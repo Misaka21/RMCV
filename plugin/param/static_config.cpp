@@ -8,7 +8,4 @@
 #include "plugin/debug/logger.hpp"
 
 namespace static_param {
-
-
-
 }

@@ -16,13 +16,12 @@
 #include "debug/logger.hpp"
 
 // 定义 Param variant 类型
-using Param = std::variant<bool, int64_t, double, std::string, std::vector<int64_t>>;
+using Param = std::variant<bool, int64_t, double, std::string, std::vector<int64_t> >;
 
 namespace static_param {
-
     // 内部辅助函数，将 toml::node 转换为我们的 Param variant
     // 与之前相同，这是核心转换逻辑
-    inline Param get_value(const toml::node& node) {
+    inline Param get_value(const toml::node &node) {
         if (node.is_boolean()) {
             return (*node.as_boolean()).get();
         }
@@ -37,7 +36,7 @@ namespace static_param {
         }
         if (node.is_array() && (node.as_array()->is_homogeneous<int64_t>() || node.as_array()->empty())) {
             std::vector<int64_t> vec_int;
-            for (const auto& ele : *node.as_array()) {
+            for (const auto &ele: *node.as_array()) {
                 vec_int.push_back((*ele.as_integer()).get());
             }
             return vec_int;
@@ -52,12 +51,11 @@ namespace static_param {
      * @param file_path TOML 文件的路径。
      * @return std::optional<toml::table> 如果成功，返回解析后的 table；如果失败，返回 std::nullopt。
      */
-    inline std::optional<toml::table> load_params(const std::string& file_path) {
+    inline std::optional<toml::table> load_params(const std::string &file_path) {
         try {
             return toml::parse_file(file_path);
-        }
-        catch (const toml::parse_error& err) {
-            debug::print("error","static_param",err.what());
+        } catch (const toml::parse_error &err) {
+            debug::print("error", "static_param", err.what());
             return std::nullopt;
         }
     }
@@ -115,7 +113,7 @@ namespace static_param {
      *         如果找不到表，返回一个空的 vector。
      */
     std::vector<std::pair<std::string, Param> > get_param_table(const toml::table &data,
-                                                                       const std::string &table_name) {
+                                                                const std::string &table_name) {
         const toml::table *sub_table = data[table_name].as_table();
         if (!sub_table) {
             debug::print("error",
@@ -134,7 +132,7 @@ namespace static_param {
                 debug::print("error",
                              "static_param",
                              "Skipping key \"{}\" in table \"{}\" due to error:{}",
-                             key, table_name, e.what() );
+                             key, table_name, e.what());
             }
         }
         return result;

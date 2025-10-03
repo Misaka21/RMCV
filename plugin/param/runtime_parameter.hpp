@@ -13,8 +13,7 @@
 #include <plugin/debug/logger.hpp>
 
 namespace runtime_param {
-
-	using Param = std::variant<bool, int64_t, double, std::string, std::vector<int64_t>>;
+	using Param = std::variant<bool, int64_t, double, std::string, std::vector<int64_t> >;
 
 	std::shared_ptr<Param> create_param(const std::string &name);
 
@@ -23,7 +22,7 @@ namespace runtime_param {
 	void wait_for_param(const std::string &name);
 
 	template<class... Ts>
-	struct Overloaded : Ts ... {
+	struct Overloaded : Ts... {
 		using Ts::operator()...;
 	};
 
@@ -31,37 +30,39 @@ namespace runtime_param {
 	Overloaded(Ts...) -> Overloaded<Ts...>;
 
 	const auto PARAM_VISITOR =
-			Overloaded{[](const auto &arg) -> std::string { return fmt::format ("{}", arg); },
-			           [](const std::vector<int64_t> &arg) -> std::string {
-				           return debug::vec_to_str<int64_t> (arg);
-			           }};
+			Overloaded{
+				[](const auto &arg) -> std::string { return fmt::format("{}", arg); },
+				[](const std::vector<int64_t> &arg) -> std::string {
+					return debug::vec_to_str<int64_t>(arg);
+				}
+			};
 
 	template<typename T>
 	T get_param(const std::string &name) {
-		auto ptr = find_param (name);
+		auto ptr = find_param(name);
 		// 找不到 variant 实例
 		if (ptr == nullptr) {
-			T value = T ();
-			::debug::print (
-					::debug::PrintMode::ERROR,
-					"param",
-					"get_param() 找不到名为 \"{}\" 的 variant 实例，将返回 {}。",
-					name,
-					PARAM_VISITOR (value)
+			T value = T();
+			::debug::print(
+				::debug::PrintMode::ERROR,
+				"param",
+				"get_param() 找不到名为 \"{}\" 的 variant 实例，将返回 {}。",
+				name,
+				PARAM_VISITOR(value)
 			);
-			return T ();
+			return T();
 		}
 		Param found = *ptr;
-		T *res = std::get_if<T> (&found);
+		T *res = std::get_if<T>(&found);
 		// 查询类型错误
 		if (res == nullptr) {
-			T value = T ();
-			::debug::print (
-					::debug::PrintMode::ERROR,
-					"param",
-					"get_param() 查询 \"{}\" 的类型错误，将返回 {}。",
-					name,
-					PARAM_VISITOR (value)
+			T value = T();
+			::debug::print(
+				::debug::PrintMode::ERROR,
+				"param",
+				"get_param() 查询 \"{}\" 的类型错误，将返回 {}。",
+				name,
+				PARAM_VISITOR(value)
 			);
 			return value;
 		}
@@ -70,15 +71,14 @@ namespace runtime_param {
 
 	class ParameterManager {
 	public:
-		explicit ParameterManager(const std::string &param_file_path) :
-				param_file_path (param_file_path) {}
+		explicit ParameterManager(const std::string &param_file_path) : param_file_path(param_file_path) {
+		}
 
 	private:
 		std::string param_file_path;
 	};
 
 	void parameter_run(const std::string &param_file_path);
-
 } // namespace base
 
 #endif /* BASE_PARAM_PARAMETER_HPP */
