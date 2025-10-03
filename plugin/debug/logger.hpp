@@ -138,7 +138,7 @@ namespace debug {
 		auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
 		// 使用 fmt::format 格式化输出时间，包括毫秒和微秒
-		return fmt::format("{:%Y-%m-%d %H:%M:%S}.{:03},{:03}", *std::localtime(&time_t_now), milliseconds.count(),
+		return fmt::format("{:%H:%M:%S}.{:03},{:03}", *std::localtime(&time_t_now), milliseconds.count(),
 		                   microseconds.count());
 	}
 
@@ -197,7 +197,7 @@ namespace debug {
 			if (md_file.is_open()) {
 				std::lock_guard<std::mutex> lock(file_mutex);
 				//////////////
-				md_file << fmt::format("- **{}** {} {}: {}\n",
+				md_file << fmt::format("{} {} {}: {}\n",
 				                       timestamp, PRINT_PREFIX.at(mode),
 				                       (node_name.empty() ? "" : "@" + node_name),
 				                       formatted_content);
