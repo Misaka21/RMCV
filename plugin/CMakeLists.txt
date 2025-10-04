@@ -26,8 +26,3 @@ target_link_libraries(${lib_name} PUBLIC
         debug
         param
 )
-
-target_compile_definitions(${lib_name} PRIVATE
-        ASSET_DIR="${ASSET_DIR}"
-        LOG_DIR="${LOG_DIR}"
-)
