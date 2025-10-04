@@ -14,7 +14,7 @@ int main() {
     const auto param_file_name = "test.toml";
 
     fmt::print(fmt::fg(fmt::color::gold),
-        "======================Loading parameters======================\n");
+               "======================Loading parameters======================\n");
 
     std::thread([=]() { runtime_param::parameter_run(param_file_name); }).detach();
     runtime_param::wait_for_param("ok");
@@ -29,5 +29,4 @@ int main() {
 
     debug::print("info", "main", "main_start");
     return 0;
-
 }

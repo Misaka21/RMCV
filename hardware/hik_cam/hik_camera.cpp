@@ -63,7 +63,7 @@ namespace camera {
         this->_config_file_path = static_param::get_param<std::string>(param, "Camera", "config_file_path");
         this->_use_camera_config = static_param::get_param<bool>(param, "Camera", "use_camera_config");
 
-        this->_config_file_path = std::string(ASSET_DIR) +"/"+ _config_file_path;
+        this->_config_file_path = std::string(ASSET_DIR) + "/" + _config_file_path;
     }
 
     bool HikCam::print_device_info(MV_CC_DEVICE_INFO *pstMVDevInfo) {
@@ -241,7 +241,6 @@ namespace camera {
         }
 
 
-
         // 开始取流
         HIKCAM_FATAL(MV_CC_StartGrabbing(_handle));
     }
@@ -356,7 +355,7 @@ namespace camera {
                 return is_match;
             }
         };
-        fmt::print(fmt::fg(fmt::color::purple),"======================\n");
+        fmt::print(fmt::fg(fmt::color::purple), "======================\n");
         for (const auto &[name, expected_variant]: _param_from_toml) {
             std::visit([&](const auto &expected_value) {
                 using T = std::decay_t<decltype(expected_value)>;
@@ -371,7 +370,7 @@ namespace camera {
                 }
             }, expected_variant);
         }
-        fmt::print(fmt::fg(fmt::color::purple),"======================\n");
+        fmt::print(fmt::fg(fmt::color::purple), "======================\n");
     }
 
     void HikCam::set_camera_info_batch() {

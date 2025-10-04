@@ -114,11 +114,11 @@ namespace static_param {
      *         如果找不到表，返回一个空的 vector。
      */
     inline std::vector<std::pair<std::string, Param> > get_param_table(const toml::table &data,
-                                                                        const std::string &table_path) {
+                                                                       const std::string &table_path) {
         // 查找嵌套表路径
         const toml::node *node = data.at_path(table_path).node();
         const toml::table *sub_table = node ? node->as_table() : nullptr;
-        
+
         if (!sub_table) {
             debug::print("error",
                          "static_param",
