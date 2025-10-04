@@ -13,7 +13,7 @@
 #include <variant>
 #include <stdexcept>
 
-#include "debug/logger.hpp"
+#include "plugin/debug/logger.hpp"
 
 // 定义 Param variant 类型
 using Param = std::variant<bool, int64_t, double, std::string, std::vector<int64_t> >;
@@ -106,20 +106,24 @@ namespace static_param {
 
     /**
      * @brief 从解析好的 TOML table 中获取一个子表，将其转换为键值对列表。
+     * 支持嵌套表路径，如 "Camera.config"。
      *
      * @param data 由 load_params 返回的 toml::table 对象。
-     * @param table_name 要获取的子表名 (e.g., "Camera_config")。
+     * @param table_path 要获取的子表路径 (e.g., "Camera.config" 或 "config")。
      * @return std::vector<std::pair<std::string, Param>> 包含子表中所有键值对的 vector。
      *         如果找不到表，返回一个空的 vector。
      */
-    std::vector<std::pair<std::string, Param> > get_param_table(const toml::table &data,
-                                                                const std::string &table_name) {
-        const toml::table *sub_table = data[table_name].as_table();
+    inline std::vector<std::pair<std::string, Param> > get_param_table(const toml::table &data,
+                                                                        const std::string &table_path) {
+        // 查找嵌套表路径
+        const toml::node *node = data.at_path(table_path).node();
+        const toml::table *sub_table = node ? node->as_table() : nullptr;
+        
         if (!sub_table) {
             debug::print("error",
                          "static_param",
                          "Table \"{}\" not found. Returning empty table.",
-                         table_name);
+                         table_path);
             return {};
         }
 
@@ -132,7 +136,7 @@ namespace static_param {
                 debug::print("error",
                              "static_param",
                              "Skipping key \"{}\" in table \"{}\" due to error:{}",
-                             key, table_name, e.what());
+                             key, table_path, e.what());
             }
         }
         return result;
