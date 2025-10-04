@@ -67,7 +67,7 @@ namespace runtime_param {
         while (true) {
             try {
                 const auto table =
-                        toml::parse_file(std::string(ASSET_DIR) + "/" + param_file_path);
+                        toml::parse_file(std::string(CONFIG_DIR) + "/" + param_file_path);
                 parse(table, "");
                 if (!this->init_ok) {
                     this->init_ok = true;

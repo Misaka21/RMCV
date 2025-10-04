@@ -1,0 +1,42 @@
+# 本文件严格区分参数的数据类型，比如 10.0 不能改成 10
+[Camera]
+    #@bool 是否通过sn码查找相机,false则查找第0个
+    use_camera_sn = true
+    #@string 相机sn码
+    camera_sn = "DA5555190"
+    #@bool 从MVS中导出的配置文件
+    use_config_from_file = true
+    #@string 文件夹中的路径
+    config_file_path = "MV-CS016-10UC_DA5555190.mfs"
+    #@bool 是否从camera.config中设置参数,会覆盖上文中file中的参数
+    use_camera_config = true
+
+#可以填写MVS中的参数,请严格遵守类型要求
+#枚举类型请使用字符串,参考MV_CC_SetEnumValueByString,
+#但无法检查是否设置成功,只能看有无对应的HIKCAM_WARN
+#如[WARN] @MV_CC_SetIntValue(this->_handle, key.c_str(), static_cast<int>(value)):  failed!, error code: 0x80000102
+[Camera.config]
+    #@float
+    ExposureTime = 4000.0
+    #@float
+    Gain = 16.0
+    ReverseX = false
+    ReverseY = false
+    Width = 1440
+
+[Camera.record]
+    #@bool 是否开启内录
+    recording = false
+    fps = 15
+
+[Serial]
+    port_name = "/dev/ttyUSB0"
+    baudrate = 921600
+    data_print_debug = false
+    ignore_crc = false
+    #不接串口测试的虚拟数据
+    use_fake_serial_data = false
+
+[Serial.data]
+    yaw_deg = 0
+

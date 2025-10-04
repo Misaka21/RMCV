@@ -55,7 +55,7 @@ namespace camera {
     };
 
     HikCam::HikCam() {
-        const auto param = toml::parse_file(ASSET_DIR"/hardware.toml");
+        const auto param = toml::parse_file(CONFIG_DIR"/hardware.toml");
         this->_param_from_toml = convert_to_cam_info(static_param::get_param_table(param, "Camera.config"));
         this->_use_camera_sn = static_param::get_param<bool>(param, "Camera", "use_camera_sn");
         this->_camera_sn = static_param::get_param<std::string>(param, "Camera", "camera_sn");
@@ -63,7 +63,7 @@ namespace camera {
         this->_config_file_path = static_param::get_param<std::string>(param, "Camera", "config_file_path");
         this->_use_camera_config = static_param::get_param<bool>(param, "Camera", "use_camera_config");
 
-        this->_config_file_path = std::string(ASSET_DIR) + "/" + _config_file_path;
+        this->_config_file_path = std::string(CONFIG_DIR) + "/" + _config_file_path;
     }
 
     bool HikCam::print_device_info(MV_CC_DEVICE_INFO *pstMVDevInfo) {
@@ -147,7 +147,6 @@ namespace camera {
 
         // 如果配置使用 SN，尝试按 SN 查找并打开（最多3次）
         if (_use_camera_sn) {
-            fmt::print("Attempting to find and open camera by SN: {}\n", _camera_sn);
             debug::print("info", "camera", "Attempting to find camera by SN:{}", _camera_sn);
 
             int sn_index = -1;
@@ -193,7 +192,7 @@ namespace camera {
                     camera_opened = false;
                 }
             } else {
-                fmt::print(fg(fmt::color::yellow),
+                debug::print("warning", "camera",
                            "Camera with SN {} not found after 3 attempts, will use default camera\n",
                            _camera_sn);
             }
@@ -230,9 +229,9 @@ namespace camera {
                 debug::print(debug::PrintMode::WARNING, "Camera", "Get Packet Size fail nRet [0x{:X}]", nPacketSize);
             }
         }
-        if (_use_config_from_file) {
+        if (_use_config_from_file)
             HIKCAM_WARN(MV_CC_FeatureLoad(this->_handle,this->_config_file_path.c_str()));
-        }
+
 
         if (_use_camera_config) {
             this->set_camera_info_batch();
