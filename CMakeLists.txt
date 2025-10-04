@@ -40,14 +40,19 @@ include_directories(${pybind11_INCLUDE_DIRS})
 include_directories(umt)
 
 add_subdirectory(plugin)
-
+add_subdirectory(hardware)
 
 add_executable(RMCV2026 main.cpp)
-
-target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin)
-
-
+target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware)
 target_compile_definitions(RMCV2026 PRIVATE
+        ASSET_DIR="${ASSET_DIR}"
+        LOG_DIR="${LOG_DIR}"
+)
+
+add_executable(test_param test/test_param.cpp)
+target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin)
+
+target_compile_definitions(test_param PRIVATE
         ASSET_DIR="${ASSET_DIR}"
         LOG_DIR="${LOG_DIR}"
 )
