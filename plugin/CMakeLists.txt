@@ -23,6 +23,4 @@ target_link_libraries(${lib_name} PUBLIC
         ${OpenCV_LIBS}
         Eigen3::Eigen
         tomlplusplus::tomlplusplus
-        debug
-        param
 )

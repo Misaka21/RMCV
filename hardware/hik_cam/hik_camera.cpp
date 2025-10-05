@@ -193,8 +193,8 @@ namespace camera {
                 }
             } else {
                 debug::print("warning", "camera",
-                           "Camera with SN {} not found after 3 attempts, will use default camera\n",
-                           _camera_sn);
+                             "Camera with SN {} not found after 3 attempts, will use default camera\n",
+                             _camera_sn);
             }
         }
 
@@ -230,7 +230,7 @@ namespace camera {
             }
         }
         if (_use_config_from_file)
-            HIKCAM_WARN(MV_CC_FeatureLoad(this->_handle,this->_config_file_path.c_str()));
+            HIKCAM_WARN(MV_CC_FeatureLoad(this->_handle, this->_config_file_path.c_str()));
 
 
         if (_use_camera_config) {
@@ -264,11 +264,10 @@ namespace camera {
                     cv::cvtColor(rawData, _srcImage, cv::COLOR_GRAY2RGB);
                 } else if (PixelType_Gvsp_BayerRG8 == stImageInfo.stFrameInfo.enPixelType) {
                     cv::cvtColor(rawData, _srcImage, cv::COLOR_BayerRG2RGB);
-                    printf("111");
                 } else {
                     debug::print(debug::PrintMode::ERROR, "Camera", "Unsupported pixel format");
                 }
-                HIKCAM_ERROR(MV_CC_FreeImageBuffer(_handle, &stImageInfo));
+                HIKCAM_WARN(MV_CC_FreeImageBuffer(_handle, &stImageInfo));
                 break;
             } else {
                 HIKCAM_WARN(_nRet);
@@ -390,10 +389,12 @@ namespace camera {
     }
 
     HikCam::~HikCam() {
-        HIKCAM_ERROR(MV_CC_StopGrabbing(_handle));
-        HIKCAM_ERROR(MV_CC_RegisterImageCallBackEx(_handle, NULL, NULL));
-        HIKCAM_ERROR(MV_CC_CloseDevice(_handle));
-        HIKCAM_ERROR(MV_CC_DestroyHandle(_handle));
-        _handle = NULL;
+        if (_handle != NULL) {
+            HIKCAM_ERROR(MV_CC_StopGrabbing(_handle));
+            HIKCAM_ERROR(MV_CC_RegisterImageCallBackEx(_handle, NULL, NULL));
+            HIKCAM_ERROR(MV_CC_CloseDevice(_handle));
+            HIKCAM_ERROR(MV_CC_DestroyHandle(_handle));
+            _handle = NULL;
+        }
     }
 } // namespace camera
