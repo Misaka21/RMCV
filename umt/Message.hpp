@@ -5,6 +5,10 @@
 #include <list>
 #include <mutex>
 #include <queue>
+#include <chrono>
+#include <atomic>
+#include <algorithm>
+#include <cmath>
 
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
@@ -239,7 +243,101 @@ namespace umt {
             fifo.push(obj);
         }
 
-        void notify() const { cv.notify_one(); }
+        void notify() const {
+            cv.notify_one();
+            // 更新性能统计
+            update_performance_stats();
+        }
+
+        /**
+         * @brief 获取消息发布性能统计信息
+         * @details 计算开销极小，使用原子操作和环形缓冲区
+         * @return 包含频率、延迟等统计信息的结构体
+         */
+        struct PerformanceStats {
+            double avg_frequency_hz;    // 1秒内平均发布频率 (Hz)
+            double max_latency_ms;     // 最大延迟 (毫秒)
+            double p1_latency_ms;      // 1%低延迟 (毫秒)
+            uint64_t total_messages;    // 总消息数
+            double window_duration_s;   // 统计窗口时长 (秒)
+        };
+
+        PerformanceStats get_performance_stats() const {
+            PerformanceStats stats;
+            const auto now = std::chrono::steady_clock::now();
+            const auto window_start = now - std::chrono::seconds(1);
+
+            // 计算最近1秒内的消息数量
+            uint64_t recent_count = 0;
+            {
+                std::lock_guard<std::mutex> lock(perf_mutex);
+                size_t start_idx = latency_buffer_idx;
+
+                // 找到1秒时间窗口内的第一条消息
+                while (start_idx > 0 && latency_buffer[start_idx].timestamp > window_start) {
+                    start_idx--;
+                }
+
+                // 统计最近1秒内的消息数量
+                for (size_t i = start_idx; i <= latency_buffer_idx; i++) {
+                    if (latency_buffer[i].timestamp >= window_start) {
+                        recent_count++;
+                    }
+                }
+
+                stats.total_messages = total_messages.load();
+                stats.window_duration_s = 1.0;
+                stats.avg_frequency_hz = static_cast<double>(recent_count);
+            }
+
+            // 计算延迟统计
+            if (recent_count > 0) {
+                std::vector<double> recent_latencies;
+                recent_latencies.reserve(recent_count);
+
+                {
+                    std::lock_guard<std::mutex> lock(perf_mutex);
+                    size_t start_idx = latency_buffer_idx;
+
+                    // 找到1秒时间窗口内的第一条消息
+                    while (start_idx > 0 && latency_buffer[start_idx].timestamp > window_start) {
+                        start_idx--;
+                    }
+
+                    // 收集最近1秒内的延迟数据
+                    for (size_t i = start_idx; i <= latency_buffer_idx; i++) {
+                        if (latency_buffer[i].timestamp >= window_start) {
+                            recent_latencies.push_back(latency_buffer[i].latency_ms);
+                        }
+                    }
+                }
+
+                if (!recent_latencies.empty()) {
+                    // 计算最大延迟
+                    stats.max_latency_ms = *std::max_element(recent_latencies.begin(), recent_latencies.end());
+
+                    // 计算1%低延迟 (P1)
+                    std::sort(recent_latencies.begin(), recent_latencies.end());
+                    size_t p1_idx = static_cast<size_t>(recent_latencies.size() * 0.01);
+                    if (p1_idx >= recent_latencies.size()) p1_idx = recent_latencies.size() - 1;
+                    stats.p1_latency_ms = recent_latencies[p1_idx];
+                }
+            }
+
+            return stats;
+        }
+
+        /**
+         * @brief 打印性能统计信息
+         */
+        void print_performance_stats() const {
+            auto stats = get_performance_stats();
+            printf("Message Performance Stats:\n");
+            printf("  Frequency: %.2f Hz\n", stats.avg_frequency_hz);
+            printf("  Max Latency: %.3f ms\n", stats.max_latency_ms);
+            printf("  P1 Latency: %.3f ms\n", stats.p1_latency_ms);
+            printf("  Total Messages: %lu\n", stats.total_messages);
+        }
 
     private:
         mutable std::mutex mtx;
@@ -247,6 +345,46 @@ namespace umt {
         size_t fifo_size{};
         std::queue<T> fifo;
         typename MsgManager::sptr p_msg;
+
+        // 性能统计相关成员变量
+        mutable std::mutex perf_mutex;
+        static constexpr size_t LATENCY_BUFFER_SIZE = 1024;  // 环形缓冲区大小
+
+        struct LatencyRecord {
+            std::chrono::steady_clock::time_point timestamp;
+            double latency_ms;
+        };
+
+        mutable std::array<LatencyRecord, LATENCY_BUFFER_SIZE> latency_buffer;
+        mutable size_t latency_buffer_idx = 0;
+        mutable std::atomic<uint64_t> total_messages{0};
+        mutable std::chrono::steady_clock::time_point last_message_time;
+
+        /**
+         * @brief 更新性能统计
+         * @details 开销极小：2次时间戳获取 + 1次原子操作 + 数组写入
+         */
+        void update_performance_stats() const {
+            const auto now = std::chrono::steady_clock::now();
+            double latency_ms = 0.0;
+
+            // 计算与上一条消息的延迟
+            if (total_messages.load() > 0) {
+                auto duration = std::chrono::duration<double, std::milli>(now - last_message_time);
+                latency_ms = duration.count();
+            }
+
+            // 更新统计信息
+            total_messages.fetch_add(1, std::memory_order_relaxed);
+            last_message_time = now;
+
+            // 写入环形缓冲区
+            {
+                std::lock_guard<std::mutex> lock(perf_mutex);
+                latency_buffer[latency_buffer_idx] = {now, latency_ms};
+                latency_buffer_idx = (latency_buffer_idx + 1) % LATENCY_BUFFER_SIZE;
+            }
+        }
     };
 
     template<class T>
