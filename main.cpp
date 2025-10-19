@@ -1,9 +1,13 @@
-#include <iostream>
-#include <string>
+// C++ system headers
 #include <algorithm>
+#include <iostream>
 #include <optional>
-#include "hardware/hik_cam/hik_camera.hpp"
+#include <string>
 
+// Third-party library headers
+
+// Project headers
+#include "hardware/hik_cam/hik_camera.hpp"
 #include "param/static_config.hpp"
 #include "param/runtime_parameter.hpp"
 #include "plugin/debug/logger.hpp"

@@ -1,16 +1,22 @@
 #ifndef BASE_PARAM_PARAMETER_HPP
 #define BASE_PARAM_PARAMETER_HPP
 
+// C system headers
+
+// C++ system headers
 #include <chrono>
 #include <iostream>
 #include <map>
-#include <opencv2/core/core.hpp>
 #include <string>
 #include <thread>
 #include <variant>
 
-#include <umt/umt.hpp>
+// Third-party library headers
+#include <opencv2/core/core.hpp>
+
+// Project headers
 #include <plugin/debug/logger.hpp>
+#include <umt/umt.hpp>
 
 namespace runtime_param {
 	using Param = std::variant<bool, int64_t, double, std::string, std::vector<int64_t> >;

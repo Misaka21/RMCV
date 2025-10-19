@@ -1,18 +1,23 @@
 #ifndef _UMT_MESSAGE_HPP_
 #define _UMT_MESSAGE_HPP_
 
+// C system headers
+
+// C++ system headers
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <list>
 #include <mutex>
 #include <queue>
-#include <chrono>
-#include <atomic>
-#include <algorithm>
 #include <cmath>
 
+// Third-party library headers
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 
+// Project headers
 #include "ObjManager.hpp"
 
 namespace umt {

@@ -2,10 +2,19 @@
 // Created by Claude on 25-10-19.
 //
 
+// Source file corresponding header
 #include "usb_bulk_protocol.hpp"
-#include <iostream>
+
+// C system headers
+
+// C++ system headers
 #include <iomanip>
+#include <iostream>
 #include <sstream>
+
+// Third-party library headers (none in this file - libusb is included in header)
+
+// Project headers
 
 bool UsbBulkProtocol::_libusb_initialized = false;
 

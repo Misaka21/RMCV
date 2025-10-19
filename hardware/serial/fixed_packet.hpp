@@ -5,12 +5,19 @@
 #ifndef FIXED_PACKET_HPP
 #define FIXED_PACKET_HPP
 
+// C system headers
+
+// C++ system headers
+#include <array>
 #include <cstring>
 #include <memory>
-#include <array>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
+
+// Third-party library headers
+
+// Project headers
 
 namespace serial {
 

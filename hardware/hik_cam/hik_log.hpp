@@ -4,6 +4,13 @@
 #ifndef RMCV_HIK_LOG_HPP
 #define RMCV_HIK_LOG_HPP
 
+// C system headers
+
+// C++ system headers
+
+// Third-party library headers
+
+// Project headers
 #include "plugin/debug/logger.hpp"
 // 注意：使用以下宏前，请确保已定义变量 `_nRet`，例如: int _nRet;
 // 警告处理宏定义

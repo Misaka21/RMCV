@@ -1,11 +1,17 @@
 #ifndef PROTOCOL_INTERFACE_HPP
 #define PROTOCOL_INTERFACE_HPP
 
+// C system headers
 
+// C++ system headers
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <system_error>
+
+// Third-party library headers
+
+// Project headers
 
 class ProtocolInterface
 {

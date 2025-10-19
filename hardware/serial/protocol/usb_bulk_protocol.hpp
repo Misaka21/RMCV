@@ -5,11 +5,18 @@
 #ifndef USB_BULK_PROTOCOL_HPP
 #define USB_BULK_PROTOCOL_HPP
 
-#include "protocol_interface.hpp"
+// C system headers
+
+// C++ system headers
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
+
+// Third-party library headers
 #include <libusb-1.0/libusb.h>
+
+// Project headers
+#include "protocol_interface.hpp"
 
 class UsbBulkProtocol: public ProtocolInterface {
 public:

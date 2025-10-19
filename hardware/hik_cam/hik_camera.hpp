@@ -1,19 +1,25 @@
 ﻿#ifndef HIK_CAMERA_H
 #define HIK_CAMERA_H
 
-#include <MvCameraControl.h>
-#include "plugin/debug/logger.hpp"
-#include <opencv2/core/mat.hpp>
-#include <opencv2/imgproc.hpp>
-#include <variant>
+// C system headers
 #include <cstdio>
-#include <fmt/core.h>
-#include "hik_log.hpp"
-#include <string>
-#include "plugin/param/static_config.hpp"
+
+// C++ system headers
 #include <iostream>
+#include <string>
 #include <unordered_map>
 #include <variant>
+
+// Third-party library headers
+#include <MvCameraControl.h>
+#include <fmt/core.h>
+#include <opencv2/core/mat.hpp>
+#include <opencv2/imgproc.hpp>
+
+// Project headers
+#include "hik_log.hpp"
+#include "plugin/debug/logger.hpp"
+#include "plugin/param/static_config.hpp"
 
 namespace camera {
     using CAM_INFO = std::variant<bool, int64_t, double, std::string>;

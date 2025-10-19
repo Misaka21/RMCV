@@ -1,21 +1,25 @@
 #ifndef PLUGIN_DEBUG_LOGGER_HPP
 #define PLUGIN_DEBUG_LOGGER_HPP
 
-#include <unordered_map>
-#include <set>
-#include <algorithm>
-#include <string>
-#include <map>
-#include <chrono>
-#include <iomanip>
-#include <fstream>
-#include <sstream>
-#include <mutex>
+// C system headers
 
+// C++ system headers
+#include <algorithm>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <map>
+#include <mutex>
+#include <set>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+
+// Third-party library headers
 #include <Eigen/Core>
-#include <fmt/core.h>
-#include <fmt/color.h>
 #include <fmt/chrono.h>
+#include <fmt/color.h>
+#include <fmt/core.h>
 
 //总有傻逼宏定义污染资源
 #ifdef INFO

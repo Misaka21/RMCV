@@ -5,8 +5,15 @@
 #ifndef UART_PROTOCOL_HPP
 #define UART_PROTOCOL_HPP
 
-#include "protocol_interface.hpp"
+// C system headers
+
+// C++ system headers
 #include <string>
+
+// Third-party library headers
+
+// Project headers
+#include "protocol_interface.hpp"
 
 class UartProtocol: public ProtocolInterface {
 public:

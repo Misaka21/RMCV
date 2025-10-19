@@ -1,19 +1,22 @@
+// Source file corresponding header
 #include "uart_protocol.hpp"
 
-#include <algorithm>
-#include <array>
-#include <cstring> // 用于 std::strerror
-#include <errno.h> /*错误号定义*/
-#include <fcntl.h> /*文件控制定义*/
-#include <stdio.h> /*标准输入输出定义*/
-#include <stdlib.h> /*标准函数库定义*/
+// C system headers
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <system_error> // 用于更完善的错误处理
-#include <termios.h> /*PPSIX 终端控制定义*/
 #include <termios.h>
-#include <unistd.h> /*Unix 标准函数定义*/
+#include <unistd.h>
+
+// C++ system headers
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <system_error>
 
 bool UartProtocol::set_param(int speed, int flow_ctrl, int databits, int stopbits, int parity) {
     // 设置串口数据帧格式

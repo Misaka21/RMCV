@@ -23,16 +23,25 @@
 	*                  2025.01.25  V5.0    完善代码，将设置抽象
 	*                  TODO：加入垂直翻转，水平翻转，相机参数输出，简化设置相机参数流程
 	*************************************************************************/
+
+// Source file corresponding header
 #include "hik_camera.hpp"
-#include "plugin/debug/logger.hpp"
-#include <string>
+
+// C system headers
+
+// C++ system headers
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
-#include <algorithm>
+#include <string>
 #include <thread>
 
+// Third-party library headers
+#include <toml++/toml.hpp>
+
+// Project headers
 #include "hik_log.hpp"
-#include "toml++/toml.hpp"
+#include "plugin/debug/logger.hpp"
 
 namespace camera {
     auto convert_to_cam_info = [](const std::vector<std::pair<std::string, Param> > &param_vec)

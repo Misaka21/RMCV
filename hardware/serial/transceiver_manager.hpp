@@ -4,19 +4,24 @@
 
 #ifndef TRANSCEIVER_MANAGER_HPP
 #define TRANSCEIVER_MANAGER_HPP
-#include <iostream>
+
+// C++ system headers
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <stdexcept>
 #include <thread>
-#include <chrono>
-#include <array>
-#include <optional>
-#include <atomic>
 
+// Third-party library headers
+
+// Project headers
 #include "fixed_packet.hpp"
 #include "protocol/protocol_interface.hpp"
+#include "plugin/debug/logger.hpp"
 
 namespace serial {
 
@@ -217,7 +222,7 @@ bool TransceiverManager<Capacity>::simple_send_packet(const PacketType& packet) 
         }
     } catch (const std::exception& e) {
         // 处理可能的异常
-        std::cerr << "Error sending packet: " << e.what() << std::endl;
+        debug::print(debug::PrintMode::ERROR, "TransceiverManager", "Error sending packet: {}", e.what());
         return false;
     }
 }
@@ -294,7 +299,7 @@ bool TransceiverManager<Capacity>::send_packet(const PacketType& packet) {
             }
             return true;
         } catch (const std::exception& e) {
-            std::cerr << "Error queuing packet: " << e.what() << std::endl;
+            debug::print(debug::PrintMode::ERROR, "TransceiverManager", "Error queuing packet: {}", e.what());
             return false;
         }
     } else {
@@ -347,7 +352,7 @@ bool TransceiverManager<Capacity>::recv_packet(PacketType& packet) {
             return false;
         }
     } catch (const std::exception& e) {
-        std::cerr << "Error receiving packet: " << e.what() << std::endl;
+        debug::print(debug::PrintMode::ERROR, "TransceiverManager", "Error receiving packet: {}", e.what());
         return false;
     }
 }

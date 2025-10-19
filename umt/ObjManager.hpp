@@ -1,11 +1,15 @@
 #ifndef _UMT_OBJ_MANAGER_HPP_
 #define _UMT_OBJ_MANAGER_HPP_
 
+// C system headers
+
+// C++ system headers
+#include <mutex>
+
+// Third-party library headers
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-
-#include <mutex>
 
 namespace umt {
     namespace utils {

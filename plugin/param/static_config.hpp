@@ -4,15 +4,21 @@
 
 #ifndef RMCV2026_STATIC_CONFIG_HPP
 #define RMCV2026_STATIC_CONFIG_HPP
+
+// C system headers
+
+// C++ system headers
+#include <iostream>
 #include <optional>
-#include <toml++/toml.hpp>
+#include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
-#include <iostream>
-#include <variant>
-#include <stdexcept>
+// Third-party library headers
+#include <toml++/toml.hpp>
 
+// Project headers
 #include "plugin/debug/logger.hpp"
 
 // 定义 Param variant 类型
