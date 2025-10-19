@@ -6,7 +6,13 @@
 #define RMCV_TRANSFORMER_HPP
 
 
-class transformer {
+class Transformer {
+
+
+private:
+    
+
+
 };
 
 
