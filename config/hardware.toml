@@ -11,10 +11,9 @@
     #@bool 是否从camera.config中设置参数,会覆盖上文中file中的参数
     use_camera_config = true
 
-#可以填写MVS中的参数,请严格遵守类型要求
+#键可以填写MVS中的键,请严格遵守类型要求
 #枚举类型请使用字符串,参考MV_CC_SetEnumValueByString,
 #但无法检查是否设置成功,只能看有无对应的HIKCAM_WARN
-#如[WARN] @MV_CC_SetIntValue(this->_handle, key.c_str(), static_cast<int>(value)):  failed!, error code: 0x80000102
 [Camera.config]
     #@float
     ExposureTime = 4000.0

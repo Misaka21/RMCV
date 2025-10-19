@@ -1,0 +1,15 @@
+[Detector]
+    type = "traditional"
+
+
+
+[Detector.traditional]
+    threshold = 150
+    classify_model = ""
+
+[Detector.yolo]
+    detect_model = ""
+    classify_model = ""
+    min_confidence = 0.5
+
+
