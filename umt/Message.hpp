@@ -246,7 +246,7 @@ namespace umt {
         void notify() const {
             cv.notify_one();
             // 更新性能统计
-            update_performance_stats();
+            //update_performance_stats();
         }
 
         /**

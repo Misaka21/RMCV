@@ -1,21 +1,12 @@
-set(hikrobot "/opt/MVS")
-aux_source_directory(./hik_cam hik_camera_src)
+# 聚合所有硬件子库的接口库
+add_library(hardware INTERFACE)
 
-add_library(hardware STATIC ${hik_camera_src})
+# 添加子目录
+add_subdirectory(hik_cam)
+# add_subdirectory(serial)  # 待添加串口库时取消注释
 
-# hikrobot
-target_include_directories(hardware PUBLIC ${hikrobot}/include/)
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    target_link_directories(hardware PUBLIC ${hikrobot}/lib/64/)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    target_link_directories(hardware PUBLIC ${hikrobot}/lib/aarch64/)
-else ()
-    message(FATAL_ERROR "Unsupported architecture: ${CMAKE_HOST_SYSTEM_PROCESSOR}!")
-endif ()
-
-# Link MVS library
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    target_link_libraries(hardware PUBLIC MvCameraControl)
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    target_link_libraries(hardware PUBLIC MvCameraControl)
-endif ()
+# 聚合所有硬件组件
+target_link_libraries(hardware INTERFACE
+    hardware_camera
+    # hardware_serial  # 待添加串口库时取消注释
+)
