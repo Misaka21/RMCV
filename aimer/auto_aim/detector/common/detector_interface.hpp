@@ -1,0 +1,8 @@
+//
+// Created by nuc11 on 2025/10/6.
+//
+
+#ifndef RMCV_DETECTOR_INTERFACE_HPP
+#define RMCV_DETECTOR_INTERFACE_HPP
+
+#endif //RMCV_DETECTOR_INTERFACE_HPP
