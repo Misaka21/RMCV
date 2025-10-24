@@ -18,7 +18,7 @@ int main() {
     camera::HikCam camera;
     camera.open();
 
-    const auto param = toml::parse_file(CONFIG_DIR"/test.toml");
+    const auto param = static_param::parse_file("test.toml");
     const auto param_file_name = "test.toml";
 
     fmt::print(fmt::fg(fmt::color::gold), "======================Loading parameters======================\n");

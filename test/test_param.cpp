@@ -16,7 +16,7 @@
 
 int main() {
     debug::init_md_file("log.log");
-    const auto param = toml::parse_file(CONFIG_DIR"/test.toml");
+    const auto param = static_param::parse_file("test.toml");
     const auto param_file_name = "test.toml";
 
     fmt::print(fmt::fg(fmt::color::gold),

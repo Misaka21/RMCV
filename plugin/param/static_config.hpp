@@ -67,6 +67,22 @@ namespace static_param {
     }
 
     /**
+     * @brief 从配置目录加载并解析 TOML 文件（自动添加 CONFIG_DIR 前缀）。
+     *
+     * @param filename TOML 文件名（不需要路径前缀）。
+     * @return toml::table 解析后的 table 对象。
+     * @throws std::runtime_error 如果解析失败，抛出异常。
+     */
+    inline toml::table parse_file(const std::string &filename) {
+        try {
+            return toml::parse_file(CONFIG_DIR"/" + filename);
+        } catch (const toml::parse_error &err) {
+            debug::print("error", "static_param", "Failed to parse config file '{}': {}", filename, err.what());
+            throw;
+        }
+    }
+
+    /**
     * @brief 从解析好的 TOML table 中获取一个指定类型的参数。
     *
     * @tparam T 你期望获取的类型 (e.g., int64_t, double, std::string)。
