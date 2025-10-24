@@ -146,7 +146,7 @@ RMCV/
 ### Parameter System Usage
 ```cpp
 // Static parameters (load once)
-auto param = toml::parse_file(CONFIG_DIR"/config.toml");
+auto param = static_param::parse_file(CONFIG_DIR"/config.toml");
 auto value = static_param::get_param<std::string>(param, "section", "key");
 
 // Runtime parameters (dynamic updates)
