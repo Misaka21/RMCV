@@ -4,9 +4,9 @@
     use_camera_sn = true
     #@string 相机sn码
     camera_sn = "DA5555190"
-    #@bool 从MVS中导出的配置文件
+    #@bool 使用从MVS中导出的配置文件
     use_config_from_file = true
-    #@string 文件夹中的路径
+    #@string 配置文件在config文件夹中的路径
     config_file_path = "MV-CS016-10UC_DA5555190.mfs"
     #@bool 是否从camera.config中设置参数,会覆盖上文中file中的参数
     use_camera_config = true
@@ -24,7 +24,7 @@
     Width = 1440
 
 [Camera.record]
-    #@bool 是否开启内录
+    #@bool 是否开启内录,比赛必开启内录,不受此值影响
     recording = false
     fps = 15
 
