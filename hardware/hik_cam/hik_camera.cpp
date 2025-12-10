@@ -31,6 +31,7 @@
 
 // C++ system headers
 #include <algorithm>
+#include <chrono>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -68,14 +69,14 @@ namespace camera {
         this->_param_from_toml = convert_to_cam_info(static_param::get_param_table(param, "Camera.config"));
         this->_use_camera_sn = static_param::get_param<bool>(param, "Camera", "use_camera_sn");
         this->_camera_sn = static_param::get_param<std::string>(param, "Camera", "camera_sn");
-        this->_use_config_from_file = static_param::get_param<bool>(param, "Camera", "use_config_from_file");
-        this->_config_file_path = static_param::get_param<std::string>(param, "Camera", "config_file_path");
-        this->_use_camera_config = static_param::get_param<bool>(param, "Camera", "use_camera_config");
+        this->_use_mfs_config = static_param::get_param<bool>(param, "Camera", "use_config_from_file");
+        this->_mfs_config_path = static_param::get_param<std::string>(param, "Camera", "config_file_path");
+        this->_use_toml_config = static_param::get_param<bool>(param, "Camera", "use_camera_config");
 
-        this->_config_file_path = std::string(CONFIG_DIR) + "/" + _config_file_path;
+        this->_mfs_config_path = std::string(CONFIG_DIR) + "/" + _mfs_config_path;
     }
 
-    bool HikCam::print_device_info(MV_CC_DEVICE_INFO *pstMVDevInfo) {
+    bool HikCam::_print_device_info(MV_CC_DEVICE_INFO *pstMVDevInfo) {
         if (NULL == pstMVDevInfo) {
             throw std::runtime_error("The Pointer of pstMVDevInfo is NULL!");
         }
@@ -98,158 +99,30 @@ namespace camera {
 
     void HikCam::open() {
         MV_CC_DEVICE_INFO_LIST stDeviceList;
-        memset(&stDeviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
-
-        // 枚举设备
-        _nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &stDeviceList);
-        HIKCAM_FATAL(MV_CC_EnumDevices(MV_USB_DEVICE, &stDeviceList));
-
-        if (stDeviceList.nDeviceNum == 0) {
-            throw std::runtime_error("Find No Devices!");
-        }
-
-        // 打印所有设备信息
-        for (unsigned int i = 0; i < stDeviceList.nDeviceNum; i++) {
-            fmt::print("[device {}]:\n", i);
-            MV_CC_DEVICE_INFO *pDeviceInfo = stDeviceList.pDeviceInfo[i];
-            if (NULL == pDeviceInfo) {
-                throw std::runtime_error("The Pointer of pstMVDevInfo is NULL!");
-            }
-            print_device_info(pDeviceInfo);
-        }
-
-        auto find_device_by_sn = [&](const std::string &sn, MV_CC_DEVICE_INFO_LIST &deviceList,
-                                     int &deviceIndex) -> bool {
-            char device_sn[INFO_MAX_BUFFER_SIZE];
-
-            if (sn.empty()) {
-                debug::print("warning", "camera", "Camera SN is empty");
-                return false;
-            }
-
-            for (size_t i = 0; i < deviceList.nDeviceNum; ++i) {
-                if (deviceList.pDeviceInfo[i]->nTLayerType == MV_USB_DEVICE) {
-                    memcpy(device_sn,
-                           deviceList.pDeviceInfo[i]->SpecialInfo.stUsb3VInfo.chSerialNumber,
-                           INFO_MAX_BUFFER_SIZE);
-                } else if (deviceList.pDeviceInfo[i]->nTLayerType == MV_GIGE_DEVICE) {
-                    memcpy(device_sn,
-                           deviceList.pDeviceInfo[i]->SpecialInfo.stGigEInfo.chSerialNumber,
-                           INFO_MAX_BUFFER_SIZE);
-                } else {
-                    continue;
-                }
-
-                device_sn[INFO_MAX_BUFFER_SIZE - 1] = '\0';
-
-                if (std::strncmp(device_sn, sn.c_str(), INFO_MAX_BUFFER_SIZE) == 0) {
-                    deviceIndex = i;
-                    debug::print("info", "camera", "Found camera with SN:{}", device_sn);
-                    return true;
-                }
-            }
-            return false; // 未找到设备
-        };
-
         bool camera_opened = false;
         int device_index_to_use = 0;
 
-        // 如果配置使用 SN，尝试按 SN 查找并打开（最多3次）
+        // 1. 枚举设备
+        _enumerate_devices(stDeviceList);
+
+        // 2. 尝试通过SN打开相机（如果配置了SN）
         if (_use_camera_sn) {
-            debug::print("info", "camera", "Attempting to find camera by SN:{}", _camera_sn);
-
-            int sn_index = -1;
-            bool found = false;
-
-            // 尝试三次查找设备
-            for (int attempt = 0; attempt < 3 && !found; ++attempt) {
-                // 每次查找前重新枚举设备，确保设备列表是最新的
-                _nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &stDeviceList);
-                HIKCAM_FATAL(MV_CC_EnumDevices(MV_USB_DEVICE, &stDeviceList));
-
-                if (stDeviceList.nDeviceNum == 0) {
-                    debug::print("warning", "camera", "No devices found in attempt {}", attempt + 1);
-                    std::this_thread::sleep_for(std::chrono::seconds(5));
-                    continue;
-                }
-
-                found = find_device_by_sn(_camera_sn, stDeviceList, sn_index);
-
-                if (!found) {
-                    debug::print("warning", "camera", "Camera with SN {} not found in attempt {}",
-                                 _camera_sn, attempt + 1);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                }
-            }
-
-            // 如果找到设备，尝试打开
-            if (found) {
-                try {
-                    // 确保句柄干净
-                    if (_handle != NULL) {
-                        MV_CC_DestroyHandle(_handle);
-                        _handle = NULL;
-                    }
-
-                    HIKCAM_FATAL(MV_CC_CreateHandle(&_handle, stDeviceList.pDeviceInfo[sn_index]));
-                    HIKCAM_FATAL(MV_CC_OpenDevice(_handle));
-                    debug::print("info", "camera", "Successfully opened camera with SN: {}", _camera_sn);
-                    device_index_to_use = sn_index;
-                    camera_opened = true;
-                } catch (const std::exception &e) {
-                    debug::print("error", "camera", "Failed to open found camera: {}", e.what());
-                    camera_opened = false;
-                }
-            } else {
-                debug::print("warning", "camera",
-                             "Camera with SN {} not found after 3 attempts, will use default camera\n",
-                             _camera_sn);
-            }
+            camera_opened = _open_camera_by_sn(_camera_sn, stDeviceList, device_index_to_use);
         }
 
-        // 如果没有成功打开相机，使用默认的第一个相机
+        // 3. 如果SN方式失败，使用默认的第一个相机
         if (!camera_opened) {
-            fmt::print("Using default camera index: 0\n");
-
-            // 确保句柄干净
-            if (_handle != NULL) {
-                MV_CC_DestroyHandle(_handle);
-                _handle = NULL;
-            }
-
-            // 尝试打开默认相机
-            try {
-                HIKCAM_FATAL(MV_CC_CreateHandle(&_handle, stDeviceList.pDeviceInfo[0]));
-                HIKCAM_FATAL(MV_CC_OpenDevice(_handle));
-                device_index_to_use = 0;
-                camera_opened = true;
-            } catch (const std::exception &e) {
-                throw std::runtime_error(fmt::format("Failed to open default camera: {}", e.what()));
-            }
+            camera_opened = _open_camera_by_index(0, stDeviceList);
+            device_index_to_use = 0;
         }
 
-        // 设置 GigE 设备的网络包大小
-        if (stDeviceList.pDeviceInfo[device_index_to_use]->nTLayerType == MV_GIGE_DEVICE) {
-            int nPacketSize = MV_CC_GetOptimalPacketSize(_handle);
-            if (nPacketSize > 0) {
-                _nRet = MV_CC_SetIntValue(_handle, "GevSCPSPacketSize", nPacketSize);
-                HIKCAM_WARN(MV_CC_SetIntValue(_handle, "GevSCPSPacketSize", nPacketSize));
-            } else {
-                debug::print(debug::PrintMode::WARNING, "Camera", "Get Packet Size fail nRet [0x{:X}]", nPacketSize);
-            }
-        }
-        if (_use_config_from_file)
-            HIKCAM_WARN(MV_CC_FeatureLoad(this->_handle, this->_config_file_path.c_str()));
+        // 4. 配置GigE设备
+        _configure_gige_device(stDeviceList.pDeviceInfo[device_index_to_use]);
 
+        // 5. 加载相机配置
+        _load_camera_config();
 
-        if (_use_camera_config) {
-            this->set_camera_info_batch();
-
-            this->check_and_print();
-        }
-
-
-        // 开始取流
+        // 6. 开始取流
         HIKCAM_FATAL(MV_CC_StartGrabbing(_handle));
     }
 
@@ -292,7 +165,7 @@ namespace camera {
 
 
     template<typename T>
-    auto HikCam::get_camera_param(std::string_view param_name)
+    auto HikCam::_get_camera_param(std::string_view param_name)
         -> std::optional<T> {
         if constexpr (std::is_same_v<T, double>) {
             MVCC_FLOATVALUE value = {0};
@@ -314,7 +187,7 @@ namespace camera {
     }
 
 
-    void HikCam::check_and_print() {
+    void HikCam::_check_and_print() {
         const auto check_param = [](const auto &actual, const auto &expected, std::string_view name) {
             using ActualType = std::decay_t<decltype(actual)>;
             using ExpectedType = std::decay_t<decltype(expected)>;
@@ -369,7 +242,7 @@ namespace camera {
                 if constexpr (std::is_same_v<T, std::vector<int64_t> >) {
                     fmt::print(fg(fmt::color::orange),
                                "   {}: Skipping vector parameter check (not supported by camera API)\n", name);
-                } else if (auto actual_opt = get_camera_param<T>(name)) {
+                } else if (auto actual_opt = _get_camera_param<T>(name)) {
                     const auto &actual_value = *actual_opt;
                     check_param(actual_value, expected_value, name);
                 } else {
@@ -380,7 +253,7 @@ namespace camera {
         fmt::print(fmt::fg(fmt::color::purple), "======================\n");
     }
 
-    void HikCam::set_camera_info_batch() {
+    void HikCam::_set_camera_info_batch() {
         for (const auto &[key, value_variant]: _param_from_toml) {
             std::visit([this, &key](auto &&value) {
                 using T = std::decay_t<decltype(value)>;
@@ -394,6 +267,148 @@ namespace camera {
 
                 this->set_camera_info(key, value);
             }, value_variant);
+        }
+    }
+
+    // 重构后的私有方法实现
+
+    void HikCam::_enumerate_devices(MV_CC_DEVICE_INFO_LIST &deviceList) {
+        memset(&deviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
+        _nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &deviceList);
+        HIKCAM_FATAL(_nRet);
+
+        if (deviceList.nDeviceNum == 0) {
+            throw std::runtime_error("Find No Devices!");
+        }
+
+        // 打印所有设备信息
+        for (unsigned int i = 0; i < deviceList.nDeviceNum; i++) {
+            fmt::print("[device {}]:\n", i);
+            MV_CC_DEVICE_INFO *pDeviceInfo = deviceList.pDeviceInfo[i];
+            if (pDeviceInfo == nullptr) {
+                throw std::runtime_error("The Pointer of pstMVDevInfo is NULL!");
+            }
+            _print_device_info(pDeviceInfo);
+        }
+    }
+
+    bool HikCam::_find_device_by_sn(const std::string &sn, const MV_CC_DEVICE_INFO_LIST &deviceList, int &deviceIndex) {
+        if (sn.empty()) {
+            debug::print("warning", "camera", "Camera SN is empty");
+            return false;
+        }
+
+        char device_sn[INFO_BUFFER_SIZE];
+
+        for (size_t i = 0; i < deviceList.nDeviceNum; ++i) {
+            if (deviceList.pDeviceInfo[i]->nTLayerType == MV_USB_DEVICE) {
+                memcpy(device_sn, deviceList.pDeviceInfo[i]->SpecialInfo.stUsb3VInfo.chSerialNumber, INFO_BUFFER_SIZE);
+            } else if (deviceList.pDeviceInfo[i]->nTLayerType == MV_GIGE_DEVICE) {
+                memcpy(device_sn, deviceList.pDeviceInfo[i]->SpecialInfo.stGigEInfo.chSerialNumber, INFO_BUFFER_SIZE);
+            } else {
+                continue;
+            }
+
+            device_sn[INFO_BUFFER_SIZE - 1] = '\0';
+
+            if (std::strncmp(device_sn, sn.c_str(), INFO_BUFFER_SIZE) == 0) {
+                deviceIndex = static_cast<int>(i);
+                debug::print("info", "camera", "Found camera with SN: {}", device_sn);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool HikCam::_open_camera_by_sn(const std::string &sn, MV_CC_DEVICE_INFO_LIST &deviceList, int &deviceIndex) {
+        debug::print("info", "camera", "Attempting to find camera by SN: {}", sn);
+
+        int sn_index = -1;
+        bool found = false;
+
+        // 尝试多次查找设备
+        for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !found; ++attempt) {
+            // 每次查找前重新枚举设备，确保设备列表是最新的
+            enumerate_devices(deviceList);
+
+            if (deviceList.nDeviceNum == 0) {
+                debug::print("warning", "camera", "No devices found in attempt {}", attempt + 1);
+                std::this_thread::sleep_for(std::chrono::seconds(RETRY_DELAY_SECONDS));
+                continue;
+            }
+
+            found = _find_device_by_sn(sn, deviceList, sn_index);
+
+            if (!found) {
+                debug::print("warning", "camera", "Camera with SN {} not found in attempt {}", sn, attempt + 1);
+            }
+        }
+
+        if (found && sn_index >= 0) {
+            try {
+                // 确保句柄干净
+                if (_handle != NULL) {
+                    MV_CC_DestroyHandle(_handle);
+                    _handle = NULL;
+                }
+
+                HIKCAM_FATAL(MV_CC_CreateHandle(&_handle, deviceList.pDeviceInfo[sn_index]));
+                HIKCAM_FATAL(MV_CC_OpenDevice(_handle));
+                deviceIndex = sn_index;
+                return true;
+            } catch (const std::exception &e) {
+                debug::print("error", "camera", "Failed to open found camera: {}", e.what());
+            }
+        } else {
+            debug::print("warning", "camera", "Camera with SN {} not found after {} attempts, will use default camera",
+                         sn, MAX_RETRY_ATTEMPTS);
+        }
+
+        return false;
+    }
+
+    bool HikCam::_open_camera_by_index(int deviceIndex, const MV_CC_DEVICE_INFO_LIST &deviceList) {
+        if (deviceIndex < 0 || deviceIndex >= static_cast<int>(deviceList.nDeviceNum)) {
+            throw std::runtime_error(fmt::format("Invalid device index: {}", deviceIndex));
+        }
+
+        fmt::print("Using default camera index: {}\n", deviceIndex);
+
+        // 确保句柄干净
+        if (_handle != NULL) {
+            MV_CC_DestroyHandle(_handle);
+            _handle = NULL;
+        }
+
+        try {
+            HIKCAM_FATAL(MV_CC_CreateHandle(&_handle, deviceList.pDeviceInfo[deviceIndex]));
+            HIKCAM_FATAL(MV_CC_OpenDevice(_handle));
+            return true;
+        } catch (const std::exception &e) {
+            throw std::runtime_error(fmt::format("Failed to open camera at index {}: {}", deviceIndex, e.what()));
+        }
+    }
+
+    void HikCam::_configure_gige_device(const MV_CC_DEVICE_INFO *deviceInfo) {
+        if (deviceInfo->nTLayerType == MV_GIGE_DEVICE) {
+            int nPacketSize = MV_CC_GetOptimalPacketSize(_handle);
+            if (nPacketSize > 0) {
+                _nRet = MV_CC_SetIntValue(_handle, "GevSCPSPacketSize", nPacketSize);
+                HIKCAM_WARN(_nRet);
+            } else {
+                debug::print(debug::PrintMode::WARNING, "Camera", "Get Packet Size fail nRet [0x{:X}]", nPacketSize);
+            }
+        }
+    }
+
+    void HikCam::_load_camera_config() {
+        if (_use_mfs_config) {
+            HIKCAM_WARN(MV_CC_FeatureLoad(_handle, _mfs_config_path.c_str()));
+        }
+
+        if (_use_toml_config) {
+            _set_camera_info_batch();
+            _check_and_print();
         }
     }
 

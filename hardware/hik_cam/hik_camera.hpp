@@ -24,6 +24,11 @@
 namespace camera {
     using CAM_INFO = std::variant<bool, int64_t, double, std::string>;
 
+    // 常量定义
+    constexpr int MAX_RETRY_ATTEMPTS = 3;
+    constexpr int RETRY_DELAY_SECONDS = 5;
+    constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;
+
     class HikCam {
     public:
         HikCam();
@@ -45,18 +50,31 @@ namespace camera {
 
         bool _use_camera_sn;
         std::string _camera_sn;
-        bool _use_config_from_file;
-        std::string _config_file_path;
-        bool _use_camera_config;
+        bool _use_mfs_config;
+        std::string _mfs_config_path;
+        bool _use_toml_config;
 
-        bool print_device_info(MV_CC_DEVICE_INFO *pstMVDevInfo);
+        bool _print_device_info(MV_CC_DEVICE_INFO *pstMVDevInfo);
 
-        void check_and_print();
+        void _check_and_print();
 
-        void set_camera_info_batch();
+        void _set_camera_info_batch();
 
         template<typename T>
-        auto get_camera_param(std::string_view param_name) -> std::optional<T>;
+        auto _get_camera_param(std::string_view param_name) -> std::optional<T>;
+
+        // 重构后的私有方法
+        void _enumerate_devices(MV_CC_DEVICE_INFO_LIST &deviceList);
+
+        bool _find_device_by_sn(const std::string &sn, const MV_CC_DEVICE_INFO_LIST &deviceList, int &deviceIndex);
+
+        bool _open_camera_by_sn(const std::string &sn, MV_CC_DEVICE_INFO_LIST &deviceList, int &deviceIndex);
+
+        bool _open_camera_by_index(int deviceIndex, const MV_CC_DEVICE_INFO_LIST &deviceList);
+
+        void _configure_gige_device(const MV_CC_DEVICE_INFO *deviceInfo);
+
+        void _load_camera_config();
 
 
         //setvalue重载
