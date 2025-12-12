@@ -329,7 +329,7 @@ namespace camera {
         // 尝试多次查找设备
         for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !found; ++attempt) {
             // 每次查找前重新枚举设备，确保设备列表是最新的
-            enumerate_devices(deviceList);
+            _enumerate_devices(deviceList);
 
             if (deviceList.nDeviceNum == 0) {
                 debug::print("warning", "camera", "No devices found in attempt {}", attempt + 1);

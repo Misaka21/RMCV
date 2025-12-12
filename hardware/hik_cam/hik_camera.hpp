@@ -25,9 +25,9 @@ namespace camera {
     using CAM_INFO = std::variant<bool, int64_t, double, std::string>;
 
     // 常量定义
-    constexpr int MAX_RETRY_ATTEMPTS = 3;
-    constexpr int RETRY_DELAY_SECONDS = 5;
-    constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;
+    constexpr int MAX_RETRY_ATTEMPTS = 3;        // 相机连接最大重试次数
+    constexpr int RETRY_DELAY_SECONDS = 5;       // 重试间隔时间(秒)
+    constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;  // 设备信息缓冲区大小
 
     class HikCam {
     public:
