@@ -14,8 +14,8 @@
 
 // Project headers
 #include "fixed_packet.hpp"
-#include "protocol/protocol_interface.hpp"
 #include "plugin/debug/logger.hpp"
+#include "protocol/protocol_interface.hpp"
 
 namespace serial {
 
@@ -32,9 +32,9 @@ public:
      * @param transporter transport interface
      * @throws std::invalid_argument if transporter is nullptr
      */
-    explicit TransceiverManager(std::shared_ptr<ProtocolInterface> transporter)
-        : _transporter(std::move(transporter)),
-          _recv_buf_len(0) {
+    explicit TransceiverManager(std::shared_ptr<ProtocolInterface> transporter):
+        _transporter(std::move(transporter)),
+        _recv_buf_len(0) {
         if (!_transporter) {
             throw std::invalid_argument("transporter is nullptr");
         }
@@ -69,7 +69,6 @@ public:
      */
     [[nodiscard]] bool recv_packet(PacketType& packet);
 
-
 private:
     /**
      * @brief 验证接收到的数据包有效性
@@ -80,17 +79,28 @@ private:
      */
     [[nodiscard]] bool check_packet(const uint8_t* buffer, int recv_len) const noexcept;
 
+    /**
+     * @brief 线程安全的重连方法
+     */
+    void safe_reconnect() noexcept;
+
 private:
     std::shared_ptr<ProtocolInterface> _transporter;
 
-    // 数据缓冲区
+    // 数据缓冲区（只被接收线程使用，无需保护）
     std::array<uint8_t, Capacity> _tmp_buffer;
     std::array<uint8_t, Capacity * 2> _recv_buffer;
     int _recv_buf_len;
+
+    // 保护重连逻辑的互斥锁
+    mutable std::mutex _reconnect_mutex;
 };
 
 template<std::size_t Capacity>
-bool TransceiverManager<Capacity>::check_packet(const uint8_t* buffer, int recv_len) const noexcept {
+bool TransceiverManager<Capacity>::check_packet(
+    const uint8_t* buffer,
+    int recv_len
+) const noexcept {
     // 检查长度
     if (recv_len != static_cast<int>(Capacity)) {
         return false;
@@ -106,6 +116,24 @@ bool TransceiverManager<Capacity>::check_packet(const uint8_t* buffer, int recv_
 }
 
 template<std::size_t Capacity>
+void TransceiverManager<Capacity>::safe_reconnect() noexcept {
+    std::lock_guard<std::mutex> lock(_reconnect_mutex);
+    try {
+        if (_transporter->is_open()) {
+            _transporter->close();
+        }
+        _transporter->open();
+    } catch (const std::exception& e) {
+        debug::print(
+            debug::PrintMode::ERROR,
+            "TransceiverManager",
+            "Reconnect failed: {}",
+            e.what()
+        );
+    }
+}
+
+template<std::size_t Capacity>
 bool TransceiverManager<Capacity>::send_packet(const PacketType& packet) {
     try {
         const auto bytes_written =
@@ -113,14 +141,18 @@ bool TransceiverManager<Capacity>::send_packet(const PacketType& packet) {
         if (bytes_written == static_cast<int>(Capacity)) {
             return true;
         } else {
-            // 尝试重新连接
-            _transporter->close();
-            _transporter->open();
+            // 线程安全的重连
+            safe_reconnect();
             return false;
         }
     } catch (const std::exception& e) {
         // 处理可能的异常
-        debug::print(debug::PrintMode::ERROR, "TransceiverManager", "Error sending packet: {}", e.what());
+        debug::print(
+            debug::PrintMode::ERROR,
+            "TransceiverManager",
+            "Error sending packet: {}",
+            e.what()
+        );
         return false;
     }
 }
@@ -128,6 +160,7 @@ bool TransceiverManager<Capacity>::send_packet(const PacketType& packet) {
 template<std::size_t Capacity>
 bool TransceiverManager<Capacity>::recv_packet(PacketType& packet) {
     try {
+        // read() 操作无需加锁，POSIX 保证并发读写安全
         int recv_len =
             _transporter->read(reinterpret_cast<std::byte*>(_tmp_buffer.data()), Capacity);
         if (recv_len > 0) {
@@ -164,13 +197,17 @@ bool TransceiverManager<Capacity>::recv_packet(PacketType& packet) {
                 return false;
             }
         } else {
-            // 尝试重新连接
-            _transporter->close();
-            _transporter->open();
+            // 线程安全的重连
+            safe_reconnect();
             return false;
         }
     } catch (const std::exception& e) {
-        debug::print(debug::PrintMode::ERROR, "TransceiverManager", "Error receiving packet: {}", e.what());
+        debug::print(
+            debug::PrintMode::ERROR,
+            "TransceiverManager",
+            "Error receiving packet: {}",
+            e.what()
+        );
         return false;
     }
 }
