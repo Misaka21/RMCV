@@ -3,11 +3,16 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <thread>
+
+// Third-party library headers
+#include <fmt/color.h>
 
 // Third-party library headers
 
 // Project headers
 #include "hardware/hik_cam/hik_camera.hpp"
+#include "hardware/serial/serial_node.hpp"
 #include "param/static_config.hpp"
 #include "param/runtime_parameter.hpp"
 #include "plugin/debug/logger.hpp"
@@ -27,6 +32,7 @@ int main() {
     runtime_param::wait_for_param("ok");
     auto server_param = static_param::get_param<std::string>(param, "database", "server");
 
+    serial::start_serial_communication("/dev/ttyUSB0", 115200);
     debug::print(
         "info",
         "test",

@@ -10,5 +10,6 @@
 // Project headers
 #include "Message.hpp"
 #include "ObjManager.hpp"
+#include "BasicObjManager.hpp"
 
 #endif /* ULTRAMULTITHREAD_INCLUDE_UMT_UMT_HPP */

@@ -1,7 +1,8 @@
 aux_source_directory(. serial_src)
+aux_source_directory(protocol serial_protocol_src)
 
 # 创建串口静态库
-add_library(hardware_serial STATIC ${serial_src})
+add_library(hardware_serial STATIC ${serial_src} ${serial_protocol_src})
 
 # 设置包含目录
 target_include_directories(hardware_serial PUBLIC

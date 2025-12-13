@@ -8,7 +8,7 @@
 #include <fmt/format.h>
 
 #include "serial_node.hpp"
-#include "uart_protocol.hpp"
+#include "protocol/uart_protocol.hpp"
 #include "plugin/debug/logger.hpp"
 
 // UMT相关头文件
@@ -22,8 +22,8 @@ using namespace std::chrono_literals;
 void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
     try {
         // 视觉数据状态管理
-        auto vision_transmit = umt::ObjManager<VisionData_t>::find_or_create("vision_transmit");
-        auto send_enabled = umt::ObjManager<bool>::find_or_create("serial_send_enabled");
+        auto vision_transmit = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
+        auto send_enabled = umt::BasicObjManager<bool>::find_or_create("serial_send_enabled", true);
 
         fmt::print(fmt::fg(fmt::color::green), "[INFO] 串口发送线程启动成功\n");
 
@@ -78,9 +78,9 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
 
 void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
     try {
-        // 创建接收数据队列并通过ObjManager共享
-        auto receive_queue = umt::ObjManager<ReceiveQueue>::find_or_create("receive_queue");
-        auto recv_enabled = umt::ObjManager<bool>::find_or_create("serial_recv_enabled");
+        // 创建接收数据队列并通过BasicObjManager共享
+        auto receive_queue = umt::BasicObjManager<ReceiveQueue>::find_or_create("receive_queue");
+        auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
 
         fmt::print(fmt::fg(fmt::color::green), "[INFO] 串口接收线程启动成功\n");
 
@@ -186,12 +186,10 @@ bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& pac
         packet.clear();
 
         // 填充数据（根据实际协议调整格式）
-        packet.set_value(0, static_cast<float>(cmd.cmd_id));
-        packet.set_value(1, cmd.yaw);
-        packet.set_value(2, cmd.pitch);
-        packet.set_value(3, cmd.distance);
-        packet.set_value(4, static_cast<float>(cmd.target_id));
-        packet.set_value(5, static_cast<float>(cmd.is_found));
+        packet.load_data(static_cast<float>(cmd.cmd_id), 1);
+        packet.load_data(cmd.yaw, 5);
+        packet.load_data(cmd.pitch, 9);
+        packet.load_data(cmd.distance, 13);
 
         return true;
     } catch (const std::exception& e) {
@@ -203,12 +201,19 @@ bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& pac
 bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceiveData& data) {
     try {
         // 从数据包提取数据
-        data.cmd_id = static_cast<uint8_t>(packet.get_value(0));
-        data.yaw = packet.get_value(1);
-        data.pitch = packet.get_value(2);
-        data.distance = packet.get_value(3);
-        data.target_id = static_cast<uint8_t>(packet.get_value(4));
-        data.is_found = static_cast<uint8_t>(packet.get_value(5));
+        float cmd_id_float, yaw, pitch, distance;
+        if (packet.unload_data(cmd_id_float, 1)) {
+            data.cmd_id = static_cast<uint8_t>(cmd_id_float);
+        }
+        if (packet.unload_data(yaw, 5)) {
+            data.yaw = yaw;
+        }
+        if (packet.unload_data(pitch, 9)) {
+            data.pitch = pitch;
+        }
+        if (packet.unload_data(distance, 13)) {
+            data.distance = distance;
+        }
 
         return true;
     } catch (const std::exception& e) {
