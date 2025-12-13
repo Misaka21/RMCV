@@ -52,8 +52,9 @@ make -j$(nproc)
 ### Core Modules
 
 1. **UMT (UltraMultiThread)** - Custom thread-safe messaging and object management
-   - `Message.hpp` - Thread-safe message passing
-   - `ObjManager.hpp` - Object lifecycle management
+   - `Message.hpp` - Thread-safe message passing with Publisher/Subscriber pattern
+   - `ObjManager.hpp` - Object lifecycle management for class types
+   - `BasicObjManager.hpp` - Object management for basic types (int, bool, float, structs)
    - Located in `umt/` directory
 
 2. **Hardware Layer** - Hardware abstraction and control
@@ -131,7 +132,15 @@ RMCV/
 
 - **Configuration Paths**: Asset, config, and log directories are defined at compile time via `ASSET_DIR`, `CONFIG_DIR`, and `LOG_DIR` macros
 - **Camera Integration**: Requires HIK MVS SDK installation and proper camera configuration files (`.mfs`)
-- **Serial Communication**: Supports both real hardware and simulated data for testing
+- **Serial Communication**:
+  - Supports both UART (/dev/ttyUSB*) and USB Bulk protocols
+  - UART requires standard Linux serial device permissions
+  - USB Bulk requires libusb-1.0 and proper device permissions
+  - Uses thread-safe UMT object management for data sharing
+- **UMT Object Management**:
+  - `ObjManager<T>` for class types only (inherits from T)
+  - `BasicObjManager<T>` for basic types and structs (wraps T)
+  - Message system for thread-safe publisher/subscriber communication
 - **Logging**: Uses custom markdown-based logging system with colorized console output
 - **Error Handling**: Extensive use of `std::optional` and variant types for safe parameter handling
 
@@ -154,10 +163,135 @@ runtime_param::parameter_run("config.toml");
 auto dynamic_value = runtime_param::get_param<std::string>("section.key");
 ```
 
+### UMT Object Management
+```cpp
+// BasicObjManager - 用于基本类型和结构体
+#include "umt/BasicObjManager.hpp"
+
+// 创建或查找基本类型对象
+auto bool_obj = umt::BasicObjManager<bool>::find_or_create("enable_flag", true);
+auto float_obj = umt::BasicObjManager<float>::find_or_create("threshold", 0.5f);
+
+// 访问和修改数据
+bool_obj->get() = false;  // 设置值
+bool enabled = bool_obj->get();  // 获取值
+
+// 对于自定义结构体
+struct MyData {
+    int id;
+    float value;
+};
+auto data_obj = umt::BasicObjManager<MyData>::find_or_create("my_data");
+data_obj->get().id = 42;
+data_obj->get().value = 3.14f;
+
+// Message系统 - 用于线程间通信
+#include "umt/Message.hpp"
+
+// Publisher发布消息
+umt::Publisher<MyData> publisher("data_channel");
+MyData msg{42, 3.14f};
+publisher.push(msg);
+
+// Subscriber订阅消息
+umt::Subscriber<MyData> subscriber("data_channel");
+try {
+    MyData received = subscriber.pop();  // 阻塞等待消息
+    MyData received_timeout = subscriber.pop_for(1000);  // 1秒超时
+} catch (const umt::MessageError_Timeout&) {
+    // 处理超时
+}
+```
+
 ### Debug Logging
 ```cpp
 debug::init_md_file("log.log");  // Initialize markdown logger
 debug::print("info", "module", "message: {}", data);
+```
+
+### Serial Communication Module
+#### 串口模块架构
+串口模块位于 `hardware/serial/` 目录，采用分层架构设计：
+
+**核心组件：**
+- `SerialNode` - 串口节点管理器，负责启动收发线程
+- `TransceiverManager` - 收发管理器，封装底层协议
+- `FixedPacket` - 定长数据包，支持帧头帧尾校验
+- `Protocol Interface` - 协议接口，支持UART和USB Bulk传输
+
+**协议支持：**
+- `UartProtocol` - 标准UART串口通信
+- `UsbBulkProtocol` - USB Bulk传输协议（需要libusb-1.0）
+
+#### 数据类型定义
+```cpp
+// 视觉数据结构
+struct VisionData_t {
+    uint8_t cmd_id;      // 命令ID
+    float yaw;           // 偏航角
+    float pitch;         // 俯仰角
+    float distance;      // 距离
+    uint8_t target_id;   // 目标ID
+    uint8_t is_found;    // 是否发现目标
+};
+
+// 接收数据结构
+struct SerialReceiveData {
+    uint8_t cmd_id;      // 命令ID
+    float yaw;           // 偏航角
+    float pitch;         // 俯仰角
+    float distance;      // 距离
+    uint64_t timestamp;  // 时间戳
+};
+```
+
+#### 串口使用方法
+```cpp
+#include "hardware/serial/serial_node.hpp"
+
+// 启动串口通信（自动创建收发线程）
+serial::start_serial_communication("/dev/ttyUSB0", 115200);
+
+// 通过UMT共享数据
+// 发送视觉数据
+auto vision_data = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
+vision_data->get() = my_vision_data;
+
+// 接收数据队列
+auto recv_queue = umt::BasicObjManager<std::queue<SerialReceiveData>>::find_or_create("receive_queue");
+```
+
+#### FixedPacket 数据包操作
+```cpp
+// 创建16字节数据包
+FixedPacket<16> packet;
+
+// 装载数据到指定位置（字节偏移）
+packet.load_data(float_value, 1);    // 在偏移1处装载float
+packet.load_data(uint8_value, 5);    // 在偏移5处装载uint8_t
+
+// 提取数据
+float value;
+if (packet.unload_data(value, 1)) {
+    // 成功提取数据
+}
+
+// 数据包格式: [HEAD_BYTE][DATA...][CHECK_BYTE][TAIL_BYTE]
+// HEAD_BYTE = 0xff, TAIL_BYTE = 0x0d
+```
+
+#### 线程模型
+- **发送线程** - 从UMT获取视觉数据，转换为数据包并发送
+- **接收线程** - 接收数据包，解析后存入共享队列
+- **共享实例** - 收发线程共享同一个串口/协议实例
+
+#### 配置文件支持
+串口参数通过TOML配置文件管理：
+```toml
+[serial]
+port_path = "/dev/ttyUSB0"
+baud_rate = 115200
+timeout_ms = 100
 ```
 
 ## Git Commit 规范
@@ -252,4 +386,8 @@ Closes: #234, #235
 - 描述要简洁明确,一句话说清楚做了什么
 - 如有破坏性变更,必须明确标注并说明影响
 - 优先使用常用类型: feat, fix, docs, refactor, perf
-- 提交信息保持简洁，不添加任何自动生成标记或作者信息
+- **提交信息保持简洁，严禁添加任何自动生成标记**：
+  - 禁止添加 "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+  - 禁止添加 "Co-Authored-By: Claude <noreply@anthropic.com>"
+  - 禁止添加任何其他AI工具生成的标记
+  - 只包含人为编写的提交内容
