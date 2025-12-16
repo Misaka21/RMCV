@@ -179,7 +179,7 @@ bool TransceiverManager<Capacity>::recv_packet(PacketType& packet) {
                 _recv_buf_len += recv_len;
 
                 // 遍历校验
-                for (int i = 0; (i + Capacity) <= _recv_buf_len; i++) {
+                for (int i = 0; (i + static_cast<int> (Capacity)) <= _recv_buf_len; i++) {
                     if (check_packet(_recv_buffer.data() + i, Capacity)) {
                         packet.copy_from(_recv_buffer.data() + i);
 
