@@ -103,12 +103,23 @@ void start_hardware_node() {
         int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
         int64_t delta_t_us = static_param::get_param<int64_t>(config, "TimeSync", "delta_t_us");
 
+        // Fake serial config
+        bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
+        double fake_yaw = static_param::get_param<double>(config, "Serial.data", "yaw_deg");
+
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Serial: {} @ {}", port_name, baudrate);
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Delta_t: {} us", delta_t_us);
+        debug::print(debug::PrintMode::INFO, "HardwareNode", "Use fake serial: {}", use_fake_serial);
 
-        // 1. Start serial communication (send + receive threads)
-        serial::start_serial_communication(port_name, static_cast<int>(baudrate));
-        std::this_thread::sleep_for(100ms);  // Wait for serial threads to start
+        // 1. Start serial communication (only if not using fake)
+        if (!use_fake_serial) {
+            serial::start_serial_communication(port_name, static_cast<int>(baudrate));
+            std::this_thread::sleep_for(100ms);  // Wait for serial threads to start
+        } else {
+            debug::print(debug::PrintMode::WARNING, "HardwareNode", "Using fake serial data: yaw={}", fake_yaw);
+            // 创建空的接收队列
+            umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
+        }
 
         // 2. Load camera config and open camera
         camera::CameraConfig cam_config = load_camera_config(config);
@@ -119,6 +130,10 @@ void start_hardware_node() {
         umt::Publisher<SyncFrame> pub("sync_frame");
         auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
         auto running = umt::BasicObjManager<bool>::find_or_create("hardware_running", true);
+
+        // 通知主线程硬件初始化完成
+        auto hardware_ready = umt::BasicObjManager<bool>::find_or_create("hardware_ready", false);
+        hardware_ready->get() = true;
 
         debug::print(debug::PrintMode::LOG, "HardwareNode", "Hardware node started");
 
@@ -133,23 +148,6 @@ void start_hardware_node() {
         // 4. Main loop
         while (running->get()) {
             try {
-                // Drain receive queue into IMU buffer
-                auto& queue = recv_queue->get();
-                while (!queue.empty()) {
-                    auto data = queue.front();
-                    queue.pop();
-
-                    ImuData imu;
-                    imu.timestamp = SteadyClock::now();  // Timestamp when received
-                    imu.yaw = data.yaw;
-                    imu.pitch = data.pitch;
-
-                    imu_buffer.push_back(imu);
-                    while (imu_buffer.size() > max_buffer_size) {
-                        imu_buffer.pop_front();
-                    }
-                }
-
                 // Capture image
                 cv::Mat& img = cam.capture();
                 if (img.empty()) continue;
@@ -162,30 +160,57 @@ void start_hardware_node() {
                 frame.frame_id = cam.frame_id;
                 frame.timestamp = cam_time;
 
-                // Match closest IMU data
-                if (!imu_buffer.empty()) {
-                    auto target = cam_time - std::chrono::microseconds(delta_t_us);
+                // 根据是否使用fake serial决定IMU数据来源
+                if (use_fake_serial) {
+                    // 使用配置文件中的固定值
+                    frame.imu.yaw = static_cast<float>(fake_yaw);
+                    frame.imu.pitch = 0.0f;
+                    frame.imu.timestamp = cam_time;
+                    frame.imu_valid = true;
+                    sync_count++;
+                } else {
+                    // Drain receive queue into IMU buffer
+                    auto& queue = recv_queue->get();
+                    while (!queue.empty()) {
+                        auto data = queue.front();
+                        queue.pop();
 
-                    auto best = imu_buffer.begin();
-                    int64_t min_diff = INT64_MAX;
+                        ImuData imu;
+                        imu.timestamp = SteadyClock::now();
+                        imu.yaw = data.yaw;
+                        imu.pitch = data.pitch;
 
-                    for (auto it = imu_buffer.begin(); it != imu_buffer.end(); ++it) {
-                        int64_t diff = std::abs(
-                            std::chrono::duration_cast<std::chrono::microseconds>(
-                                it->timestamp - target
-                            ).count()
-                        );
-                        if (diff < min_diff) {
-                            min_diff = diff;
-                            best = it;
+                        imu_buffer.push_back(imu);
+                        while (imu_buffer.size() > max_buffer_size) {
+                            imu_buffer.pop_front();
                         }
                     }
 
-                    // Accept if within 50ms
-                    if (min_diff <= 50000) {
-                        frame.imu = *best;
-                        frame.imu_valid = true;
-                        sync_count++;
+                    // Match closest IMU data
+                    if (!imu_buffer.empty()) {
+                        auto target = cam_time - std::chrono::microseconds(delta_t_us);
+
+                        auto best = imu_buffer.begin();
+                        int64_t min_diff = INT64_MAX;
+
+                        for (auto it = imu_buffer.begin(); it != imu_buffer.end(); ++it) {
+                            int64_t diff = std::abs(
+                                std::chrono::duration_cast<std::chrono::microseconds>(
+                                    it->timestamp - target
+                                ).count()
+                            );
+                            if (diff < min_diff) {
+                                min_diff = diff;
+                                best = it;
+                            }
+                        }
+
+                        // Accept if within 50ms
+                        if (min_diff <= 50000) {
+                            frame.imu = *best;
+                            frame.imu_valid = true;
+                            sync_count++;
+                        }
                     }
                 }
 
