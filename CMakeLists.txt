@@ -52,7 +52,7 @@ add_subdirectory(hardware)
 add_subdirectory(aimer/auto_aim/detector)
 
 add_executable(RMCV2026 main.cpp)
-target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware)
+target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector)
 
 add_executable(test_param test/test_param.cpp)
 target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin)
