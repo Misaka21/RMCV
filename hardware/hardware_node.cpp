@@ -12,11 +12,13 @@
 #include <thread>
 
 // Third-party library headers
+#include <fmt/format.h>
 #include <opencv2/core/mat.hpp>
 
 // Project headers
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/static_config.hpp"
+#include "plugin/stats/fps_stats.hpp"
 #include "hik_cam/hik_camera.hpp"
 #include "serial/serial_thread.hpp"
 #include "umt/umt.hpp"
@@ -195,9 +197,11 @@ void start_hardware_node() {
         std::deque<ImuData> imu_buffer;
         constexpr size_t max_buffer_size = 500;
 
-        // FPS stats
-        int fps_count = 0, sync_count = 0;
-        auto fps_time = SteadyClock::now();
+        // FPS统计
+        stats::FpsStats stats("HardwareNode", "synced");
+        stats.set_extra_info([&imu_buffer]() {
+            return fmt::format("imu_buf: {}", imu_buffer.size());
+        });
 
         // 4. Main loop
         while (true) {
@@ -215,10 +219,11 @@ void start_hardware_node() {
                 frame.timestamp = cam_time;
 
                 // 根据是否使用fake serial决定IMU数据来源
+                bool synced = false;
                 if (use_fake_serial) {
                     frame.imu = {cam_time, static_cast<float>(fake_yaw), 0.0f, 0.0f};
                     frame.imu_valid = true;
-                    sync_count++;
+                    synced = true;
                 } else {
                     drain_queue_to_buffer(recv_queue->get(), imu_buffer, max_buffer_size);
 
@@ -226,7 +231,7 @@ void start_hardware_node() {
                     if (auto imu = find_closest_imu(imu_buffer, target)) {
                         frame.imu = *imu;
                         frame.imu_valid = true;
-                        sync_count++;
+                        synced = true;
                     }
                 }
 
@@ -234,16 +239,8 @@ void start_hardware_node() {
                 pub.push(frame);
                 hardware_running->get() = true;
 
-                // FPS stats
-                fps_count++;
-                auto now = SteadyClock::now();
-                if (std::chrono::duration_cast<std::chrono::milliseconds>(now - fps_time).count() >= 1000) {
-                    debug::print(debug::PrintMode::DEBUG, "HardwareNode",
-                                 "FPS: {}, synced: {}, imu_buf: {}", fps_count, sync_count, imu_buffer.size());
-                    fps_count = 0;
-                    sync_count = 0;
-                    fps_time = now;
-                }
+                // 更新统计
+                stats.update(0, synced);
 
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "HardwareNode", "Loop error: {}", e.what());

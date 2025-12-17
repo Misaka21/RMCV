@@ -22,7 +22,6 @@
 namespace autoaim {
 
 using TimePoint = std::chrono::steady_clock::time_point;
-using SteadyClock = std::chrono::steady_clock;
 
 // 检测结果
 struct DetectionResult {
@@ -30,37 +29,6 @@ struct DetectionResult {
     TimePoint timestamp;
     std::vector<detector::Armor> armors;
     float detect_latency_ms = 0;
-};
-
-// 检测器统计信息
-struct DetectorStats {
-    int fps_count = 0;
-    int detect_count = 0;
-    float total_latency = 0;
-    SteadyClock::time_point last_print_time = SteadyClock::now();
-
-    void update(float latency, bool detected) {
-        fps_count++;
-        total_latency += latency;
-        if (detected) {
-            detect_count++;
-        }
-    }
-
-    void print_if_needed() {
-        auto now = SteadyClock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_print_time).count();
-        if (elapsed >= 1000) {
-            float avg_latency = fps_count > 0 ? total_latency / fps_count : 0;
-            debug::print(debug::PrintMode::DEBUG, "DetectorNode",
-                "FPS: {}, detected: {}, avg_latency: {:.1f}ms",
-                fps_count, detect_count, avg_latency);
-            fps_count = 0;
-            detect_count = 0;
-            total_latency = 0;
-            last_print_time = now;
-        }
-    }
 };
 
 // Debug可视化

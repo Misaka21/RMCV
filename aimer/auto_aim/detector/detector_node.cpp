@@ -8,9 +8,12 @@
 
 #include "detector_node.hpp"
 #include "detector_factory.hpp"
+#include "plugin/stats/fps_stats.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim {
+
+using SteadyClock = std::chrono::steady_clock;
 
 // Global detector instance
 static std::unique_ptr<detector::Detector> g_detector = nullptr;
@@ -42,7 +45,7 @@ void start_detector_node(detector::EnemyColor color) {
 
         debug::print(debug::PrintMode::LOG, "DetectorNode", "Detector node started");
 
-        DetectorStats stats;
+        stats::FpsStats stats("DetectorNode", "detected");
 
         // 3. Main loop
         while (running->get()) {
@@ -75,7 +78,6 @@ void start_detector_node(detector::EnemyColor color) {
 
                 // 更新统计
                 stats.update(latency, !result.armors.empty());
-                stats.print_if_needed();
 
                 // Debug可视化
                 if (debug_mode->get()) {
