@@ -3,11 +3,11 @@
     #@bool 是否通过sn码查找相机,false则查找第0个
     use_camera_sn = true
     #@string 相机sn码
-    camera_sn = "DA5555190"
+    camera_sn = "00G07828078"
     #@bool 使用从MVS中导出的配置文件
     use_config_from_file = true
     #@string 配置文件在config文件夹中的路径
-    config_file_path = "MV-CS016-10UC_DA5555190.mfs"
+    config_file_path = "MV-CA016-10UC_00G07828078.mfs"
     #@bool 是否从camera.config中设置参数,会覆盖上文中file中的参数
     use_camera_config = true
 
@@ -38,4 +38,10 @@
 
 [Serial.data]
     yaw_deg = 0
+
+[TimeSync]
+    # Camera-IMU time offset in microseconds
+    # Positive: camera timestamp is ahead of IMU
+    # Calibrate using static target test
+    delta_t_us = 0
 
