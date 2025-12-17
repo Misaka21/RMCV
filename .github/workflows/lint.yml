@@ -1,0 +1,111 @@
+name: Code Review
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  clang-format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-17
+
+      - name: Check format
+        run: |
+          # 查找所有C++源文件
+          FILES=$(find . -name "*.cpp" -o -name "*.hpp" -o -name "*.h" | grep -v build | grep -v third_party)
+
+          # 检查格式
+          DIFF=""
+          for file in $FILES; do
+            result=$(clang-format-17 --style=file --dry-run --Werror "$file" 2>&1) || DIFF="$DIFF\n$file"
+          done
+
+          if [ -n "$DIFF" ]; then
+            echo "::error::以下文件格式不符合规范:"
+            echo -e "$DIFF"
+            echo ""
+            echo "请运行: clang-format -i <file> 来修复格式问题"
+            exit 1
+          fi
+
+          echo "✅ 所有文件格式检查通过"
+
+  file-check:
+    name: File Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for common issues
+        run: |
+          errors=0
+
+          # 检查是否有调试代码遗留
+          echo "检查调试代码..."
+          if grep -rn "TODO\|FIXME\|XXX\|HACK" --include="*.cpp" --include="*.hpp" . | grep -v ".github"; then
+            echo "::warning::发现TODO/FIXME标记（仅提醒，不阻止提交）"
+          fi
+
+          # 检查是否有 cout/printf 调试输出
+          echo "检查调试输出..."
+          if grep -rn "std::cout\|printf\|std::cerr" --include="*.cpp" --include="*.hpp" . | grep -v ".github" | grep -v "test/"; then
+            echo "::warning::发现 cout/printf 输出，请确认是否为调试代码"
+          fi
+
+          # 检查文件末尾是否有换行符
+          echo "检查文件末尾换行符..."
+          for file in $(find . -name "*.cpp" -o -name "*.hpp" -o -name "*.h" | grep -v build | grep -v third_party); do
+            if [ -n "$(tail -c 1 "$file")" ]; then
+              echo "::error::文件缺少末尾换行符: $file"
+              errors=$((errors + 1))
+            fi
+          done
+
+          # 检查是否有 Windows 换行符
+          echo "检查换行符格式..."
+          if grep -rIl $'\r' --include="*.cpp" --include="*.hpp" --include="*.h" . 2>/dev/null | grep -v build | grep -v third_party; then
+            echo "::error::发现Windows换行符(CRLF)，请转换为Unix换行符(LF)"
+            errors=$((errors + 1))
+          fi
+
+          if [ $errors -gt 0 ]; then
+            exit 1
+          fi
+
+          echo "✅ 文件检查通过"
+
+  include-guard:
+    name: Include Guard Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check include guards
+        run: |
+          errors=0
+
+          for file in $(find . -name "*.hpp" -o -name "*.h" | grep -v build | grep -v third_party); do
+            # 检查是否有 #ifndef 或 #pragma once
+            if ! grep -q "#ifndef\|#pragma once" "$file"; then
+              echo "::error::头文件缺少包含保护: $file"
+              errors=$((errors + 1))
+            fi
+          done
+
+          if [ $errors -gt 0 ]; then
+            exit 1
+          fi
+
+          echo "✅ 头文件包含保护检查通过"
