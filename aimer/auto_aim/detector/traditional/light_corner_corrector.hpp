@@ -26,24 +26,23 @@ namespace autoaim::detector {
 struct SymmetryAxis {
   cv::Point2f centroid;
   cv::Point2f direction;
-  float mean_val; // Mean brightness
+  float mean_val;  // 平均亮度
 };
 
-// This class is used to improve the precision of the corner points of the light bar.
-// First, the PCA algorithm is used to find the symmetry axis of the light bar,
-// and then along the symmetry axis to find the corner points of the light bar based on the gradient of brightness.
+// 灯条角点校正器
+// 使用PCA算法找到灯条的对称轴，然后沿对称轴根据亮度梯度找到角点
 class LightCornerCorrector {
 public:
   explicit LightCornerCorrector() noexcept {}
 
-  // Correct the corners of the armor's lights
+  // 校正装甲板灯条的角点
   void correct_corners(Armor &armor, const cv::Mat &gray_img);
 
 private:
-  // Find the symmetry axis of the light
+  // 查找灯条的对称轴
   SymmetryAxis find_symmetry_axis(const cv::Mat &gray_img, const Light &light);
 
-  // Find the corner of the light
+  // 查找灯条的角点
   cv::Point2f find_corner(const cv::Mat &gray_img,
                          const Light &light,
                          const SymmetryAxis &axis,

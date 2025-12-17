@@ -31,7 +31,8 @@
 #include "types.hpp"
 
 namespace autoaim::detector {
-// Class used to classify the number of the armor, based on the MLP model
+
+// 装甲板数字分类器，基于MLP模型
 class NumberClassifier {
 public:
   NumberClassifier(const std::string &model_path,
@@ -39,13 +40,13 @@ public:
                    const double threshold,
                    const std::vector<std::string> &ignore_classes = {});
 
-  // Extract the roi image of number from the src
+  // 从图像中提取数字区域
   cv::Mat extract_number(const cv::Mat &src, const Armor &armor) const noexcept;
 
-  // Classify the number of the armor
+  // 分类装甲板数字
   void classify(const cv::Mat &src, Armor &armor) noexcept;
 
-  // Erase the ignore classes
+  // 移除忽略的类别
   void erase_ignore_classes(std::vector<Armor> &armors) noexcept;
 
   double threshold;

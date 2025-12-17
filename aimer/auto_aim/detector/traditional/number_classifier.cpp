@@ -55,17 +55,17 @@ NumberClassifier::NumberClassifier(const std::string &model_path,
 }
 
 cv::Mat NumberClassifier::extract_number(const cv::Mat &src, const Armor &armor) const noexcept {
-  // Light length in image
+  // 图像中灯条长度
   static const int light_length = 12;
-  // Image size after warp
+  // 透视变换后的图像尺寸
   static const int warp_height = 28;
   static const int small_armor_width = 32;
   static const int large_armor_width = 54;
-  // Number ROI size
+  // 数字ROI尺寸
   static const cv::Size roi_size(20, 28);
   static const cv::Size input_size(28, 28);
 
-  // Warp perspective transform
+  // 透视变换
   cv::Point2f lights_vertices[4] = {
     armor.left_light.bottom, armor.left_light.top, armor.right_light.top, armor.right_light.bottom};
 
@@ -82,10 +82,10 @@ cv::Mat NumberClassifier::extract_number(const cv::Mat &src, const Armor &armor)
   auto rotation_matrix = cv::getPerspectiveTransform(lights_vertices, target_vertices);
   cv::warpPerspective(src, number_image, rotation_matrix, cv::Size(warp_width, warp_height));
 
-  // Get ROI
+  // 获取ROI
   number_image = number_image(cv::Rect(cv::Point((warp_width - roi_size.width) / 2, 0), roi_size));
 
-  // Binarize
+  // 二值化
   cv::cvtColor(number_image, number_image, cv::COLOR_RGB2GRAY);
   cv::threshold(number_image, number_image, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
   cv::resize(number_image, number_image, input_size);
@@ -93,22 +93,22 @@ cv::Mat NumberClassifier::extract_number(const cv::Mat &src, const Armor &armor)
 }
 
 void NumberClassifier::classify(const cv::Mat &src, Armor &armor) noexcept {
-  // Normalize
+  // 归一化
   cv::Mat input = armor.number_img / 255.0;
 
-  // Create blob from image
+  // 创建blob
   cv::Mat blob;
   cv::dnn::blobFromImage(input, blob);
 
-  // Set the input blob for the neural network
+  // 设置神经网络输入
   mutex_.lock();
   net_.setInput(blob);
 
-  // Forward pass the image blob through the model
+  // 前向传播
   cv::Mat outputs = net_.forward().clone();
   mutex_.unlock();
 
-  // Decode the output
+  // 解码输出
   double confidence;
   cv::Point class_id_point;
   minMaxLoc(outputs.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);

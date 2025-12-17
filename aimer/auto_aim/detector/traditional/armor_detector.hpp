@@ -32,26 +32,28 @@
 #include "types.hpp"
 
 namespace autoaim::detector {
+
+// 传统装甲板检测器
 class Detector {
 public:
   struct LightParams {
-    // width / height
+    // 宽高比
     double min_ratio;
     double max_ratio;
-    // vertical angle
+    // 垂直角度
     double max_angle;
-    // judge color
+    // 颜色判断
     int color_diff_thresh;
   };
 
   struct ArmorParams {
     double min_light_ratio;
-    // light pairs distance
+    // 灯条对距离
     double min_small_center_distance;
     double max_small_center_distance;
     double min_large_center_distance;
     double max_large_center_distance;
-    // horizontal angle
+    // 水平角度
     double max_angle;
   };
 
@@ -65,11 +67,11 @@ public:
                                 const cv::Mat &binary_img) noexcept;
   std::vector<Armor> match_lights(const std::vector<Light> &lights) noexcept;
 
-  // For debug usage
+  // 调试用
   cv::Mat get_all_numbers_image() const noexcept;
   void draw_results(cv::Mat &img) const noexcept;
 
-  // Parameters
+  // 参数
   int binary_thres;
   EnemyColor detect_color;
   LightParams light_params;
@@ -78,7 +80,7 @@ public:
   std::unique_ptr<NumberClassifier> classifier;
   std::unique_ptr<LightCornerCorrector> corner_corrector;
 
-  // Debug info
+  // 调试信息
   cv::Mat binary_img;
 
 private:

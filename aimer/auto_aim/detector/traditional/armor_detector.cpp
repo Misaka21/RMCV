@@ -42,28 +42,28 @@ Detector::Detector(const int &bin_thres,
 : binary_thres(bin_thres), detect_color(color), light_params(l), armor_params(a) {}
 
 std::vector<Armor> Detector::detect(const cv::Mat &input) noexcept {
-  // 1. Preprocess the image
+  // 1. 预处理图像
   binary_img = preprocess_image(input);
-  // 2. Find lights
+  // 2. 寻找灯条
   lights_ = find_lights(input, binary_img);
-  // 3. Match lights to armors
+  // 3. 匹配灯条为装甲板
   armors_ = match_lights(lights_);
 
   if (!armors_.empty() && classifier != nullptr) {
-    // Parallel processing
+    // 并行处理
     std::for_each(
       std::execution::par, armors_.begin(), armors_.end(), [this, &input](Armor &armor) {
-        // 4. Extract the number image
+        // 4. 提取数字图像
         armor.number_img = classifier->extract_number(input, armor);
-        // 5. Do classification
+        // 5. 分类
         classifier->classify(input, armor);
-        // 6. Correct the corners of the armor
+        // 6. 校正角点
         if (corner_corrector != nullptr) {
           corner_corrector->correct_corners(armor, gray_img_);
         }
       });
 
-    // 7. Erase the armors with ignore classes
+    // 7. 移除忽略的类别
     classifier->erase_ignore_classes(armors_);
   }
 
@@ -113,7 +113,7 @@ std::vector<Light> Detector::find_lights(const cv::Mat &rgb_img,
 }
 
 bool Detector::is_light(const Light &light) noexcept {
-  // The ratio of light (short side / long side)
+  // 灯条宽高比
   float ratio = light.width / light.length;
   bool ratio_ok = light_params.min_ratio < ratio && ratio < light_params.max_ratio;
 
@@ -126,7 +126,7 @@ bool Detector::is_light(const Light &light) noexcept {
 
 std::vector<Armor> Detector::match_lights(const std::vector<Light> &lights) noexcept {
   std::vector<Armor> armors;
-  // Loop all the pairing of lights
+  // 遍历所有灯条配对
   for (auto light_1 = lights.begin(); light_1 != lights.end(); light_1++) {
     if (light_1->color != detect_color) continue;
     double max_iter_width = light_1->length * armor_params.max_large_center_distance;
@@ -150,14 +150,14 @@ std::vector<Armor> Detector::match_lights(const std::vector<Light> &lights) noex
   return armors;
 }
 
-// Check if there is another light in the boundingRect formed by the 2 lights
+// 检查两个灯条之间是否存在其他灯条
 bool Detector::contain_light(const int i, const int j, const std::vector<Light> &lights) noexcept {
   const Light &light_1 = lights.at(i), light_2 = lights.at(j);
   auto points = std::vector<cv::Point2f>{light_1.top, light_1.bottom, light_2.top, light_2.bottom};
   auto bounding_rect = cv::boundingRect(points);
   double avg_length = (light_1.length + light_2.length) / 2.0;
   double avg_width = (light_1.width + light_2.width) / 2.0;
-  // Only check lights in between
+  // 只检查中间的灯条
   for (int k = i + 1; k < j; k++) {
     const Light &test_light = lights.at(k);
 
@@ -179,12 +179,12 @@ bool Detector::contain_light(const int i, const int j, const std::vector<Light> 
 }
 
 ArmorType Detector::is_armor(const Light &light_1, const Light &light_2) noexcept {
-  // Ratio of the length of 2 lights (short side / long side)
+  // 两灯条长度比
   float light_length_ratio = light_1.length < light_2.length ? light_1.length / light_2.length
                                                              : light_2.length / light_1.length;
   bool light_ratio_ok = light_length_ratio > armor_params.min_light_ratio;
 
-  // Distance between the center of 2 lights (unit : light length)
+  // 两灯条中心距离（单位：灯条长度）
   float avg_light_length = (light_1.length + light_2.length) / 2;
   float center_distance = cv::norm(light_1.center - light_2.center) / avg_light_length;
   bool center_distance_ok = (armor_params.min_small_center_distance <= center_distance &&
@@ -192,14 +192,14 @@ ArmorType Detector::is_armor(const Light &light_1, const Light &light_2) noexcep
                             (armor_params.min_large_center_distance <= center_distance &&
                              center_distance < armor_params.max_large_center_distance);
 
-  // Angle of light center connection
+  // 灯条中心连线角度
   cv::Point2f diff = light_1.center - light_2.center;
   float angle = std::abs(std::atan(diff.y / diff.x)) / CV_PI * 180;
   bool angle_ok = angle < armor_params.max_angle;
 
   bool is_armor = light_ratio_ok && center_distance_ok && angle_ok;
 
-  // Judge armor type
+  // 判断装甲板类型
   ArmorType type;
   if (is_armor) {
     type = center_distance > armor_params.min_large_center_distance ? ArmorType::LARGE
@@ -227,7 +227,7 @@ cv::Mat Detector::get_all_numbers_image() const noexcept {
 }
 
 void Detector::draw_results(cv::Mat &img) const noexcept {
-  // Draw Lights
+  // 绘制灯条
 
   // for (const auto &light : lights_) {
   //   auto line_color =
@@ -236,7 +236,7 @@ void Detector::draw_results(cv::Mat &img) const noexcept {
   //   cv::line(img, light.top, light.bottom, line_color, 1);
   // }
 
-  // Draw armors
+  // 绘制装甲板
   for (const auto &armor : armors_) {
     // cv::line(img, armor.left_light.top, armor.right_light.bottom, cv::Scalar(0, 255, 0), 1);
     // cv::line(img, armor.left_light.bottom, armor.right_light.top, cv::Scalar(0, 255, 0), 1);
@@ -254,7 +254,7 @@ void Detector::draw_results(cv::Mat &img) const noexcept {
              1,
              cv::LINE_AA);
   }
-  // Show numbers and confidence
+  // 显示数字和置信度
   for (const auto &armor : armors_) {
     std::string text =
       fmt::format("{} {}", armor_type_to_string(armor.type), armor.classfication_result);

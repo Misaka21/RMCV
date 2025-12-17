@@ -1,5 +1,5 @@
 //
-// Detector Factory - Create detector from TOML config
+// 检测器工厂 - 从配置文件创建检测器
 //
 
 #ifndef DETECTOR_FACTORY_HPP
@@ -16,32 +16,20 @@
 
 namespace autoaim::detector {
 
-/**
- * @brief Create a traditional armor detector from TOML config
- *
- * Reads parameters from config/detector.toml:
- * - Detector.traditional.binary_thres
- * - Detector.traditional.light.*
- * - Detector.traditional.armor.*
- * - Detector.traditional.classify.*
- *
- * @param color Enemy color to detect
- * @param use_pca Whether to use PCA corner correction
- * @return std::unique_ptr<Detector> Configured detector instance
- */
+// 从TOML配置文件创建传统装甲板检测器
 inline std::unique_ptr<Detector> create_detector_from_config(
     EnemyColor color,
     bool use_pca = true
 ) {
     auto config = static_param::parse_file("detector.toml");
 
-    // Binary threshold
+    // 二值化阈值
     int binary_thres = static_cast<int>(
         static_param::get_param<int64_t>(config, "Detector.traditional", "binary_thres")
     );
-    if (binary_thres == 0) binary_thres = 100;  // Default
+    if (binary_thres == 0) binary_thres = 100;
 
-    // Light parameters
+    // 灯条参数
     Detector::LightParams light_params;
     light_params.min_ratio = static_param::get_param<double>(
         config, "Detector.traditional.light", "min_ratio");
@@ -53,13 +41,13 @@ inline std::unique_ptr<Detector> create_detector_from_config(
         static_param::get_param<int64_t>(config, "Detector.traditional.light", "color_diff_thresh")
     );
 
-    // Set defaults if not loaded
+    // 默认值
     if (light_params.min_ratio == 0) light_params.min_ratio = 0.08;
     if (light_params.max_ratio == 0) light_params.max_ratio = 0.4;
     if (light_params.max_angle == 0) light_params.max_angle = 40.0;
     if (light_params.color_diff_thresh == 0) light_params.color_diff_thresh = 25;
 
-    // Armor parameters
+    // 装甲板参数
     Detector::ArmorParams armor_params;
     armor_params.min_light_ratio = static_param::get_param<double>(
         config, "Detector.traditional.armor", "min_light_ratio");
@@ -74,7 +62,7 @@ inline std::unique_ptr<Detector> create_detector_from_config(
     armor_params.max_angle = static_param::get_param<double>(
         config, "Detector.traditional.armor", "max_angle");
 
-    // Set defaults if not loaded
+    // 默认值
     if (armor_params.min_light_ratio == 0) armor_params.min_light_ratio = 0.6;
     if (armor_params.min_small_center_distance == 0) armor_params.min_small_center_distance = 0.8;
     if (armor_params.max_small_center_distance == 0) armor_params.max_small_center_distance = 3.2;
@@ -82,10 +70,10 @@ inline std::unique_ptr<Detector> create_detector_from_config(
     if (armor_params.max_large_center_distance == 0) armor_params.max_large_center_distance = 6.4;
     if (armor_params.max_angle == 0) armor_params.max_angle = 35.0;
 
-    // Create detector
+    // 创建检测器
     auto detector = std::make_unique<Detector>(binary_thres, color, light_params, armor_params);
 
-    // Classifier parameters
+    // 分类器参数
     std::string model_path = static_param::get_param<std::string>(
         config, "Detector.traditional.classify", "model_path");
     std::string label_path = static_param::get_param<std::string>(
@@ -93,24 +81,22 @@ inline std::unique_ptr<Detector> create_detector_from_config(
     double classify_threshold = static_param::get_param<double>(
         config, "Detector.traditional.classify", "threshold");
 
-    // Set defaults
+    // 默认值
     if (model_path.empty()) model_path = "lenet.onnx";
     if (label_path.empty()) label_path = "label.txt";
     if (classify_threshold == 0) classify_threshold = 0.8;
 
-    // Full paths
+    // 完整路径
     std::string full_model_path = std::string(ASSET_DIR) + "/" + model_path;
     std::string full_label_path = std::string(ASSET_DIR) + "/" + label_path;
-
-    // Ignore classes (hardcoded for now since TOML array parsing is complex)
     std::vector<std::string> ignore_classes = {"negative"};
 
-    // Create classifier
+    // 创建分类器
     detector->classifier = std::make_unique<NumberClassifier>(
         full_model_path, full_label_path, classify_threshold, ignore_classes
     );
 
-    // Create corner corrector
+    // 创建角点校正器
     if (use_pca) {
         detector->corner_corrector = std::make_unique<LightCornerCorrector>();
     }
@@ -118,9 +104,7 @@ inline std::unique_ptr<Detector> create_detector_from_config(
     return detector;
 }
 
-/**
- * @brief Create a detector with manual parameters (for testing or custom config)
- */
+// 手动参数创建检测器（用于测试或自定义配置）
 inline std::unique_ptr<Detector> create_detector(
     int binary_thres,
     EnemyColor color,

@@ -33,16 +33,16 @@ namespace autoaim::detector {
 // 敌方颜色枚举
 enum class EnemyColor { RED, BLUE, WHITE };
 
-// Armor size, Unit: m
+// 装甲板尺寸，单位：m
 constexpr double SMALL_ARMOR_WIDTH = 133.0 / 1000.0; // 135
 constexpr double SMALL_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
 constexpr double LARGE_ARMOR_WIDTH = 225.0 / 1000.0;
 constexpr double LARGE_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
 
-// 15 degree in rad
+// 15度对应的弧度
 constexpr double FIFTTEN_DEGREE_RAD = 15 * CV_PI / 180;
 
-// Armor type
+// 装甲板类型
 enum class ArmorType { SMALL, LARGE, INVALID };
 inline std::string armor_type_to_string(const ArmorType &type) {
   switch (type) {
@@ -55,7 +55,7 @@ inline std::string armor_type_to_string(const ArmorType &type) {
   }
 }
 
-// Struct used to store the light bar
+// 灯条结构体
 struct Light : public cv::RotatedRect {
   Light() = default;
   explicit Light(const std::vector<cv::Point> &contour)
@@ -82,8 +82,7 @@ struct Light : public cv::RotatedRect {
     axis = top - bottom;
     axis = axis / cv::norm(axis);
 
-    // Calculate the tilt angle
-    // The angle is the angle between the light bar and the horizontal line
+    // 计算倾斜角度（灯条与水平线的夹角）
     tilt_angle = std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y));
     tilt_angle = tilt_angle / CV_PI * 180;
   }
@@ -95,7 +94,7 @@ struct Light : public cv::RotatedRect {
   float tilt_angle;
 };
 
-// Struct used to store the armor
+// 装甲板结构体
 struct Armor {
   static constexpr const int N_LANDMARKS = 6;
   static constexpr const int N_LANDMARKS_2 = N_LANDMARKS * 2;
@@ -110,8 +109,7 @@ struct Armor {
     center = (left_light.center + right_light.center) / 2;
   }
 
-  // Build the points in the object coordinate system, start from bottom left in
-  // clockwise order
+  // 构建物体坐标系中的点，从左下角开始顺时针排列
   template <typename PointType>
   static inline std::vector<PointType> buildObjectPoints(const double &w,
                                                          const double &h) noexcept {
@@ -130,7 +128,7 @@ struct Armor {
     }
   }
 
-  // Landmarks start from bottom left in clockwise order
+  // 获取关键点，从左下角开始顺时针排列
   std::vector<cv::Point2f> landmarks() const {
     if constexpr (N_LANDMARKS == 4) {
       return {left_light.bottom, left_light.top, right_light.top, right_light.bottom};
@@ -144,12 +142,12 @@ struct Armor {
     }
   }
 
-  // Light pairs part
+  // 灯条对
   Light left_light, right_light;
   cv::Point2f center;
   ArmorType type;
 
-  // Number part
+  // 数字识别
   cv::Mat number_img;
   std::string number;
   float confidence;
