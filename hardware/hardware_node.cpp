@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <optional>
 #include <thread>
 
 // Third-party library headers
@@ -82,6 +83,61 @@ camera::CameraConfig load_camera_config(const toml::table& config) {
     return cam_config;
 }
 
+/**
+ * @brief Drain receive queue into IMU buffer
+ */
+void drain_queue_to_buffer(serial::ReceiveQueue& queue,
+                           std::deque<ImuData>& imu_buffer,
+                           size_t max_buffer_size) {
+    while (!queue.empty()) {
+        auto data = queue.front();
+        queue.pop();
+
+        ImuData imu;
+        imu.timestamp = SteadyClock::now();
+        imu.yaw = data.yaw;
+        imu.pitch = data.pitch;
+
+        imu_buffer.push_back(imu);
+        while (imu_buffer.size() > max_buffer_size) {
+            imu_buffer.pop_front();
+        }
+    }
+}
+
+/**
+ * @brief Find closest IMU data to target time
+ * @param imu_buffer IMU data buffer
+ * @param target_time Target timestamp to match
+ * @param max_diff_us Maximum allowed time difference in microseconds
+ * @return Matched IMU data or nullopt if no match within threshold
+ */
+std::optional<ImuData> find_closest_imu(const std::deque<ImuData>& imu_buffer,
+                                        TimePoint target_time,
+                                        int64_t max_diff_us = 50000) {
+    if (imu_buffer.empty()) return std::nullopt;
+
+    auto best = imu_buffer.begin();
+    int64_t min_diff = INT64_MAX;
+
+    for (auto it = imu_buffer.begin(); it != imu_buffer.end(); ++it) {
+        int64_t diff = std::abs(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                it->timestamp - target_time
+            ).count()
+        );
+        if (diff < min_diff) {
+            min_diff = diff;
+            best = it;
+        }
+    }
+
+    if (min_diff <= max_diff_us) {
+        return *best;
+    }
+    return std::nullopt;
+}
+
 // ============================================================================
 // Hardware Node Main Function
 // ============================================================================
@@ -129,11 +185,9 @@ void start_hardware_node() {
         // 3. Setup UMT
         umt::Publisher<SyncFrame> pub("sync_frame");
         auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
-        auto running = umt::BasicObjManager<bool>::find_or_create("hardware_running", true);
 
-        // 通知主线程硬件初始化完成
-        auto hardware_ready = umt::BasicObjManager<bool>::find_or_create("hardware_ready", false);
-        hardware_ready->get() = true;
+        // 通知其他线程硬件节点已开始发布（初始为false，发布后设为true）
+        auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
 
         debug::print(debug::PrintMode::LOG, "HardwareNode", "Hardware node started");
 
@@ -146,7 +200,7 @@ void start_hardware_node() {
         auto fps_time = SteadyClock::now();
 
         // 4. Main loop
-        while (running->get()) {
+        while (true) {
             try {
                 // Capture image
                 cv::Mat& img = cam.capture();
@@ -162,60 +216,23 @@ void start_hardware_node() {
 
                 // 根据是否使用fake serial决定IMU数据来源
                 if (use_fake_serial) {
-                    // 使用配置文件中的固定值
-                    frame.imu.yaw = static_cast<float>(fake_yaw);
-                    frame.imu.pitch = 0.0f;
-                    frame.imu.timestamp = cam_time;
+                    frame.imu = {cam_time, static_cast<float>(fake_yaw), 0.0f, 0.0f};
                     frame.imu_valid = true;
                     sync_count++;
                 } else {
-                    // Drain receive queue into IMU buffer
-                    auto& queue = recv_queue->get();
-                    while (!queue.empty()) {
-                        auto data = queue.front();
-                        queue.pop();
+                    drain_queue_to_buffer(recv_queue->get(), imu_buffer, max_buffer_size);
 
-                        ImuData imu;
-                        imu.timestamp = SteadyClock::now();
-                        imu.yaw = data.yaw;
-                        imu.pitch = data.pitch;
-
-                        imu_buffer.push_back(imu);
-                        while (imu_buffer.size() > max_buffer_size) {
-                            imu_buffer.pop_front();
-                        }
-                    }
-
-                    // Match closest IMU data
-                    if (!imu_buffer.empty()) {
-                        auto target = cam_time - std::chrono::microseconds(delta_t_us);
-
-                        auto best = imu_buffer.begin();
-                        int64_t min_diff = INT64_MAX;
-
-                        for (auto it = imu_buffer.begin(); it != imu_buffer.end(); ++it) {
-                            int64_t diff = std::abs(
-                                std::chrono::duration_cast<std::chrono::microseconds>(
-                                    it->timestamp - target
-                                ).count()
-                            );
-                            if (diff < min_diff) {
-                                min_diff = diff;
-                                best = it;
-                            }
-                        }
-
-                        // Accept if within 50ms
-                        if (min_diff <= 50000) {
-                            frame.imu = *best;
-                            frame.imu_valid = true;
-                            sync_count++;
-                        }
+                    auto target = cam_time - std::chrono::microseconds(delta_t_us);
+                    if (auto imu = find_closest_imu(imu_buffer, target)) {
+                        frame.imu = *imu;
+                        frame.imu_valid = true;
+                        sync_count++;
                     }
                 }
 
                 // Publish
                 pub.push(frame);
+                hardware_running->get() = true;
 
                 // FPS stats
                 fps_count++;
