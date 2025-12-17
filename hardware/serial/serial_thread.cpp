@@ -7,9 +7,9 @@
 #include <fmt/color.h>
 #include <fmt/format.h>
 
-#include "serial_node.hpp"
-#include "protocol/uart_protocol.hpp"
 #include "plugin/debug/logger.hpp"
+#include "protocol/uart_protocol.hpp"
+#include "serial_thread.hpp"
 
 // UMT相关头文件
 #include "umt/umt.hpp"

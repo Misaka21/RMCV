@@ -2,8 +2,8 @@
 // Created by 霍睿 on 25-3-2.
 //
 
-#ifndef SERIAL_NODE_HPP
-#define SERIAL_NODE_HPP
+#ifndef SERIAL_THREAD_HPP
+#define SERIAL_THREAD_HPP
 
 // C++ system headers
 #include <string>
@@ -94,4 +94,4 @@ public:
 
 } // namespace serial
 
-#endif //SERIAL_NODE_HPP
+#endif //SERIAL_THREAD_HPP
