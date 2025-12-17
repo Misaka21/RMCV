@@ -298,6 +298,386 @@ baud_rate = 115200
 timeout_ms = 100
 ```
 
+## 参考项目: rm.cv.fans (SJTU Lmtd)
+
+来自上海交通大学 RoboMaster 战队的视觉系统，以下是值得借鉴的设计模式和最佳实践：
+
+### 设计模式
+
+
+#### 3. 自动微分EKF
+使用Ceres库的Jet类型实现自动微分，无需手动计算雅可比矩阵：
+```cpp
+template<int N_X, int N_Y>
+class AdaptiveEkf {
+    template<class PredictFunc>
+    PredictResult predict(PredictFunc&& func) {
+        ceres::Jet<double, N_X> x_jet[N_X];
+        func(x_jet, result_jet);  // 自动计算导数
+        // 从jet提取雅可比矩阵
+    }
+};
+```
+
+### 参数系统增强
+
+#### 运行时热重载
+```cpp
+// 参数持续监控文件变化，自动重载
+base::parameter_run("config.toml");  // 异步线程持续更新
+
+// 类型安全的点分隔访问
+auto value = base::get_param<double>("launching-mechanism.bullet.resistance-k");
+```
+
+#### TOML层级配置
+```toml
+[launching-mechanism]
+camera-to-barrel-x = 0.0
+
+    [launching-mechanism.bullet]
+    radius = 0.0085
+    mass = 0.041
+```
+
+### 通用工具类
+
+#### FPS统计插件 (待实现)
+```cpp
+// plugin/stats/fps_stats.hpp
+struct FpsStats {
+    std::string module;
+    int count = 0;
+    int secondary = 0;
+    std::string secondary_label;
+    SteadyClock::time_point last_print;
+
+    void tick(float latency = 0, bool secondary_hit = false);
+    void print_if_needed();
+};
+
+// 使用
+FpsStats stats("DetectorNode", "detected");
+stats.tick(latency, !armors.empty());
+```
+
+#### 数学工具
+```cpp
+// 球坐标结构
+struct YpdCoord {
+    double yaw, pitch, dis;
+};
+
+// 常用工具函数
+template<typename T> T sq(const T& x) { return x * x; }
+inline double get_ratio(double x, double y) { return (x < y) ? x / y : y / x; }
+```
+
+### 架构参考
+
+#### 生产者-消费者管道
+```
+Camera Thread → Detector Thread → Predictor Thread → Controller Thread
+     ↓                ↓                 ↓                  ↓
+  SyncFrame    DetectionResult     PredictResult       RobotCmd
+```
+
+#### 无状态组件设计
+每个模块接收共享状态的引用，而不是缓存状态：
+```cpp
+class EnemyModel {
+    EnemyModel(CoordConverter* converter, EnemyState* state);
+    // 方法始终使用当前的converter和state
+};
+```
+
+### 可借鉴的改进方向
+
+| 功能 | 当前RMCV | rm.cv.fans | 改进建议 |
+|------|----------|------------|----------|
+| 参数加载 | 启动时加载一次 | 运行时热重载 | 添加文件监控线程 |
+| 滤波器 | 简单工厂函数 | Factory + Builder | 采用Builder模式 |
+| 类型约束 | SFINAE | C++20 Concepts | 升级到Concepts |
+| EKF雅可比 | 手动计算 | Ceres自动微分 | 考虑引入Ceres |
+| 统计信息 | 各模块重复代码 | 通用FpsStats | 创建plugin/stats |
+| 网页调参 | 无 | webview_info树形结构 | 实现Web UI |
+
+### 网页调参系统 (待实现)
+
+rm.cv.fans使用树形结构管理Web UI数据，通过UMT ObjManager在C++和Python间共享：
+
+#### 数据结构
+```cpp
+// 树形页面结构
+// root (Page)
+// ├── 自瞄-识别器 (Group)
+// │   ├── 帧率 (Entry) = "30"
+// │   └── 延迟 (Entry) = "5.2ms"
+// └── 自瞄-预测器 (Group)
+//     └── 状态 (Entry) = "tracking"
+
+// 创建或获取页面
+auto page = umt::ObjManager<webview_info::Page>::find_or_create("root");
+
+// 添加数据 (树形访问)
+page->sub("自瞄-识别器").sub("帧率").get() = fmt::format("{}", fps);
+page->sub("自瞄-识别器").sub("延迟").get() = fmt::format("{:.1f}ms", latency);
+```
+
+#### 图像流推送
+```cpp
+// 发布图像供Web显示
+umt::Publisher<cv::Mat> img_pub("auto_aim.detector.preview");
+img_pub.push(debug_image);
+
+// CheckBox控制是否推送
+auto checkbox = umt::ObjManager<CheckBox>::find_or_create("auto_aim.detector");
+if (checkbox->checked) {
+    img_pub.push(debug_image);
+}
+```
+
+#### Python Web后端集成
+```python
+# Python通过pybind11访问C++数据
+import ObjManager_Page as page_mgr
+
+# 获取页面数据
+page = page_mgr.find("root")
+detector_fps = page.sub("自瞄-识别器").sub("帧率").get()
+
+# Flask/FastAPI提供HTTP接口
+@app.get("/api/status")
+def get_status():
+    return {"detector_fps": detector_fps}
+```
+
+### Python绑定 (pybind11)
+
+#### 嵌入式模块导出
+```cpp
+// 导出函数到Python
+PYBIND11_EMBEDDED_MODULE(auto_aim_detector, m) {
+    m.def("background_detector_run", background_detector_run,
+          py::arg("model_path"));
+}
+
+// 导出UMT ObjManager
+UMT_EXPORT_OBJMANAGER_ALIAS(MyData, MyData, c) {
+    c.def(pybind11::init<>());
+    c.def_readwrite("value", &MyData::value);
+}
+
+// 导出UMT Message
+UMT_EXPORT_MESSAGE_ALIAS(MyData, MyData, c) {
+    c.def_readwrite("value", &MyData::value);
+}
+```
+
+#### Python调用C++模块
+```python
+# 启动参数热重载线程
+import base_param
+base_param.background_parameter_run("config.toml")
+
+# 启动检测器线程
+import auto_aim_detector
+auto_aim_detector.background_detector_run("model.onnx")
+
+# 订阅检测结果
+import Message_DetectionResult as msg
+sub = msg.Subscriber("detections")
+result = sub.pop_for(1000)  # 1秒超时
+```
+
+### 完整线程架构
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Python 主程序                            │
+│  - Flask/FastAPI Web服务                                    │
+│  - 参数修改接口                                              │
+│  - 图像流WebSocket                                          │
+└─────────────────────────────────────────────────────────────┘
+                          │
+        ┌─────────────────┼─────────────────┐
+        │                 │                 │
+        ▼                 ▼                 ▼
+   参数热重载        Hardware线程       Detector线程
+   (1秒/次)         (相机+串口)        (目标检测)
+        │                 │                 │
+        │            SyncFrame      DetectionResult
+        │                 │                 │
+        └────────UMT Message Channel────────┘
+                          │
+                          ▼
+                  ObjManager<Page>
+                   (Web UI数据)
+```
+
+### 参考项目: CVRM2021 (SJTU)
+
+CVRM2021提供了更完整的Python端Web UI实现，可作为网页调参的参考：
+
+#### Flask Web服务器架构
+```python
+# script/app.py
+from flask import Flask, Response, render_template, request
+import bridge
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return render_template("index.html",
+                           video_names=bridge.get_cvmat_names(),
+                           params_info=bridge.get_range_params_info(),
+                           buttons_info=bridge.get_buttons_info(),
+                           checkboxes_info=bridge.get_checkboxes_info())
+
+@app.route('/video_feed/<name>')
+def video_feed(name):
+    return Response(bridge.get_cvmat_jpegcode(name),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/setting/<param_name>', methods=["GET"])
+def setting(param_name):
+    value = float(request.args["current_value"])
+    bridge.get_range_param(param_name).current_value = value
+    return str(value)
+```
+
+#### MJPEG视频流实现
+```python
+# script/bridge.py
+import Message_cvMat
+import cv2
+
+def get_cvmat_jpegcode(name):
+    """生成MJPEG流"""
+    sub = Message_cvMat.Subscriber(name, 1)  # fifo_size=1只保留最新帧
+    while True:
+        mat = sub.pop()
+        jpeg = cv2.imencode(".jpeg", mat.get_nparray())[1].tobytes()
+        yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n\r\n'
+```
+
+#### Web UI工具类 (C++导出)
+```cpp
+// common/common.cpp
+struct RangeParam {
+    double current_value = 0;
+    double min_value = 0;
+    double max_value = 255;
+    double step_value = 1;
+};
+
+class Button {
+public:
+    bool is_press_once();
+    void set_press_once();
+private:
+    bool is_press = false;
+};
+
+struct CheckBox {
+    bool checked = false;
+};
+
+// cv::Mat到numpy转换
+UMT_EXPORT_MESSAGE_ALIAS(cvMat, cv::Mat, c) {
+    c.def("get_nparray", cvMat2npArray);
+}
+
+UMT_EXPORT_OBJMANAGER_ALIAS(RangeParam, RangeParam, c) {
+    c.def_readwrite("current_value", &RangeParam::current_value);
+    c.def_readwrite("min_value", &RangeParam::min_value);
+    c.def_readwrite("max_value", &RangeParam::max_value);
+    c.def_readwrite("step_value", &RangeParam::step_value);
+}
+```
+
+#### HTML调参界面
+```html
+<!-- templates/index.html -->
+<h2>参数设置</h2>
+{% for name, param in params_info %}
+<li>
+    <span>{{ name }}</span>
+    <input type="range" min="{{ param.min_value }}" max="{{ param.max_value }}"
+           step="{{ param.step_value }}" value="{{ param.current_value }}"
+           onchange="range_onchange('{{ name }}')">
+</li>
+{% endfor %}
+
+<h2>实时视频</h2>
+{% for name in video_names %}
+<li><a href="/video/{{name}}">{{ name }}</a></li>
+{% endfor %}
+
+<script>
+function range_onchange(name) {
+    var value = document.getElementById("range_" + name).value;
+    fetch("/setting/" + name + "?current_value=" + value);
+}
+</script>
+```
+
+#### Python启动脚本模式
+```python
+# 启动命令: ./RMCV --script sensors.py autoaim.py app.py
+
+# sensors.py
+import SensorsIO
+SensorsIO.background_sensors_io_auto_restart(
+    camera_name="main-cam",
+    camera_cfg="config/camera.mfs"
+)
+
+# autoaim.py
+import AutoAim
+AutoAim.background_detection_run("models/armor.onnx")
+AutoAim.background_predict_run()
+
+# app.py (最后启动Flask)
+app.run(host="0.0.0.0", port=3000, threaded=True)
+```
+
+#### 数据流架构
+```
+[SensorsIO线程] → SensorsData消息
+        ↓
+[AutoAim检测线程] → detections消息 (cv::Mat画框图)
+        ↓                    ↓
+[AutoAim预测线程]      [Web Server]
+        ↓                    ↓
+    robot_cmd消息      MJPEG视频流
+        ↓
+[RobotIO线程] → 串口发送
+```
+
+#### 关键文件结构
+```
+script/
+├── app.py              # Flask Web服务器
+├── bridge.py           # C++/Python桥接函数
+├── sensors_io.py       # 传感器启动脚本
+├── autoaim.py          # 自瞄启动脚本
+├── robot_io.py         # 通信启动脚本
+└── templates/
+    ├── index.html      # 参数调试界面
+    └── video.html      # 视频显示页面
+```
+
+### Web UI改进方向
+
+| 功能 | CVRM2021实现 | 可改进方向 |
+|------|-------------|-----------|
+| 视频流 | MJPEG (HTTP) | WebSocket + H.264 更低延迟 |
+| 参数修改 | HTTP GET | WebSocket 双向实时 |
+| 前端框架 | Bootstrap + 原生JS | Vue/React 更好交互 |
+| 数据展示 | 静态列表 | ECharts 实时图表 |
+| 配置持久化 | 无 | 保存到TOML文件 |
+
 ## Git Commit 规范
 
 你是一个专业的 Git 提交信息生成助手。请严格按照以下规范生成 commit 信息。
