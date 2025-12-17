@@ -46,6 +46,43 @@ struct SyncFrame {
 };
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * @brief Load camera configuration from TOML
+ */
+camera::CameraConfig load_camera_config(const toml::table& config) {
+    camera::CameraConfig cam_config;
+
+    // Device selection
+    cam_config.use_camera_sn = static_param::get_param<bool>(config, "Camera", "use_camera_sn");
+    cam_config.camera_sn = static_param::get_param<std::string>(config, "Camera", "camera_sn");
+
+    // MFS config file
+    cam_config.use_mfs_config = static_param::get_param<bool>(config, "Camera", "use_config_from_file");
+    std::string mfs_filename = static_param::get_param<std::string>(config, "Camera", "config_file_path");
+    cam_config.mfs_config_path = std::string(CONFIG_DIR) + "/" + mfs_filename;
+
+    // Runtime parameters
+    cam_config.use_runtime_config = static_param::get_param<bool>(config, "Camera", "use_camera_config");
+
+    // Get Camera.config table and convert to CameraParam
+    auto param_table = static_param::get_param_table(config, "Camera.config");
+    for (const auto& [key, value] : param_table) {
+        std::visit([&](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            // Skip vector types (not supported by camera API)
+            if constexpr (!std::is_same_v<T, std::vector<int64_t>>) {
+                cam_config.runtime_params.emplace_back(key, camera::CameraParam(v));
+            }
+        }, value);
+    }
+
+    return cam_config;
+}
+
+// ============================================================================
 // Hardware Node Main Function
 // ============================================================================
 
@@ -61,6 +98,7 @@ void start_hardware_node() {
         // Load config
         auto config = static_param::parse_file("hardware.toml");
 
+        // Serial config
         std::string port_name = static_param::get_param<std::string>(config, "Serial", "port_name");
         int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
         int64_t delta_t_us = static_param::get_param<int64_t>(config, "TimeSync", "delta_t_us");
@@ -72,8 +110,9 @@ void start_hardware_node() {
         serial::start_serial_communication(port_name, static_cast<int>(baudrate));
         std::this_thread::sleep_for(100ms);  // Wait for serial threads to start
 
-        // 2. Open camera
-        camera::HikCam cam;
+        // 2. Load camera config and open camera
+        camera::CameraConfig cam_config = load_camera_config(config);
+        camera::HikCam cam(cam_config);
         cam.open();
 
         // 3. Setup UMT
@@ -85,7 +124,7 @@ void start_hardware_node() {
 
         // IMU buffer for time matching
         std::deque<ImuData> imu_buffer;
-        const size_t max_buffer_size = 500;
+        constexpr size_t max_buffer_size = 500;
 
         // FPS stats
         int fps_count = 0, sync_count = 0;

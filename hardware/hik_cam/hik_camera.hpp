@@ -1,4 +1,4 @@
-﻿#ifndef HIK_CAMERA_H
+#ifndef HIK_CAMERA_H
 #define HIK_CAMERA_H
 
 // C system headers
@@ -6,9 +6,11 @@
 
 // C++ system headers
 #include <iostream>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 // Third-party library headers
 #include <MvCameraControl.h>
@@ -19,81 +21,116 @@
 // Project headers
 #include "hik_log.hpp"
 #include "plugin/debug/logger.hpp"
-#include "plugin/param/static_config.hpp"
 
 namespace camera {
-    using CAM_INFO = std::variant<bool, int64_t, double, std::string>;
 
-    // 常量定义
-    constexpr int MAX_RETRY_ATTEMPTS = 3;        // 相机连接最大重试次数
-    constexpr int RETRY_DELAY_SECONDS = 5;       // 重试间隔时间(秒)
-    constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;  // 设备信息缓冲区大小
+// ============================================================================
+// Camera Configuration Structure
+// ============================================================================
 
-    class HikCam {
-    public:
-        HikCam();
+/**
+ * @brief Camera parameter type for runtime configuration
+ * Supports bool, int64_t, double, string types
+ */
+using CameraParam = std::variant<bool, int64_t, double, std::string>;
 
-        void open();
+/**
+ * @brief Camera configuration structure
+ * Decouples HikCam from TOML configuration
+ */
+struct CameraConfig {
+    // Device selection
+    bool use_camera_sn = false;
+    std::string camera_sn;
 
-        ~HikCam();
+    // MFS config file
+    bool use_mfs_config = false;
+    std::string mfs_config_path;  // Full path to .mfs file
 
-        auto capture() -> cv::Mat &;
+    // Runtime parameters (from TOML Camera.config section)
+    bool use_runtime_config = false;
+    std::vector<std::pair<std::string, CameraParam>> runtime_params;
+};
 
-        int frame_id;
+// ============================================================================
+// Constants
+// ============================================================================
 
-    private:
-        uint32_t _nRet = MV_OK;
-        void *_handle = NULL;
-        unsigned char *_pDstData = NULL;
-        cv::Mat _srcImage;
-        std::vector<std::pair<std::string, CAM_INFO> > _param_from_toml;
+constexpr int MAX_RETRY_ATTEMPTS = 3;
+constexpr int RETRY_DELAY_SECONDS = 5;
+constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;
 
-        bool _use_camera_sn;
-        std::string _camera_sn;
-        bool _use_mfs_config;
-        std::string _mfs_config_path;
-        bool _use_toml_config;
+// ============================================================================
+// HikCam Class
+// ============================================================================
 
-        bool _print_device_info(MV_CC_DEVICE_INFO *pstMVDevInfo);
+class HikCam {
+public:
+    /**
+     * @brief Construct HikCam with configuration
+     * @param config Camera configuration struct
+     */
+    explicit HikCam(const CameraConfig& config);
 
-        void _check_and_print();
+    /**
+     * @brief Default constructor (uses default config)
+     */
+    HikCam();
 
-        void _set_camera_info_batch();
+    ~HikCam();
 
-        template<typename T>
-        auto _get_camera_param(std::string_view param_name) -> std::optional<T>;
+    /**
+     * @brief Open camera and start grabbing
+     */
+    void open();
 
-        // 重构后的私有方法
-        void _enumerate_devices(MV_CC_DEVICE_INFO_LIST &deviceList);
+    /**
+     * @brief Capture one frame
+     * @return Reference to captured image
+     */
+    auto capture() -> cv::Mat&;
 
-        bool _find_device_by_sn(const std::string &sn, const MV_CC_DEVICE_INFO_LIST &deviceList, int &deviceIndex);
+    int frame_id = 0;
 
-        bool _open_camera_by_sn(const std::string &sn, MV_CC_DEVICE_INFO_LIST &deviceList, int &deviceIndex);
+private:
+    CameraConfig _config;
+    uint32_t _nRet = MV_OK;
+    void* _handle = nullptr;
+    unsigned char* _pDstData = nullptr;
+    cv::Mat _srcImage;
 
-        bool _open_camera_by_index(int deviceIndex, const MV_CC_DEVICE_INFO_LIST &deviceList);
+    bool _print_device_info(MV_CC_DEVICE_INFO* pstMVDevInfo);
+    void _check_and_print();
+    void _set_camera_info_batch();
 
-        void _configure_gige_device(const MV_CC_DEVICE_INFO *deviceInfo);
+    template <typename T>
+    auto _get_camera_param(std::string_view param_name) -> std::optional<T>;
 
-        void _load_camera_config();
+    void _enumerate_devices(MV_CC_DEVICE_INFO_LIST& deviceList);
+    bool _find_device_by_sn(const std::string& sn, const MV_CC_DEVICE_INFO_LIST& deviceList, int& deviceIndex);
+    bool _open_camera_by_sn(const std::string& sn, MV_CC_DEVICE_INFO_LIST& deviceList, int& deviceIndex);
+    bool _open_camera_by_index(int deviceIndex, const MV_CC_DEVICE_INFO_LIST& deviceList);
+    void _configure_gige_device(const MV_CC_DEVICE_INFO* deviceInfo);
+    void _load_camera_config();
 
+    // Set value overloads
+    inline void set_camera_info(const std::string& key, const std::string& value) {
+        HIKCAM_WARN(MV_CC_SetEnumValueByString(this->_handle, key.c_str(), value.c_str()));
+    }
 
-        //setvalue重载
-        //enum
-        inline void set_camera_info(std::string key, std::string value) {
-            HIKCAM_WARN(MV_CC_SetEnumValueByString(this->_handle, key.c_str(), value.c_str()));
-        }
+    inline void set_camera_info(const std::string& key, int64_t value) {
+        HIKCAM_WARN(MV_CC_SetIntValue(this->_handle, key.c_str(), static_cast<int>(value)));
+    }
 
-        inline void set_camera_info(std::string key, int64_t value) {
-            HIKCAM_WARN(MV_CC_SetIntValue(this->_handle, key.c_str(), static_cast<int>(value)));
-        }
+    inline void set_camera_info(const std::string& key, double value) {
+        HIKCAM_WARN(MV_CC_SetFloatValue(this->_handle, key.c_str(), static_cast<float>(value)));
+    }
 
-        inline void set_camera_info(std::string key, double value) {
-            HIKCAM_WARN(MV_CC_SetFloatValue(this->_handle, key.c_str(), static_cast<float>(value)));
-        }
+    inline void set_camera_info(const std::string& key, bool value) {
+        HIKCAM_WARN(MV_CC_SetBoolValue(this->_handle, key.c_str(), value));
+    }
+};
 
-        inline void set_camera_info(std::string key, bool value) {
-            HIKCAM_WARN(MV_CC_SetBoolValue(this->_handle, key.c_str(), value));
-        }
-    };
-} // namespace camera
-#endif // HIK_CAMERA_H
+}  // namespace camera
+
+#endif  // HIK_CAMERA_H
