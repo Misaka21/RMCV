@@ -1,0 +1,111 @@
+# Doxyfile 1.9.x - RMCV 项目文档配置
+
+#---------------------------------------------------------------------------
+# 项目信息
+#---------------------------------------------------------------------------
+PROJECT_NAME           = "RMCV"
+PROJECT_NUMBER         = "2026"
+PROJECT_BRIEF          = "RoboMaster 视觉系统"
+PROJECT_LOGO           =
+OUTPUT_DIRECTORY       = docs
+OUTPUT_LANGUAGE        = Chinese
+
+#---------------------------------------------------------------------------
+# 输入配置
+#---------------------------------------------------------------------------
+INPUT                  = . \
+                         aimer \
+                         hardware \
+                         plugin \
+                         umt
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.cpp \
+                         *.hpp \
+                         *.h \
+                         *.md
+RECURSIVE              = YES
+EXCLUDE                = build \
+                         third_party \
+                         .git
+EXCLUDE_PATTERNS       = */build/* \
+                         */third_party/*
+
+#---------------------------------------------------------------------------
+# 文档提取配置
+#---------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+
+#---------------------------------------------------------------------------
+# 源码浏览
+#---------------------------------------------------------------------------
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+
+#---------------------------------------------------------------------------
+# HTML 输出
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+HTML_COLORSTYLE_HUE    = 220
+HTML_COLORSTYLE_SAT    = 100
+HTML_COLORSTYLE_GAMMA  = 80
+HTML_TIMESTAMP         = YES
+HTML_DYNAMIC_SECTIONS  = YES
+GENERATE_TREEVIEW      = YES
+TREEVIEW_WIDTH         = 250
+
+#---------------------------------------------------------------------------
+# 其他输出格式
+#---------------------------------------------------------------------------
+GENERATE_LATEX         = NO
+GENERATE_RTF           = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+
+#---------------------------------------------------------------------------
+# 图表生成
+#---------------------------------------------------------------------------
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 4
+CLASS_DIAGRAMS         = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+DOT_GRAPH_MAX_NODES    = 100
+
+#---------------------------------------------------------------------------
+# 预处理
+#---------------------------------------------------------------------------
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+SEARCH_INCLUDES        = YES
+
+#---------------------------------------------------------------------------
+# Markdown 支持
+#---------------------------------------------------------------------------
+USE_MDFILE_AS_MAINPAGE = README.md
+MARKDOWN_SUPPORT       = YES
+
+#---------------------------------------------------------------------------
+# 警告配置
+#---------------------------------------------------------------------------
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO

@@ -7,6 +7,9 @@ cmake-build-relwithdebinfo/
 # log files
 log/
 
+# Doxygen generated docs
+docs/
+
 # cache files
 *.cache
 __pycache__
