@@ -105,6 +105,10 @@ Naming conventions (enforced by clang-tidy):
 - Namespaces: `lower_case`
 - Macros/Constants: `UPPER_CASE`
 
+Language conventions:
+- 代码注释使用简单的中文
+- Log输出和debug信息使用英文
+
 ### Testing
 
 Test executable: `test_param` - Validates parameter loading and runtime configuration

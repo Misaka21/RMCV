@@ -18,7 +18,7 @@
 #include "detector_node.hpp"
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
-#include "traditional/detector_factory.hpp"
+#include "detector_factory.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim {
