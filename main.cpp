@@ -12,13 +12,13 @@
 
 // Project headers
 #include "hardware/hik_cam/hik_camera.hpp"
-#include "hardware/serial/serial_node.hpp"
-#include "param/static_config.hpp"
+#include "hardware/serial/serial_thread.hpp"
 #include "param/runtime_parameter.hpp"
+#include "param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
 
 int main() {
-    debug::init_md_file("log.log");
+    debug::init_session();
 
     camera::HikCam camera;
     camera.open();
