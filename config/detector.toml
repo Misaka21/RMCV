@@ -1,15 +1,53 @@
 [Detector]
+    # 检测器类型: "traditional" 或 "yolo"
     type = "traditional"
 
-
-
+# ============================================================================
+# 传统装甲板检测器配置
+# ============================================================================
 [Detector.traditional]
-    threshold = 150
-    classify_model = ""
+    # 是否开启调试模式
+    debug = true
+    # 二值化阈值
+    binary_thres = 100
 
+[Detector.traditional.classify]
+    # 数字分类阈值
+    threshold = 0.8
+    # 分类模型路径 (相对于asset目录)
+    model_path = "lenet.onnx"
+    label_path = "label.txt"
+    # 跳过的类别
+    ignore_classes = ["negative"]
+
+[Detector.traditional.light]
+    # 灯条最小长宽比
+    min_ratio = 0.08
+    # 灯条最大长宽比
+    max_ratio = 0.4
+    # 灯条最大倾斜角度
+    max_angle = 40.0
+    # 灯条颜色差异阈值
+    color_diff_thresh = 25
+
+[Detector.traditional.armor]
+    # 装甲板灯条最小长宽比
+    min_light_ratio = 0.6
+    # 小装甲板最小中心距离长宽比
+    min_small_center_distance = 0.8
+    # 小装甲板最大中心距离长宽比
+    max_small_center_distance = 3.2
+    # 大装甲板最小中心距离长宽比
+    min_large_center_distance = 1.8
+    # 大装甲板最大中心距离长宽比
+    max_large_center_distance = 6.4
+    # 装甲板最大倾斜角度
+    max_angle = 35.0
+
+# ============================================================================
+# YOLO检测器配置 (预留)
+# ============================================================================
 [Detector.yolo]
     detect_model = ""
     classify_model = ""
     min_confidence = 0.5
-
-
