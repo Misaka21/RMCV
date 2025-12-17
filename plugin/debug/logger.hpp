@@ -1,16 +1,13 @@
 #ifndef PLUGIN_DEBUG_LOGGER_HPP
 #define PLUGIN_DEBUG_LOGGER_HPP
 
-// C system headers
-
 // C++ system headers
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <map>
 #include <mutex>
-#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -21,7 +18,7 @@
 #include <fmt/color.h>
 #include <fmt/core.h>
 
-//总有傻逼宏定义污染资源
+// Avoid macro pollution
 #ifdef INFO
 #undef INFO
 #endif
@@ -39,202 +36,225 @@
 #endif
 
 namespace debug {
-	namespace fmt = ::fmt;
 
-	enum class PrintMode {
-		LOG,
-		INFO,
-		DEBUG,
-		WARNING,
-		ERROR,
-		SILENT
-	};
+namespace fmt = ::fmt;
+namespace fs = std::filesystem;
 
-	static const Eigen::IOFormat kLongCsvFmt(
-		Eigen::FullPrecision, Eigen::FullPrecision, ", ", ";\n", "[", "]", "\n{", "}");
-	static const std::unordered_map<PrintMode, fmt::color> PRINT_COLOR = {
-		{PrintMode::LOG, fmt::color::green},
-		{PrintMode::INFO, fmt::color::white},
-		{PrintMode::WARNING, fmt::color::yellow},
-		{PrintMode::ERROR, fmt::color::red},
-		{PrintMode::DEBUG, fmt::color::cyan},
-	};
-	static const std::unordered_map<PrintMode, std::string> PRINT_PREFIX = {
-		{PrintMode::LOG, "[LOGG]"},
-		{PrintMode::INFO, "[INFO]"},
-		{PrintMode::WARNING, "[WARN]"},
-		{PrintMode::ERROR, "[EROR]"},
-		{PrintMode::DEBUG, "[DBUG]"}
-	};
-	//	static const std::unordered_map<PrintMode, std::string> HTML_COLOR = {
-	//			{PrintMode::LOG, "green"},
-	//			{PrintMode::INFO, ""},
-	//			{PrintMode::DEBUG, "blue"},
-	//			{PrintMode::WARNING, "orange"},
-	//			{PrintMode::ERROR, "red"},
-	//	};
-	static PrintMode current_min_mode = PrintMode::LOG;
-	static std::set<std::string> whitelist_nodes;
-	static std::set<std::string> blacklist_nodes;
-	static std::ofstream md_file;
-	static std::mutex file_mutex;
+enum class PrintMode {
+    LOG,
+    INFO,
+    DEBUG,
+    WARNING,
+    ERROR,
+    SILENT
+};
 
+// Eigen format for logging
+inline const Eigen::IOFormat kLongCsvFmt(
+    Eigen::FullPrecision, Eigen::FullPrecision, ", ", ";\n", "[", "]", "\n{", "}");
 
-	inline void add_whitenode(const std::string &node) {
-		whitelist_nodes.insert(node);
-	}
+inline const std::unordered_map<PrintMode, fmt::color> PRINT_COLOR = {
+    {PrintMode::LOG, fmt::color::green},
+    {PrintMode::INFO, fmt::color::white},
+    {PrintMode::WARNING, fmt::color::yellow},
+    {PrintMode::ERROR, fmt::color::red},
+    {PrintMode::DEBUG, fmt::color::cyan},
+};
 
-	inline void add_blacknode(const std::string &node) {
-		blacklist_nodes.insert(node);
-	}
+inline const std::unordered_map<PrintMode, std::string> PRINT_PREFIX = {
+    {PrintMode::LOG, "[LOG ]"},
+    {PrintMode::INFO, "[INFO]"},
+    {PrintMode::WARNING, "[WARN]"},
+    {PrintMode::ERROR, "[ERR ]"},
+    {PrintMode::DEBUG, "[DBG ]"}
+};
 
-	template<typename T>
-	inline auto stream_to_str(T &x) -> std::string {
-		std::stringstream buffer;
-		buffer << x;
-		return buffer.str();
-	}
+/**
+ * @brief Logger state singleton - manages all logger state with thread safety
+ */
+class LoggerState {
+public:
+    static LoggerState& instance() {
+        static LoggerState inst;
+        return inst;
+    }
 
-	template<typename T>
-	inline auto eigen_to_str(const T &x) -> std::string {
-		std::ostringstream oss;
-		oss << x.format(kLongCsvFmt);
-		return oss.str();
-	}
+    // Session management
+    std::string session_path;
+    std::string session_timestamp;
 
-	template<typename T>
-	inline auto vec_to_str(const std::vector<T> &vec) -> std::string {
-		std::string str = "[";
-		for (const auto &ele: vec) {
-			str += fmt::format("{}", ele);
-			if (&ele != &vec.back()) {
-				str += ", ";
-			}
-		}
-		str += "]";
-		return str;
-	}
+    // Log file
+    std::ofstream log_file;
+    std::mutex file_mutex;
 
-	template<typename K, typename V>
-	inline auto map_to_str(const std::map<K, V> &m) -> std::string {
-		std::string str = "{";
-		for (auto it = m.begin(); it != m.end(); ++it) {
-			const auto &key = it->first;
-			const auto &data = it->second;
+    // Filter settings
+    PrintMode min_mode = PrintMode::LOG;
 
-			// 格式化每个元素
-			str += fmt::format("{}: {{{},{}}}", key, data.val, data.updated);
+private:
+    LoggerState() = default;
+    ~LoggerState() {
+        if (log_file.is_open()) {
+            log_file.close();
+        }
+    }
+    LoggerState(const LoggerState&) = delete;
+    LoggerState& operator=(const LoggerState&) = delete;
+};
 
-			// 添加逗号，除了最后一个元素
-			if (std::next(it) != m.end()) {
-				str += ", ";
-			}
-		}
-		str += "}";
-		return str;
-	}
+/**
+ * @brief Get current time string with microsecond precision
+ */
+inline std::string get_current_time_string() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()) % 1000;
 
-	inline std::string get_current_time_string() {
-		auto now = std::chrono::system_clock::now();
-		auto time_t_now = std::chrono::system_clock::to_time_t(now);
-		auto microseconds =
-				std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()) % 1000000 % 1000;
-		auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-
-		// 使用 fmt::format 格式化输出时间，包括毫秒和微秒
-		return fmt::format("{:%H:%M:%S}.{:03},{:03}", *std::localtime(&time_t_now), milliseconds.count(),
-		                   microseconds.count());
-	}
-
-	inline void init_md_file(const std::string &filename) {
-		// Get current time for filename (without microseconds)
-		auto now = std::chrono::system_clock::now();
-		auto time_t_now = std::chrono::system_clock::to_time_t(now);
-		std::string timestamp = fmt::format("{:%Y-%m-%d_%H-%M-%S}", *std::localtime(&time_t_now));
-
-		// Create filename with timestamp
-		std::string timestamped_filename = fmt::format("{}_{}", timestamp, filename);
-
-		md_file.open(std::string(LOG_DIR) + "/" + timestamped_filename, std::ios::app);
-		if (md_file.is_open()) {
-			std::lock_guard<std::mutex> lock(file_mutex);
-			std::string current_time = get_current_time_string();
-			md_file << fmt::format("\n## Run started at {}\n", current_time);
-			md_file.flush();
-		}
-	}
-
-	inline void close_md_file() {
-		if (md_file.is_open()) {
-			md_file.close();
-		}
-	}
-
-	template<typename... T>
-	inline void print(
-		const PrintMode &mode,
-		const std::string &node_name,
-		const std::string &content,
-		T &&... args) {
-		if (mode >= current_min_mode &&
-		    (whitelist_nodes.empty() || whitelist_nodes.find(node_name) != whitelist_nodes.end()) &&
-		    (blacklist_nodes.find(node_name) == blacklist_nodes.end())) {
-			std::string timestamp = get_current_time_string();
-			std::string formatted_content;
-			try {
-				if constexpr (sizeof...(args) > 0) {
-					formatted_content = fmt::format(fmt::runtime(content), std::forward<T>(args)...);
-				} else {
-					formatted_content = content;
-				}
-			} catch (const fmt::format_error &e) {
-				formatted_content = content + " [格式化错误: " + e.what() + "]";
-			}
-
-			std::string full_message = fmt::format("{} {} {}: {}",
-			                                       timestamp, PRINT_PREFIX.at(mode),
-			                                       (node_name.empty() ? "" : "@" + node_name),
-			                                       formatted_content);
-
-			fmt::print(fmt::fg(PRINT_COLOR.at(mode)), "{}\n", full_message);
-
-			if (md_file.is_open()) {
-				std::lock_guard<std::mutex> lock(file_mutex);
-				//////////////
-				md_file << fmt::format("{} {} {}: {}\n",
-				                       timestamp, PRINT_PREFIX.at(mode),
-				                       (node_name.empty() ? "" : "@" + node_name),
-				                       formatted_content);
-				////////////
-				//md_file << fmt::format("- **{}** <font color=\"{}\">{} {}: {}</font>\n",
-				//                       timestamp, HTML_COLOR.at(mode),
-				//                       PRINT_PREFIX.at(mode),
-				//                       (node_name.empty() ? "" : "@" + node_name),
-				//                       formatted_content);
-				md_file.flush();
-			}
-		}
-	}
-
-	inline auto string_to_mode(const std::string &mode_str) -> PrintMode {
-		std::string lower_str = mode_str;
-		std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(), ::tolower);
-		if (lower_str == "log") return PrintMode::LOG;
-		if (lower_str == "info") return PrintMode::INFO;
-		if (lower_str == "debug") return PrintMode::DEBUG;
-		if (lower_str == "warning") return PrintMode::WARNING;
-		if (lower_str == "error") return PrintMode::ERROR;
-		return PrintMode::SILENT;
-	}
-
-	template<typename... T>
-	inline void print(
-		const std::string &mode_str,
-		const std::string &node_name,
-		const std::string &content,
-		T &&... args) {
-		print(string_to_mode(mode_str), node_name, content, std::forward<T>(args)...);
-	}
+    return fmt::format("{:%H:%M:%S}.{:03},{:03}", *std::localtime(&time_t_now), ms.count(), us.count());
 }
 
-#endif //PLUGIN_DEBUG_LOGGER_HPP
+/**
+ * @brief Get timestamp string for filenames
+ */
+inline std::string get_timestamp_for_filename() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    return fmt::format("{:%Y-%m-%d_%H-%M-%S}", *std::localtime(&time_t_now));
+}
+
+/**
+ * @brief Initialize a new session with timestamped directory
+ * @param base_dir Base directory for sessions (default: LOG_DIR)
+ * @return Session directory path
+ *
+ * Directory structure: {base_dir}/{timestamp}/
+ *   - run.log: log file
+ *   - *.avi: video recordings
+ */
+inline std::string init_session(const std::string& base_dir = LOG_DIR) {
+    auto& state = LoggerState::instance();
+    std::lock_guard<std::mutex> lock(state.file_mutex);
+
+    if (state.log_file.is_open()) {
+        state.log_file.close();
+    }
+
+    state.session_timestamp = get_timestamp_for_filename();
+    state.session_path = base_dir + "/" + state.session_timestamp;
+
+    fs::create_directories(state.session_path);
+
+    std::string log_path = state.session_path + "/run.log";
+    state.log_file.open(log_path, std::ios::app);
+
+    if (state.log_file.is_open()) {
+        state.log_file << fmt::format("=== Session started at {} ===\n", get_current_time_string());
+        state.log_file.flush();
+    }
+
+    return state.session_path;
+}
+
+/**
+ * @brief Get current session path for video recording
+ */
+inline std::string get_session_path() {
+    return LoggerState::instance().session_path;
+}
+
+inline void close_log_file() {
+    auto& state = LoggerState::instance();
+    std::lock_guard<std::mutex> lock(state.file_mutex);
+    if (state.log_file.is_open()) {
+        state.log_file.close();
+    }
+}
+
+inline void set_min_level(PrintMode mode) {
+    LoggerState::instance().min_mode = mode;
+}
+
+// Utility functions
+template<typename T>
+inline auto stream_to_str(T& x) -> std::string {
+    std::stringstream buffer;
+    buffer << x;
+    return buffer.str();
+}
+
+template<typename T>
+inline auto eigen_to_str(const T& x) -> std::string {
+    std::ostringstream oss;
+    oss << x.format(kLongCsvFmt);
+    return oss.str();
+}
+
+template<typename T>
+inline auto vec_to_str(const std::vector<T>& vec) -> std::string {
+    std::string str = "[";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        str += fmt::format("{}", vec[i]);
+        if (i < vec.size() - 1) str += ", ";
+    }
+    str += "]";
+    return str;
+}
+
+inline auto string_to_mode(const std::string& mode_str) -> PrintMode {
+    std::string lower_str = mode_str;
+    std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(), ::tolower);
+    if (lower_str == "log") return PrintMode::LOG;
+    if (lower_str == "info") return PrintMode::INFO;
+    if (lower_str == "debug") return PrintMode::DEBUG;
+    if (lower_str == "warning" || lower_str == "warn") return PrintMode::WARNING;
+    if (lower_str == "error" || lower_str == "err") return PrintMode::ERROR;
+    return PrintMode::SILENT;
+}
+
+/**
+ * @brief Print log message
+ */
+template<typename... T>
+inline void print(const PrintMode& mode, const std::string& node_name,
+                  const std::string& content, T&&... args) {
+    auto& state = LoggerState::instance();
+
+    if (mode < state.min_mode) return;
+
+    std::string timestamp = get_current_time_string();
+    std::string formatted_content;
+    try {
+        if constexpr (sizeof...(args) > 0) {
+            formatted_content = fmt::format(fmt::runtime(content), std::forward<T>(args)...);
+        } else {
+            formatted_content = content;
+        }
+    } catch (const fmt::format_error& e) {
+        formatted_content = content + " [format error: " + e.what() + "]";
+    }
+
+    std::string node_str = node_name.empty() ? "" : "@" + node_name;
+    std::string full_message = fmt::format("{} {} {}: {}",
+                                           timestamp, PRINT_PREFIX.at(mode),
+                                           node_str, formatted_content);
+
+    fmt::print(fmt::fg(PRINT_COLOR.at(mode)), "{}\n", full_message);
+
+    {
+        std::lock_guard<std::mutex> lock(state.file_mutex);
+        if (state.log_file.is_open()) {
+            state.log_file << full_message << "\n";
+            state.log_file.flush();
+        }
+    }
+}
+
+template<typename... T>
+inline void print(const std::string& mode_str, const std::string& node_name,
+                  const std::string& content, T&&... args) {
+    print(string_to_mode(mode_str), node_name, content, std::forward<T>(args)...);
+}
+
+} // namespace debug
+
+#endif // PLUGIN_DEBUG_LOGGER_HPP
