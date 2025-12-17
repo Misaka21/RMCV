@@ -60,14 +60,14 @@ public:
 
   std::vector<Armor> detect(const cv::Mat &input) noexcept;
 
-  cv::Mat preprocessImage(const cv::Mat &input) noexcept;
-  std::vector<Light> findLights(const cv::Mat &rbg_img,
+  cv::Mat preprocess_image(const cv::Mat &input) noexcept;
+  std::vector<Light> find_lights(const cv::Mat &rbg_img,
                                 const cv::Mat &binary_img) noexcept;
-  std::vector<Armor> matchLights(const std::vector<Light> &lights) noexcept;
+  std::vector<Armor> match_lights(const std::vector<Light> &lights) noexcept;
 
   // For debug usage
-  cv::Mat getAllNumbersImage() const noexcept;
-  void drawResults(cv::Mat &img) const noexcept;
+  cv::Mat get_all_numbers_image() const noexcept;
+  void draw_results(cv::Mat &img) const noexcept;
 
   // Parameters
   int binary_thres;
@@ -82,9 +82,9 @@ public:
   cv::Mat binary_img;
 
 private:
-  bool isLight(const Light &possible_light) noexcept;
-  bool containLight(const int i,const int j,const std::vector<Light> &lights) noexcept;
-  ArmorType isArmor(const Light &light_1, const Light &light_2) noexcept;
+  bool is_light(const Light &possible_light) noexcept;
+  bool contain_light(const int i,const int j,const std::vector<Light> &lights) noexcept;
+  ArmorType is_armor(const Light &light_1, const Light &light_2) noexcept;
 
   cv::Mat gray_img_;
 

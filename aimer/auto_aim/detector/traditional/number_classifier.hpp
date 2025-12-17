@@ -40,13 +40,13 @@ public:
                    const std::vector<std::string> &ignore_classes = {});
 
   // Extract the roi image of number from the src
-  cv::Mat extractNumber(const cv::Mat &src, const Armor &armor) const noexcept;
+  cv::Mat extract_number(const cv::Mat &src, const Armor &armor) const noexcept;
 
   // Classify the number of the armor
   void classify(const cv::Mat &src, Armor &armor) noexcept;
 
   // Erase the ignore classes
-  void eraseIgnoreClasses(std::vector<Armor> &armors) noexcept;
+  void erase_ignore_classes(std::vector<Armor> &armors) noexcept;
 
   double threshold;
 

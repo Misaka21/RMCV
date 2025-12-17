@@ -29,7 +29,7 @@ namespace autoaim::detector {
  * @param use_pca Whether to use PCA corner correction
  * @return std::unique_ptr<Detector> Configured detector instance
  */
-inline std::unique_ptr<Detector> createDetectorFromConfig(
+inline std::unique_ptr<Detector> create_detector_from_config(
     EnemyColor color,
     bool use_pca = true
 ) {
@@ -121,7 +121,7 @@ inline std::unique_ptr<Detector> createDetectorFromConfig(
 /**
  * @brief Create a detector with manual parameters (for testing or custom config)
  */
-inline std::unique_ptr<Detector> createDetector(
+inline std::unique_ptr<Detector> create_detector(
     int binary_thres,
     EnemyColor color,
     const Detector::LightParams& light_params,

@@ -54,7 +54,7 @@ NumberClassifier::NumberClassifier(const std::string &model_path,
   }
 }
 
-cv::Mat NumberClassifier::extractNumber(const cv::Mat &src, const Armor &armor) const noexcept {
+cv::Mat NumberClassifier::extract_number(const cv::Mat &src, const Armor &armor) const noexcept {
   // Light length in image
   static const int light_length = 12;
   // Image size after warp
@@ -120,7 +120,7 @@ void NumberClassifier::classify(const cv::Mat &src, Armor &armor) noexcept {
   armor.classfication_result = fmt::format("{}:{:.1f}%", armor.number, armor.confidence * 100.0);
 }
 
-void NumberClassifier::eraseIgnoreClasses(std::vector<Armor> &armors) noexcept {
+void NumberClassifier::erase_ignore_classes(std::vector<Armor> &armors) noexcept {
   armors.erase(
     std::remove_if(armors.begin(),
                    armors.end(),

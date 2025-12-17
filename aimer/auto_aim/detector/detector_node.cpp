@@ -45,7 +45,7 @@ void start_detector_node(detector::EnemyColor color) {
     try {
         // 1. Create detector from config
         g_detect_color = color;
-        g_detector = detector::createDetectorFromConfig(color, true);
+        g_detector = detector::create_detector_from_config(color, true);
         debug::print(debug::PrintMode::LOG, "DetectorNode", "Detector created from config");
 
         // 2. Setup UMT
@@ -106,7 +106,7 @@ void start_detector_node(detector::EnemyColor color) {
                 // Debug visualization
                 if (debug_mode->get()) {
                     cv::Mat debug_img = frame.image.clone();
-                    g_detector->drawResults(debug_img);
+                    g_detector->draw_results(debug_img);
 
                     // Draw stats
                     std::string info = fmt::format("Armors: {} Latency: {:.1f}ms",

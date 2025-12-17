@@ -19,40 +19,40 @@
 
 namespace autoaim::detector {
 
-void LightCornerCorrector::correctCorners(Armor &armor, const cv::Mat &gray_img) {
+void LightCornerCorrector::correct_corners(Armor &armor, const cv::Mat &gray_img) {
   // If the width of the light is too small, the correction is not performed
   constexpr int PASS_OPTIMIZE_WIDTH = 3;
 
   if (armor.left_light.width > PASS_OPTIMIZE_WIDTH) {
     // Find the symmetry axis of the light
-    SymmetryAxis left_axis = findSymmetryAxis(gray_img, armor.left_light);
+    SymmetryAxis left_axis = find_symmetry_axis(gray_img, armor.left_light);
     armor.left_light.center = left_axis.centroid;
     armor.left_light.axis = left_axis.direction;
     // Find the corner of the light
-    if (cv::Point2f t = findCorner(gray_img, armor.left_light, left_axis, "top"); t.x > 0) {
+    if (cv::Point2f t = find_corner(gray_img, armor.left_light, left_axis, "top"); t.x > 0) {
       armor.left_light.top = t;
     }
-    if (cv::Point2f b = findCorner(gray_img, armor.left_light, left_axis, "bottom"); b.x > 0) {
+    if (cv::Point2f b = find_corner(gray_img, armor.left_light, left_axis, "bottom"); b.x > 0) {
       armor.left_light.bottom = b;
     }
   }
 
   if (armor.right_light.width > PASS_OPTIMIZE_WIDTH) {
     // Find the symmetry axis of the light
-    SymmetryAxis right_axis = findSymmetryAxis(gray_img, armor.right_light);
+    SymmetryAxis right_axis = find_symmetry_axis(gray_img, armor.right_light);
     armor.right_light.center = right_axis.centroid;
     armor.right_light.axis = right_axis.direction;
     // Find the corner of the light
-    if (cv::Point2f t = findCorner(gray_img, armor.right_light, right_axis, "top"); t.x > 0) {
+    if (cv::Point2f t = find_corner(gray_img, armor.right_light, right_axis, "top"); t.x > 0) {
       armor.right_light.top = t;
     }
-    if (cv::Point2f b = findCorner(gray_img, armor.right_light, right_axis, "bottom"); b.x > 0) {
+    if (cv::Point2f b = find_corner(gray_img, armor.right_light, right_axis, "bottom"); b.x > 0) {
       armor.right_light.bottom = b;
     }
   }
 }
 
-SymmetryAxis LightCornerCorrector::findSymmetryAxis(const cv::Mat &gray_img, const Light &light) {
+SymmetryAxis LightCornerCorrector::find_symmetry_axis(const cv::Mat &gray_img, const Light &light) {
   constexpr float MAX_BRIGHTNESS = 25;
   constexpr float SCALE = 0.07;
 
@@ -110,7 +110,7 @@ SymmetryAxis LightCornerCorrector::findSymmetryAxis(const cv::Mat &gray_img, con
   return SymmetryAxis{.centroid = centroid, .direction = axis, .mean_val = mean_val};
 }
 
-cv::Point2f LightCornerCorrector::findCorner(const cv::Mat &gray_img,
+cv::Point2f LightCornerCorrector::find_corner(const cv::Mat &gray_img,
                                              const Light &light,
                                              const SymmetryAxis &axis,
                                              std::string order) {

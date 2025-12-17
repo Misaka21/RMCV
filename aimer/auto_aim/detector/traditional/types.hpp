@@ -44,7 +44,7 @@ constexpr double FIFTTEN_DEGREE_RAD = 15 * CV_PI / 180;
 
 // Armor type
 enum class ArmorType { SMALL, LARGE, INVALID };
-inline std::string armorTypeToString(const ArmorType &type) {
+inline std::string armor_type_to_string(const ArmorType &type) {
   switch (type) {
     case ArmorType::SMALL:
       return "small";
