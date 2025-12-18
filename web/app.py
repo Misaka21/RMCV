@@ -36,30 +36,7 @@ def get_dashboard_data():
             return DASHBOARD_MODULE.all()
         except Exception as e:
             print(f"[WebServer] Error reading dashboard: {e}")
-    return get_mock_data()
-
-
-def get_mock_data():
-    """Mock data for testing"""
-    import math
-    t = time.time()
-    return {
-        "detector.latency_ms": round(5.2 + math.sin(t) * 2, 2),
-        "detector.armor_count": int(abs(math.sin(t * 0.5)) * 3),
-        "detector.color": "RED" if int(t) % 10 < 5 else "BLUE",
-        "detector.fps": 200 + int(math.sin(t) * 10),
-        "detector.target.number": "3",
-        "detector.target.center_x": round(720 + math.sin(t) * 100, 1),
-        "detector.target.center_y": round(540 + math.cos(t) * 50, 1),
-        "hardware.fps": 200 + int(math.cos(t) * 5),
-        "imu.yaw": round(math.sin(t * 0.3) * 45, 2),
-        "imu.pitch": round(math.cos(t * 0.2) * 15, 2),
-        "imu.roll": round(math.sin(t * 0.1) * 5, 2),
-        "serial.bullet_speed": round(15.0 + math.sin(t) * 0.5, 2),
-        "serial.aim_mode": 1,
-        "serial.allow_fire": True,
-        "serial.valid": False,
-    }
+    return {}
 
 
 @app.route('/')
