@@ -52,7 +52,18 @@ add_subdirectory(hardware)
 add_subdirectory(aimer/auto_aim/detector)
 
 add_executable(RMCV2026 main.cpp)
-target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector)
+target_link_libraries(RMCV2026
+    ${OpenCV_LIBS}
+    fmt::fmt
+    # 使用 whole-archive 确保 pybind11 嵌入模块被链接
+    -Wl,--whole-archive
+    plugin
+    -Wl,--no-whole-archive
+    hardware
+    detector
+    pybind11::embed
+    ${Python_LIBRARIES}
+)
 
 add_executable(test_param test/test_param.cpp)
 target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin)
