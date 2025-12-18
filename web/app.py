@@ -58,7 +58,7 @@ def stream():
         while True:
             data = get_dashboard_data()
             yield f"data: {json.dumps(data)}\n\n"
-            time.sleep(0.1)  # 10Hz
+            time.sleep(0.01)  # 100Hz
 
     return Response(generate(), mimetype='text/event-stream')
 
