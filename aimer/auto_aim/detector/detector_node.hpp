@@ -58,8 +58,8 @@ inline void draw_debug_visualization(const cv::Mat& image,
     cv::waitKey(1);
 }
 
-// 启动检测节点
-void start_detector_node(detector::EnemyColor color);
+// 启动检测节点 (颜色从串口获取)
+void start_detector_node();
 
 // 运行时设置敌方颜色
 void set_enemy_color(detector::EnemyColor color);

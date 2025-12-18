@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
 
     // 检测器
     fmt::print(fmt::fg(fmt::color::gold), "===================== Loading Detector =====================\n");
-    std::thread([]() { autoaim::start_detector_node(autoaim::detector::EnemyColor::RED); }).detach();
+    std::thread([]() { autoaim::start_detector_node(); }).detach();
 
     fmt::print(fmt::fg(fmt::color::green), "====================== System Ready ========================\n");
 

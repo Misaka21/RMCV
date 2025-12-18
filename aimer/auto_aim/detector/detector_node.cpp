@@ -3,7 +3,6 @@
 // 订阅sync_frame，运行装甲板检测，发布检测结果
 //
 
-#include <atomic>
 #include <memory>
 
 #include <fmt/format.h>
@@ -21,10 +20,8 @@ using SteadyClock = std::chrono::steady_clock;
 
 // Global detector instance
 static std::unique_ptr<detector::Detector> g_detector = nullptr;
-static std::atomic<detector::EnemyColor> g_detect_color{detector::EnemyColor::RED};
 
 void set_enemy_color(detector::EnemyColor color) {
-    g_detect_color = color;
     if (g_detector) {
         g_detector->detect_color = color;
     }
@@ -32,13 +29,12 @@ void set_enemy_color(detector::EnemyColor color) {
                  color == detector::EnemyColor::RED ? "RED" : "BLUE");
 }
 
-void start_detector_node(detector::EnemyColor color) {
+void start_detector_node() {
     debug::print(debug::PrintMode::INFO, "DetectorNode", "Starting detector node...");
 
     try {
-        // 1. Create detector from config
-        g_detect_color = color;
-        g_detector = detector::create_detector_from_config(color);
+        // 1. Create detector (初始颜色会从串口获取)
+        g_detector = detector::create_detector_from_config(detector::EnemyColor::RED);
         debug::print(debug::PrintMode::LOG, "DetectorNode", "Detector created from config");
 
         // 2. Setup UMT
@@ -65,14 +61,22 @@ void start_detector_node(detector::EnemyColor color) {
                     continue;
                 }
 
-                // 更新颜色：优先使用串口传来的颜色，否则用全局设置
-                detector::EnemyColor current_color = g_detect_color;
-                if (frame.serial_valid && frame.serial_data.enemy_color != 0) {
-                    // 串口颜色: 1=红, 2=蓝
-                    current_color = (frame.serial_data.enemy_color == 1)
-                        ? detector::EnemyColor::RED
-                        : detector::EnemyColor::BLUE;
+                // 必须有有效串口数据才处理
+                if (!frame.serial_valid) {
+                    debug::print(debug::PrintMode::WARNING, "DetectorNode", "No valid serial data, skipping frame");
+                    dashboard::set("serial.valid", false);
+                    continue;
                 }
+
+                // 颜色必须从串口获取
+                if (frame.serial_data.enemy_color == 0) {
+                    debug::print(debug::PrintMode::WARNING, "DetectorNode", "Invalid enemy color from serial");
+                    continue;
+                }
+                detector::EnemyColor current_color = (frame.serial_data.enemy_color == 1)
+                    ? detector::EnemyColor::RED
+                    : detector::EnemyColor::BLUE;
+
                 if (g_detector->detect_color != current_color) {
                     g_detector->detect_color = current_color;
                 }
