@@ -29,18 +29,33 @@ struct VisionData_t {
     VisionData_t() : cmd_id(0x01), yaw(0.0f), pitch(0.0f), distance(0.0f), target_id(0), is_found(0) {}
 };
 
-// 接收到的串口数据结构体
+// 接收到的串口数据结构体 - 从电控接收
 struct SerialReceiveData {
-    uint8_t  cmd_id;      // 数据类型
-    float    yaw;         // 偏航角
-    float    pitch;       // 俯仰角
-    float    distance;    // 距离
-    uint8_t  target_id;   // 目标ID
-    uint8_t  is_found;    // 是否发现目标
-    uint32_t timestamp;   // 时间戳
+    // IMU 姿态数据
+    float yaw;            // 偏航角 (°)
+    float pitch;          // 俯仰角 (°)
+    float roll;           // 横滚角 (°)
 
-    SerialReceiveData() : cmd_id(0), yaw(0.0f), pitch(0.0f), distance(0.0f),
-                         target_id(0), is_found(0), timestamp(0) {}
+    // 机器人状态
+    uint8_t robot_id;     // 机器人ID (1-7红方, 101-107蓝方)
+    uint8_t enemy_color;  // 敌方颜色 (0=未知, 1=红, 2=蓝)
+
+    // 射击参数
+    float bullet_speed;   // 弹速 (m/s)
+
+    // 模式控制
+    uint8_t aim_mode;     // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
+    bool allow_fire;      // 是否允许射击
+
+    // 时间戳
+    uint32_t timestamp;   // 下位机时间戳 (ms)
+
+    SerialReceiveData()
+        : yaw(0.0f), pitch(0.0f), roll(0.0f)
+        , robot_id(0), enemy_color(0)
+        , bullet_speed(15.0f)
+        , aim_mode(0), allow_fire(false)
+        , timestamp(0) {}
 };
 
 // 接收数据队列类型别名 - 使用STL queue

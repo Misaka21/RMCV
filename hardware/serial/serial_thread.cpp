@@ -200,20 +200,19 @@ bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& pac
 
 bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceiveData& data) {
     try {
-        // 从数据包提取数据
-        float cmd_id_float, yaw, pitch, distance;
-        if (packet.unload_data(cmd_id_float, 1)) {
-            data.cmd_id = static_cast<uint8_t>(cmd_id_float);
-        }
-        if (packet.unload_data(yaw, 5)) {
+        // 从数据包提取数据 (格式需与电控约定)
+        // 目前简单解析: [1]yaw [5]pitch [9]roll
+        float yaw, pitch, roll;
+        if (packet.unload_data(yaw, 1)) {
             data.yaw = yaw;
         }
-        if (packet.unload_data(pitch, 9)) {
+        if (packet.unload_data(pitch, 5)) {
             data.pitch = pitch;
         }
-        if (packet.unload_data(distance, 13)) {
-            data.distance = distance;
+        if (packet.unload_data(roll, 9)) {
+            data.roll = roll;
         }
+        // TODO: 其他字段需要和电控约定后添加
 
         return true;
     } catch (const std::exception& e) {
