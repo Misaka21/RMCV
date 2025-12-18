@@ -10,6 +10,8 @@
     debug = true
     # 二值化阈值
     binary_thres = 100
+    # 是否开启灯条角点PCA校正
+    use_pca = true
 
 [Detector.traditional.classify]
     # 数字分类阈值
@@ -38,9 +40,9 @@
     # 小装甲板最大中心距离长宽比
     max_small_center_distance = 3.2
     # 大装甲板最小中心距离长宽比
-    min_large_center_distance = 1.8
+    min_large_center_distance = 3.2
     # 大装甲板最大中心距离长宽比
-    max_large_center_distance = 6.4
+    max_large_center_distance = 5.0
     # 装甲板最大倾斜角度
     max_angle = 35.0
 

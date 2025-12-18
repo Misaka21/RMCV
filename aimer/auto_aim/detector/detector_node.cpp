@@ -8,6 +8,7 @@
 
 #include "detector_node.hpp"
 #include "detector_factory.hpp"
+#include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "umt/umt.hpp"
 
@@ -34,14 +35,17 @@ void start_detector_node(detector::EnemyColor color) {
     try {
         // 1. Create detector from config
         g_detect_color = color;
-        g_detector = detector::create_detector_from_config(color, true);
+        g_detector = detector::create_detector_from_config(color);
         debug::print(debug::PrintMode::LOG, "DetectorNode", "Detector created from config");
 
         // 2. Setup UMT
         umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
         umt::Publisher<DetectionResult> pub("detection_result");
         auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
-        auto debug_mode = umt::BasicObjManager<bool>::find_or_create("detector_debug", false);
+
+        // 从配置文件读取 debug 模式
+        auto config = static_param::parse_file("detector.toml");
+        bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");
 
         debug::print(debug::PrintMode::LOG, "DetectorNode", "Detector node started");
 
@@ -55,9 +59,16 @@ void start_detector_node(detector::EnemyColor color) {
                     continue;
                 }
 
-                // 更新颜色
-                if (g_detector->detect_color != g_detect_color) {
-                    g_detector->detect_color = g_detect_color;
+                // 更新颜色：优先使用串口传来的颜色，否则用全局设置
+                detector::EnemyColor current_color = g_detect_color;
+                if (frame.serial_valid && frame.serial_data.enemy_color != 0) {
+                    // 串口颜色: 1=红, 2=蓝
+                    current_color = (frame.serial_data.enemy_color == 1)
+                        ? detector::EnemyColor::RED
+                        : detector::EnemyColor::BLUE;
+                }
+                if (g_detector->detect_color != current_color) {
+                    g_detector->detect_color = current_color;
                 }
 
                 // 运行检测
@@ -80,7 +91,7 @@ void start_detector_node(detector::EnemyColor color) {
                 stats.update(latency, !result.armors.empty());
 
                 // Debug可视化
-                if (debug_mode->get()) {
+                if (debug_mode) {
                     draw_debug_visualization(frame.image, result, frame, g_detector.get());
                 }
 
@@ -90,7 +101,7 @@ void start_detector_node(detector::EnemyColor color) {
         }
 
         // Cleanup
-        if (debug_mode->get()) {
+        if (debug_mode) {
             cv::destroyWindow("Detector Debug");
         }
 

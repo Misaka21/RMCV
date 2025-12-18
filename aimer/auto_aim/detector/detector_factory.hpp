@@ -17,10 +17,7 @@
 namespace autoaim::detector {
 
 // 从TOML配置文件创建传统装甲板检测器
-inline std::unique_ptr<Detector> create_detector_from_config(
-    EnemyColor color,
-    bool use_pca = true
-) {
+inline std::unique_ptr<Detector> create_detector_from_config(EnemyColor color) {
     auto config = static_param::parse_file("detector.toml");
 
     // 二值化阈值
@@ -28,6 +25,9 @@ inline std::unique_ptr<Detector> create_detector_from_config(
         static_param::get_param<int64_t>(config, "Detector.traditional", "binary_thres")
     );
     if (binary_thres == 0) binary_thres = 100;
+
+    // PCA角点校正
+    bool use_pca = static_param::get_param<bool>(config, "Detector.traditional", "use_pca");
 
     // 灯条参数
     Detector::LightParams light_params;
