@@ -12,7 +12,7 @@
 #include "detector_factory.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
-#include "plugin/webview/dashboard_data.hpp"
+#include "plugin/webview/dashboard.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim {
@@ -45,9 +45,6 @@ void start_detector_node(detector::EnemyColor color) {
         umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
         umt::Publisher<DetectionResult> pub("detection_result");
         auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
-
-        // Dashboard 数据 (通过 UMT ObjManager 共享到 Python)
-        auto dashboard = umt::ObjManager<DashboardData>::find_or_create("dashboard");
 
         // 图像话题发布器 (只在 debug 模式使用)
         umt::Publisher<cv::Mat> pub_debug("/detector/debug");
@@ -100,32 +97,28 @@ void start_detector_node(detector::EnemyColor color) {
                 stats.update(latency, !result.armors.empty());
 
                 // 更新 Dashboard 数据 (供 Python Web 读取)
-                {
-                    dashboard->detect_latency_ms = latency;
-                    dashboard->armor_count = static_cast<int>(result.armors.size());
-                    dashboard->enemy_color = (current_color == detector::EnemyColor::RED) ? "RED" : "BLUE";
-                    dashboard->detector_fps = stats.last_fps;
+                dashboard::set("detector.latency_ms", latency);
+                dashboard::set("detector.armor_count", static_cast<int>(result.armors.size()));
+                dashboard::set("detector.color", (current_color == detector::EnemyColor::RED) ? "RED" : "BLUE");
+                dashboard::set("detector.fps", stats.last_fps);
 
-                    // 目标信息
-                    if (!result.armors.empty()) {
-                        const auto& target = result.armors[0];
-                        dashboard->target_number = target.number;
-                        dashboard->target_x = target.center.x;
-                        dashboard->target_y = target.center.y;
-                    }
+                if (!result.armors.empty()) {
+                    const auto& target = result.armors[0];
+                    dashboard::set("target.number", target.number);
+                    dashboard::set("target.x", target.center.x);
+                    dashboard::set("target.y", target.center.y);
+                }
 
-                    // 串口数据
-                    if (frame.serial_valid) {
-                        dashboard->imu_yaw = frame.serial_data.yaw;
-                        dashboard->imu_pitch = frame.serial_data.pitch;
-                        dashboard->imu_roll = frame.serial_data.roll;
-                        dashboard->bullet_speed = frame.serial_data.bullet_speed;
-                        dashboard->aim_mode = frame.serial_data.aim_mode;
-                        dashboard->allow_fire = frame.serial_data.allow_fire;
-                        dashboard->serial_valid = true;
-                    } else {
-                        dashboard->serial_valid = false;
-                    }
+                if (frame.serial_valid) {
+                    dashboard::set("imu.yaw", frame.serial_data.yaw);
+                    dashboard::set("imu.pitch", frame.serial_data.pitch);
+                    dashboard::set("imu.roll", frame.serial_data.roll);
+                    dashboard::set("serial.bullet_speed", frame.serial_data.bullet_speed);
+                    dashboard::set("serial.aim_mode", static_cast<int>(frame.serial_data.aim_mode));
+                    dashboard::set("serial.allow_fire", frame.serial_data.allow_fire);
+                    dashboard::set("serial.valid", true);
+                } else {
+                    dashboard::set("serial.valid", false);
                 }
 
                 // Debug可视化 (只在有订阅者时处理，不阻塞主循环)

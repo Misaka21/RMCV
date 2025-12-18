@@ -1,6 +1,6 @@
 """
 RMCV Web Dashboard - Flask Server
-Use UMT ObjManager for data sharing (following SJTU CVRM2021 approach)
+Use dashboard module for data sharing
 
 Start: ./RMCV2026 --py web/app.py
 """
@@ -15,11 +15,11 @@ DASHBOARD_MODULE = None
 MESSAGE_MODULE = None
 
 try:
-    import ObjManager_DashboardData
-    DASHBOARD_MODULE = ObjManager_DashboardData
-    print("[WebServer] ObjManager_DashboardData loaded")
+    import dashboard
+    DASHBOARD_MODULE = dashboard
+    print("[WebServer] dashboard module loaded")
 except ImportError as e:
-    print(f"[WebServer] ObjManager_DashboardData not available: {e}")
+    print(f"[WebServer] dashboard module not available: {e}")
 
 try:
     import Message_cvMat
@@ -30,27 +30,10 @@ except ImportError as e:
 
 
 def get_dashboard_data():
-    """Get dashboard data from UMT ObjManager"""
+    """Get dashboard data from dashboard module"""
     if DASHBOARD_MODULE is not None:
         try:
-            d = DASHBOARD_MODULE.find_or_create("dashboard")
-            return {
-                "detector.latency_ms": round(d.detect_latency_ms, 2),
-                "detector.armor_count": d.armor_count,
-                "detector.color": d.enemy_color,
-                "detector.fps": d.detector_fps,
-                "detector.target.number": d.target_number,
-                "detector.target.center_x": round(d.target_x, 1),
-                "detector.target.center_y": round(d.target_y, 1),
-                "hardware.fps": d.hardware_fps,
-                "imu.yaw": round(d.imu_yaw, 2),
-                "imu.pitch": round(d.imu_pitch, 2),
-                "imu.roll": round(d.imu_roll, 2),
-                "serial.bullet_speed": round(d.bullet_speed, 2),
-                "serial.aim_mode": d.aim_mode,
-                "serial.allow_fire": d.allow_fire,
-                "serial.valid": d.serial_valid,
-            }
+            return DASHBOARD_MODULE.all()
         except Exception as e:
             print(f"[WebServer] Error reading dashboard: {e}")
     return get_mock_data()
