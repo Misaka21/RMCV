@@ -82,6 +82,11 @@ struct SyncFrame {
  */
 void start_hardware_node();
 
+/**
+ * @brief 等待硬件节点初始化完成
+ */
+void wait_hardware();
+
 } // namespace hardware
 
 #endif // HARDWARE_NODE_HPP

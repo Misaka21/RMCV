@@ -19,6 +19,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
+#include "plugin/webview/dashboard_data.hpp"
 #include "hik_cam/hik_camera.hpp"
 #include "serial/serial_thread.hpp"
 #include "umt/umt.hpp"
@@ -190,6 +191,9 @@ void start_hardware_node() {
         // 通知其他线程硬件节点已开始发布（初始为false，发布后设为true）
         auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
 
+        // Dashboard 数据 (共享给 detector_node 更新)
+        auto dashboard = umt::ObjManager<DashboardData>::find_or_create("dashboard");
+
         debug::print(debug::PrintMode::LOG, "HardwareNode", "Hardware node started");
 
         // 串口数据缓冲区，用于时间同步匹配
@@ -241,6 +245,9 @@ void start_hardware_node() {
                 // 更新统计
                 stats.update(0, synced);
 
+                // 更新 Dashboard 数据
+                dashboard->hardware_fps = stats.last_fps;
+
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "HardwareNode", "Loop error: {}", e.what());
                 std::this_thread::sleep_for(100ms);
@@ -249,6 +256,13 @@ void start_hardware_node() {
 
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::ERROR, "HardwareNode", "Init failed: {}", e.what());
+    }
+}
+
+void wait_hardware() {
+    auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
+    while (!hardware_running->get()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
 
