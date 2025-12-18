@@ -6,10 +6,13 @@
 #include <atomic>
 #include <memory>
 
+#include <fmt/format.h>
+
 #include "detector_node.hpp"
 #include "detector_factory.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
+#include "plugin/webview/dashboard_data.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim {
@@ -42,6 +45,12 @@ void start_detector_node(detector::EnemyColor color) {
         umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
         umt::Publisher<DetectionResult> pub("detection_result");
         auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
+
+        // Dashboard 数据 (通过 UMT ObjManager 共享到 Python)
+        auto dashboard = umt::ObjManager<DashboardData>::find_or_create("dashboard");
+
+        // 图像话题发布器 (只在 debug 模式使用)
+        umt::Publisher<cv::Mat> pub_debug("/detector/debug");
 
         // 从配置文件读取 debug 模式
         auto config = static_param::parse_file("detector.toml");
@@ -90,19 +99,59 @@ void start_detector_node(detector::EnemyColor color) {
                 // 更新统计
                 stats.update(latency, !result.armors.empty());
 
-                // Debug可视化
-                if (debug_mode) {
-                    draw_debug_visualization(frame.image, result, frame, g_detector.get());
+                // 更新 Dashboard 数据 (供 Python Web 读取)
+                {
+                    dashboard->detect_latency_ms = latency;
+                    dashboard->armor_count = static_cast<int>(result.armors.size());
+                    dashboard->enemy_color = (current_color == detector::EnemyColor::RED) ? "RED" : "BLUE";
+                    dashboard->detector_fps = stats.last_fps;
+
+                    // 目标信息
+                    if (!result.armors.empty()) {
+                        const auto& target = result.armors[0];
+                        dashboard->target_number = target.number;
+                        dashboard->target_x = target.center.x;
+                        dashboard->target_y = target.center.y;
+                    }
+
+                    // 串口数据
+                    if (frame.serial_valid) {
+                        dashboard->imu_yaw = frame.serial_data.yaw;
+                        dashboard->imu_pitch = frame.serial_data.pitch;
+                        dashboard->imu_roll = frame.serial_data.roll;
+                        dashboard->bullet_speed = frame.serial_data.bullet_speed;
+                        dashboard->aim_mode = frame.serial_data.aim_mode;
+                        dashboard->allow_fire = frame.serial_data.allow_fire;
+                        dashboard->serial_valid = true;
+                    } else {
+                        dashboard->serial_valid = false;
+                    }
+                }
+
+                // Debug可视化 (只在有订阅者时处理，不阻塞主循环)
+                if (debug_mode && pub_debug.has_subscriber()) {
+                    // 直接在原图上画，避免 clone 开销
+                    for (const auto& armor : result.armors) {
+                        auto pts = armor.landmarks();
+                        for (size_t i = 0; i < pts.size(); i++) {
+                            cv::line(frame.image, pts[i], pts[(i+1)%pts.size()],
+                                     cv::Scalar(0, 255, 0), 2);
+                        }
+                        cv::circle(frame.image, armor.center, 5, cv::Scalar(0, 0, 255), -1);
+                        cv::putText(frame.image, armor.number, armor.center + cv::Point2f(10, -10),
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 0), 2);
+                    }
+                    std::string info = fmt::format("FPS:{} Lat:{:.1f}ms Cnt:{}",
+                        stats.last_fps, latency, result.armors.size());
+                    cv::putText(frame.image, info, cv::Point(10, 30),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
+
+                    pub_debug.push(frame.image);
                 }
 
             } catch (const umt::MessageError_Timeout&) {
                 debug::print(debug::PrintMode::WARNING, "DetectorNode", "Timeout waiting for frame");
             }
-        }
-
-        // Cleanup
-        if (debug_mode) {
-            cv::destroyWindow("Detector Debug");
         }
 
     } catch (const std::exception& e) {
