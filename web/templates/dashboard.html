@@ -23,6 +23,24 @@
     <style>
         body { font-family: 'Consolas', 'Monaco', monospace; }
         .data-row:hover { background: rgba(255,255,255,0.05); }
+        .resizer {
+            width: 4px;
+            cursor: col-resize;
+            background: transparent;
+            transition: background 0.2s;
+        }
+        .resizer:hover {
+            background: rgba(59, 130, 246, 0.5);
+        }
+        .resizer.resizing {
+            background: rgb(59, 130, 246);
+        }
+        #log-panel {
+            transition: height 0.3s ease;
+        }
+        #log {
+            transition: opacity 0.2s ease;
+        }
     </style>
 </head>
 <body class="bg-background text-foreground h-screen flex flex-col overflow-hidden">
@@ -43,15 +61,18 @@
     <!-- Main Content -->
     <div class="flex-1 flex min-h-0">
         <!-- Left: Image -->
-        <div class="w-1/2 border-r border-border p-2 flex flex-col">
+        <div id="left-panel" class="border-r border-border p-2 flex flex-col" style="width: 50%;">
             <div class="flex-1 bg-black rounded flex items-center justify-center overflow-hidden">
                 <img id="video" class="max-w-full max-h-full object-contain hidden" alt="">
                 <span id="video-placeholder" class="text-muted-foreground text-sm">选择话题查看图像</span>
             </div>
         </div>
 
+        <!-- Resizer -->
+        <div id="resizer" class="resizer shrink-0"></div>
+
         <!-- Right: Data -->
-        <div class="w-1/2 flex flex-col min-h-0">
+        <div id="right-panel" class="flex flex-col min-h-0" style="flex: 1;">
             <div class="flex-1 overflow-auto p-2">
                 <table class="w-full text-sm">
                     <tbody id="data-table"></tbody>
@@ -61,15 +82,62 @@
     </div>
 
     <!-- Bottom: Log -->
-    <div class="border-t border-border h-32 shrink-0 flex flex-col">
-        <div class="px-2 py-1 text-xs text-muted-foreground border-b border-border flex justify-between">
-            <span>Log</span>
+    <div id="log-panel" class="border-t border-border shrink-0 flex flex-col" style="height: 8rem;">
+        <div class="px-2 py-1 text-xs text-muted-foreground border-b border-border flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <button id="toggle-log" class="hover:text-foreground">▼</button>
+                <span>Log</span>
+            </div>
             <button id="clear-log" class="hover:text-foreground">Clear</button>
         </div>
         <div id="log" class="flex-1 overflow-auto p-2 text-xs font-mono"></div>
     </div>
 
     <script>
+        // Resizer logic
+        const resizer = document.getElementById('resizer');
+        const leftPanel = document.getElementById('left-panel');
+        const rightPanel = document.getElementById('right-panel');
+
+        let isResizing = false;
+        let lastX = 0;
+
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            lastX = e.clientX;
+            resizer.classList.add('resizing');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+
+            const container = leftPanel.parentElement;
+            const containerWidth = container.offsetWidth;
+            const leftWidth = leftPanel.offsetWidth + (e.clientX - lastX);
+
+            // Limit to 20%-80%
+            const minWidth = containerWidth * 0.2;
+            const maxWidth = containerWidth * 0.8;
+
+            if (leftWidth >= minWidth && leftWidth <= maxWidth) {
+                const leftPercent = (leftWidth / containerWidth) * 100;
+                leftPanel.style.width = leftPercent + '%';
+                lastX = e.clientX;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                resizer.classList.remove('resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+
+        // Main dashboard code
         const topicSelect = document.getElementById('topic-select');
         const video = document.getElementById('video');
         const placeholder = document.getElementById('video-placeholder');
@@ -77,9 +145,26 @@
         const dataTable = document.getElementById('data-table');
         const logDiv = document.getElementById('log');
         const fpsEl = document.getElementById('fps');
+        const logPanel = document.getElementById('log-panel');
+        const toggleLogBtn = document.getElementById('toggle-log');
 
         let lastUpdate = Date.now();
         let frameCount = 0;
+        let logCollapsed = false;
+
+        // Toggle log panel
+        toggleLogBtn.onclick = () => {
+            logCollapsed = !logCollapsed;
+            if (logCollapsed) {
+                logPanel.style.height = '1.5rem';
+                logDiv.style.display = 'none';
+                toggleLogBtn.textContent = '▶';
+            } else {
+                logPanel.style.height = '8rem';
+                logDiv.style.display = 'block';
+                toggleLogBtn.textContent = '▼';
+            }
+        };
 
         // Log function
         function log(msg, type = 'info') {
