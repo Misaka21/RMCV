@@ -330,6 +330,17 @@ namespace umt {
             }
         }
 
+        /**
+   * @brief 检查是否有订阅者
+   * @return 是否有订阅者
+   */
+        bool has_subscriber() const {
+            if (!p_msg)
+                return false;
+            std::unique_lock subs_lock(p_msg->subs_mtx);
+            return !p_msg->subs.empty();
+        }
+
     private:
         typename MsgManager::sptr p_msg;
     };
