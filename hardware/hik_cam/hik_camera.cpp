@@ -49,8 +49,24 @@ void HikCam::open() {
     bool camera_opened = false;
     int device_index_to_use = 0;
 
-    // 1. 枚举设备
-    _enumerate_devices(stDeviceList);
+    // 1. 枚举设备（带重试）
+    bool devices_found = false;
+    for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !devices_found; ++attempt) {
+        debug::print(debug::PrintMode::INFO, "Camera", "Enumerating devices, attempt {}/{}",
+            attempt + 1, MAX_RETRY_ATTEMPTS);
+        devices_found = _enumerate_devices(stDeviceList);
+        if (!devices_found) {
+            debug::print(debug::PrintMode::WARNING, "Camera",
+                "No devices found, retrying in {} seconds...", RETRY_DELAY_SECONDS);
+            std::this_thread::sleep_for(std::chrono::seconds(RETRY_DELAY_SECONDS));
+        }
+    }
+
+    if (!devices_found) {
+        throw std::runtime_error(fmt::format(
+            "No devices found after {} attempts!", MAX_RETRY_ATTEMPTS));
+        std::exit(1);
+    }
 
     // 2. 尝试通过SN打开相机（如果配置了SN）
     if (_config.use_camera_sn) {
@@ -153,13 +169,14 @@ bool HikCam::_print_device_info(MV_CC_DEVICE_INFO* pstMVDevInfo) {
     return true;
 }
 
-void HikCam::_enumerate_devices(MV_CC_DEVICE_INFO_LIST& deviceList) {
+bool HikCam::_enumerate_devices(MV_CC_DEVICE_INFO_LIST& deviceList) {
     memset(&deviceList, 0, sizeof(MV_CC_DEVICE_INFO_LIST));
     _nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &deviceList);
     HIKCAM_FATAL(_nRet);
 
     if (deviceList.nDeviceNum == 0) {
-        throw std::runtime_error("Find No Devices!");
+        debug::print(debug::PrintMode::WARNING, "Camera", "No devices found");
+        return false;
     }
 
     // 打印所有设备信息
@@ -171,6 +188,7 @@ void HikCam::_enumerate_devices(MV_CC_DEVICE_INFO_LIST& deviceList) {
         }
         _print_device_info(pDeviceInfo);
     }
+    return true;
 }
 
 bool HikCam::_find_device_by_sn(const std::string& sn, const MV_CC_DEVICE_INFO_LIST& deviceList, int& deviceIndex) {

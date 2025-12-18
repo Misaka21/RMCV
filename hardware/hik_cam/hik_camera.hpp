@@ -56,8 +56,8 @@ struct CameraConfig {
 // Constants
 // ============================================================================
 
-constexpr int MAX_RETRY_ATTEMPTS = 3;
-constexpr int RETRY_DELAY_SECONDS = 5;
+constexpr int MAX_RETRY_ATTEMPTS = 5;
+constexpr int RETRY_DELAY_SECONDS = 2;
 constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;
 
 // ============================================================================
@@ -106,7 +106,7 @@ private:
     template <typename T>
     auto _get_camera_param(std::string_view param_name) -> std::optional<T>;
 
-    void _enumerate_devices(MV_CC_DEVICE_INFO_LIST& deviceList);
+    bool _enumerate_devices(MV_CC_DEVICE_INFO_LIST& deviceList);
     bool _find_device_by_sn(const std::string& sn, const MV_CC_DEVICE_INFO_LIST& deviceList, int& deviceIndex);
     bool _open_camera_by_sn(const std::string& sn, MV_CC_DEVICE_INFO_LIST& deviceList, int& deviceIndex);
     bool _open_camera_by_index(int deviceIndex, const MV_CC_DEVICE_INFO_LIST& deviceList);
