@@ -16,13 +16,14 @@
 #但无法检查是否设置成功,只能看有无对应的HIKCAM_WARN
 [Camera.config]
     #@float
-    ExposureTime = 4000.0
+    ExposureTime = 2500.0
     #@float
-    Gain = 16.0
+    Gain = 17.0
     ReverseX = false
     ReverseY = false
     Width = 1440
     ADCBitDepth = "Bits_8"
+    GammaEnable = false
     AcquisitionFrameRate = 200.0
     AcquisitionFrameRateEnable = true
 
