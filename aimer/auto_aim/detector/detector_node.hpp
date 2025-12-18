@@ -44,9 +44,10 @@ inline void draw_debug_visualization(const cv::Mat& image,
     cv::putText(debug_img, info, cv::Point(10, 30),
         cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
 
-    if (frame.imu_valid) {
+    if (frame.serial_valid) {
+        auto imu = frame.imu();
         std::string imu_info = fmt::format("IMU: yaw={:.1f} pitch={:.1f}",
-            frame.imu.yaw, frame.imu.pitch);
+            imu.yaw, imu.pitch);
         cv::putText(debug_img, imu_info, cv::Point(10, 60),
             cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
     }
