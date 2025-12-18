@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RMCV Dashboard</title>
+    <script src="{{ url_for('static', filename='css/tailwind.js') }}"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        border: "hsl(240 3.7% 15.9%)",
+                        background: "hsl(240 10% 3.9%)",
+                        foreground: "hsl(0 0% 98%)",
+                        muted: { DEFAULT: "hsl(240 3.7% 15.9%)", foreground: "hsl(240 5% 64.9%)" },
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Consolas', 'Monaco', monospace; }
+        .data-row:hover { background: rgba(255,255,255,0.05); }
+    </style>
+</head>
+<body class="bg-background text-foreground h-screen flex flex-col overflow-hidden">
+    <!-- Header -->
+    <header class="border-b border-border px-4 py-2 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+            <span class="text-lg font-bold">RMCV</span>
+            <span id="fps" class="text-sm text-muted-foreground">--</span>
+        </div>
+        <div class="flex items-center gap-3">
+            <select id="topic-select" class="bg-muted border border-border rounded px-2 py-1 text-sm">
+                <option value="">选择话题</option>
+            </select>
+            <span id="status" class="w-2 h-2 rounded-full bg-gray-500"></span>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex min-h-0">
+        <!-- Left: Image -->
+        <div class="w-1/2 border-r border-border p-2 flex flex-col">
+            <div class="flex-1 bg-black rounded flex items-center justify-center overflow-hidden">
+                <img id="video" class="max-w-full max-h-full object-contain hidden" alt="">
+                <span id="video-placeholder" class="text-muted-foreground text-sm">选择话题查看图像</span>
+            </div>
+        </div>
+
+        <!-- Right: Data -->
+        <div class="w-1/2 flex flex-col min-h-0">
+            <div class="flex-1 overflow-auto p-2">
+                <table class="w-full text-sm">
+                    <tbody id="data-table"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom: Log -->
+    <div class="border-t border-border h-32 shrink-0 flex flex-col">
+        <div class="px-2 py-1 text-xs text-muted-foreground border-b border-border flex justify-between">
+            <span>Log</span>
+            <button id="clear-log" class="hover:text-foreground">Clear</button>
+        </div>
+        <div id="log" class="flex-1 overflow-auto p-2 text-xs font-mono"></div>
+    </div>
+
+    <script>
+        const topicSelect = document.getElementById('topic-select');
+        const video = document.getElementById('video');
+        const placeholder = document.getElementById('video-placeholder');
+        const statusDot = document.getElementById('status');
+        const dataTable = document.getElementById('data-table');
+        const logDiv = document.getElementById('log');
+        const fpsEl = document.getElementById('fps');
+
+        let lastUpdate = Date.now();
+        let frameCount = 0;
+
+        // Log function
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const colors = { info: 'text-gray-400', warn: 'text-yellow-400', error: 'text-red-400' };
+            logDiv.innerHTML += `<div class="${colors[type] || colors.info}">[${time}] ${msg}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        document.getElementById('clear-log').onclick = () => logDiv.innerHTML = '';
+
+        // Load topics
+        async function loadTopics() {
+            try {
+                const res = await fetch('/api/topics');
+                const topics = await res.json();
+                log(`加载话题: ${JSON.stringify(topics)}`);
+
+                if (Array.isArray(topics)) {
+                    topics.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t;
+                        opt.textContent = t;
+                        topicSelect.appendChild(opt);
+                    });
+                } else if (topics.error) {
+                    log(`话题错误: ${topics.error}`, 'error');
+                }
+            } catch (e) {
+                log(`加载话题失败: ${e.message}`, 'error');
+            }
+        }
+
+        // Select topic
+        topicSelect.onchange = () => {
+            const topic = topicSelect.value;
+            if (!topic) {
+                video.classList.add('hidden');
+                placeholder.classList.remove('hidden');
+                statusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
+                return;
+            }
+
+            const path = topic.startsWith('/') ? topic.substring(1) : topic;
+            video.src = '/api/video/' + path;
+            video.classList.remove('hidden');
+            placeholder.classList.add('hidden');
+            statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500';
+            log(`切换话题: ${topic}`);
+
+            video.onload = () => {
+                statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
+                frameCount++;
+            };
+            video.onerror = () => {
+                statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+                log(`图像加载失败: ${topic}`, 'error');
+            };
+        };
+
+        // Data update
+        function formatValue(v) {
+            if (typeof v === 'number') return Number.isInteger(v) ? v : v.toFixed(3);
+            return v;
+        }
+
+        function updateData(data) {
+            const keys = Object.keys(data).sort();
+            dataTable.innerHTML = keys.map(k => `
+                <tr class="data-row border-b border-border/30">
+                    <td class="py-1 px-2 text-muted-foreground">${k}</td>
+                    <td class="py-1 px-2 text-right font-bold">${formatValue(data[k])}</td>
+                </tr>
+            `).join('');
+        }
+
+        // SSE
+        const sse = new EventSource('/api/stream');
+        sse.onmessage = (e) => {
+            updateData(JSON.parse(e.data));
+
+            // FPS
+            frameCount++;
+            const now = Date.now();
+            if (now - lastUpdate > 1000) {
+                fpsEl.textContent = `${frameCount} Hz`;
+                frameCount = 0;
+                lastUpdate = now;
+            }
+        };
+        sse.onerror = () => {
+            statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+            log('SSE 连接断开', 'error');
+        };
+        sse.onopen = () => log('SSE 连接成功');
+
+        // Check system status
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const status = await res.json();
+                log(`系统状态: Message模块=${status.message_module}, Dashboard文件=${status.dashboard_file}`);
+                if (status.topics && status.topics.length > 0) {
+                    log(`可用话题: ${status.topics.join(', ')}`);
+                }
+            } catch (e) {
+                log(`状态检查失败: ${e.message}`, 'error');
+            }
+        }
+
+        // Init
+        checkStatus();
+        loadTopics();
+        log('Dashboard 已启动');
+    </script>
+</body>
+</html>
