@@ -124,14 +124,14 @@ inline std::string get_timestamp_for_filename() {
 
 /**
  * @brief Initialize a new session with timestamped directory
- * @param base_dir Base directory for sessions (default: LOG_DIR)
+ * @param suffix 文件夹后缀，比赛模式传 "match" 等
  * @return Session directory path
  *
- * Directory structure: {base_dir}/{timestamp}/
+ * Directory structure: {LOG_DIR}/{timestamp}_{suffix}/ 或 {LOG_DIR}/{timestamp}/
  *   - run.log: log file
  *   - *.avi: video recordings
  */
-inline std::string init_session(const std::string& base_dir = LOG_DIR) {
+inline std::string init_session(const std::string& suffix = "") {
     auto& state = LoggerState::instance();
     std::lock_guard<std::mutex> lock(state.file_mutex);
 
@@ -140,7 +140,11 @@ inline std::string init_session(const std::string& base_dir = LOG_DIR) {
     }
 
     state.session_timestamp = get_timestamp_for_filename();
-    state.session_path = base_dir + "/" + state.session_timestamp;
+    if (suffix.empty()) {
+        state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp;
+    } else {
+        state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp + "_" + suffix;
+    }
 
     fs::create_directories(state.session_path);
 
