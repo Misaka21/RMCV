@@ -55,10 +55,14 @@ def stream():
     """SSE real-time data stream"""
     def generate():
         import json
-        while True:
-            data = get_dashboard_data()
-            yield f"data: {json.dumps(data)}\n\n"
-            time.sleep(0.01)  # 100Hz
+        try:
+            while True:
+                data = get_dashboard_data()
+                yield f"data: {json.dumps(data)}\n\n"
+                time.sleep(0.01)  # 100Hz
+        except GeneratorExit:
+            # Client disconnected, cleanup
+            pass
 
     return Response(generate(), mimetype='text/event-stream')
 
@@ -82,23 +86,31 @@ def video_feed(topic):
 
     def generate():
         if MESSAGE_MODULE is not None:
+            import cv2
             try:
                 sub = MESSAGE_MODULE.Subscriber(topic, 1)
                 while True:
                     try:
-                        mat = sub.pop_for(1000)
+                        # Use pop_for with timeout to allow Ctrl+C to work
+                        mat = sub.pop_for(2000)  # 2 second timeout
                         if not mat.empty():
-                            jpeg = mat.to_jpeg(80)
-                            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n'
-                    except Exception:
-                        pass
+                            jpeg_code = cv2.imencode(".jpeg", mat.get_nparray())[1].tobytes()
+                            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg_code + b'\r\n\r\n'
+                    except Exception as e:
+                        # Timeout or other errors - continue
+                        time.sleep(0.1)
+            except GeneratorExit:
+                # Client disconnected
+                pass
             except Exception as e:
                 print(f"[WebServer] Video error: {e}")
-                yield_error_frame(f"Error: {str(e)[:40]}")
         else:
-            while True:
-                yield_placeholder_frame(topic)
-                time.sleep(0.5)
+            try:
+                while True:
+                    yield_placeholder_frame(topic)
+                    time.sleep(0.5)
+            except GeneratorExit:
+                pass
 
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
