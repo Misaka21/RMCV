@@ -9,6 +9,7 @@ log/
 
 # Doxygen generated docs
 docs/
+!docs/devnotes.md
 
 # cache files
 *.cache
