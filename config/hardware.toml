@@ -22,6 +22,9 @@
     ReverseX = false
     ReverseY = false
     Width = 1440
+    ADCBitDepth = "Bits_8"
+    AcquisitionFrameRate = 200.0
+    AcquisitionFrameRateEnable = true
 
 [Camera.record]
     #@bool 是否开启内录,比赛必开启内录,不受此值影响
@@ -33,15 +36,28 @@
     baudrate = 921600
     data_print_debug = false
     ignore_crc = false
-    #不接串口测试的虚拟数据
+    # 不接串口时使用虚拟数据
     use_fake_serial_data = true
 
-[Serial.data]
+# fake serial 虚拟数据配置
+[Serial.fake_data]
+    # IMU姿态
     yaw_deg = 0.0
+    pitch_deg = 0.0
+    roll_deg = 0.0
+    # 机器人状态
+    robot_id = 3           # 1-7红方, 101-107蓝方
+    enemy_color = 1        # 0=未知, 1=红, 2=蓝
+    # 射击参数
+    bullet_speed = 15.0    # m/s
+    # 模式控制
+    aim_mode = 1           # 0=关闭, 1=自瞄, 2=小符, 3=大符
+    allow_fire = true
 
 [TimeSync]
-    # Camera-IMU time offset in microseconds
-    # Positive: camera timestamp is ahead of IMU
-    # Calibrate using static target test
+    # 相机-IMU时间偏移 (微秒)
+    # 正值: 图像比IMU数据晚到达，匹配过去的IMU
+    # 负值: 图像比IMU数据早到达，匹配未来的IMU
+    # 例: delta_t_us = 5000 表示图像实际对应5ms前的IMU姿态
     delta_t_us = 0
 
