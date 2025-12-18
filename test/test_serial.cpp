@@ -45,8 +45,8 @@ int main() {
                 count++;
 
                 debug::print(debug::PrintMode::DEBUG, "TestSerial",
-                    "[{}] yaw: {:.2f}, pitch: {:.2f}, dist: {:.2f}",
-                    count, data.yaw, data.pitch, data.distance);
+                    "[{}] yaw: {:.2f}, pitch: {:.2f}, roll: {:.2f}",
+                    count, data.yaw, data.pitch, data.roll);
             }
 
             // Print stats every second

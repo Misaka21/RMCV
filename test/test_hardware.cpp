@@ -39,17 +39,18 @@ int main() {
             auto frame = sub.pop_for(1000);  // 1 second timeout
 
             frame_count++;
-            if (frame.imu_valid) {
+            if (frame.serial_valid) {
                 sync_count++;
             }
 
             // Print stats every second
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - stats_time).count() >= 1000) {
+                auto imu = frame.imu();
                 debug::print(debug::PrintMode::INFO, "TestHardware",
                     "FPS: {}, Synced: {}, IMU: yaw={:.2f} pitch={:.2f}",
                     frame_count, sync_count,
-                    frame.imu.yaw, frame.imu.pitch);
+                    imu.yaw, imu.pitch);
                 frame_count = 0;
                 sync_count = 0;
                 stats_time = now;
@@ -61,8 +62,9 @@ int main() {
                 cv::resize(frame.image, display, cv::Size(720, 540));
 
                 // Draw IMU info on image
+                auto imu = frame.imu();
                 std::string info = fmt::format("IMU: yaw={:.1f} pitch={:.1f} valid={}",
-                    frame.imu.yaw, frame.imu.pitch, frame.imu_valid ? "Y" : "N");
+                    imu.yaw, imu.pitch, frame.serial_valid ? "Y" : "N");
                 cv::putText(display, info, cv::Point(10, 30),
                     cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
 
