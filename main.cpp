@@ -42,7 +42,7 @@ int main() {
     debug::print(debug::PrintMode::INFO, "Main", "Starting RMCV 2026...");
 
     // 创建同步标志
-    auto hardware_ready = umt::BasicObjManager<bool>::find_or_create("hardware_ready", false);
+    auto hardware_ready = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
 
     // 启动硬件节点线程 (相机 + 串口/fake serial)
     std::thread hardware_thread([]() {
