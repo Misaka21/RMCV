@@ -1,5 +1,4 @@
 //
-// Created by RMCV on 2025/12/17.
 // Hardware Node - 硬件节点管理器
 // 负责启动串口、相机采集和数据同步打包
 //
@@ -16,6 +15,7 @@
 #include <opencv2/core/mat.hpp>
 
 // Project headers
+#include "hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
@@ -27,25 +27,11 @@ namespace hardware {
 
 using namespace std::chrono_literals;
 using SteadyClock = std::chrono::steady_clock;
-using TimePoint = std::chrono::steady_clock::time_point;
 
-// ============================================================================
-// Data Structures
-// ============================================================================
-
-struct ImuData {
-    TimePoint timestamp;
-    float yaw   = 0;
-    float pitch = 0;
-    float roll  = 0;
-};
-
-struct SyncFrame {
-    cv::Mat image;
-    int frame_id        = 0;
-    TimePoint timestamp;
-    ImuData imu;
-    bool imu_valid      = false;
+// 带时间戳的串口数据，用于时间同步匹配
+struct TimestampedSerialData {
+    TimePoint recv_time;  // 接收时间
+    serial::SerialReceiveData data;
 };
 
 // ============================================================================
@@ -86,46 +72,40 @@ camera::CameraConfig load_camera_config(const toml::table& config) {
 }
 
 /**
- * @brief Drain receive queue into IMU buffer
+ * @brief 将接收队列中的数据转移到缓冲区
  */
 void drain_queue_to_buffer(serial::ReceiveQueue& queue,
-                           std::deque<ImuData>& imu_buffer,
+                           std::deque<TimestampedSerialData>& buffer,
                            size_t max_buffer_size) {
     while (!queue.empty()) {
-        auto data = queue.front();
+        TimestampedSerialData ts_data;
+        ts_data.recv_time = SteadyClock::now();
+        ts_data.data = queue.front();
         queue.pop();
 
-        ImuData imu;
-        imu.timestamp = SteadyClock::now();
-        imu.yaw = data.yaw;
-        imu.pitch = data.pitch;
-
-        imu_buffer.push_back(imu);
-        while (imu_buffer.size() > max_buffer_size) {
-            imu_buffer.pop_front();
+        buffer.push_back(ts_data);
+        while (buffer.size() > max_buffer_size) {
+            buffer.pop_front();
         }
     }
 }
 
 /**
- * @brief Find closest IMU data to target time
- * @param imu_buffer IMU data buffer
- * @param target_time Target timestamp to match
- * @param max_diff_us Maximum allowed time difference in microseconds
- * @return Matched IMU data or nullopt if no match within threshold
+ * @brief 查找最接近目标时间的串口数据
  */
-std::optional<ImuData> find_closest_imu(const std::deque<ImuData>& imu_buffer,
-                                        TimePoint target_time,
-                                        int64_t max_diff_us = 50000) {
-    if (imu_buffer.empty()) return std::nullopt;
+std::optional<serial::SerialReceiveData> find_closest_serial_data(
+    const std::deque<TimestampedSerialData>& buffer,
+    TimePoint target_time,
+    int64_t max_diff_us = 50000) {
+    if (buffer.empty()) return std::nullopt;
 
-    auto best = imu_buffer.begin();
+    auto best = buffer.begin();
     int64_t min_diff = INT64_MAX;
 
-    for (auto it = imu_buffer.begin(); it != imu_buffer.end(); ++it) {
+    for (auto it = buffer.begin(); it != buffer.end(); ++it) {
         int64_t diff = std::abs(
             std::chrono::duration_cast<std::chrono::microseconds>(
-                it->timestamp - target_time
+                it->recv_time - target_time
             ).count()
         );
         if (diff < min_diff) {
@@ -135,7 +115,7 @@ std::optional<ImuData> find_closest_imu(const std::deque<ImuData>& imu_buffer,
     }
 
     if (min_diff <= max_diff_us) {
-        return *best;
+        return best->data;
     }
     return std::nullopt;
 }
@@ -163,7 +143,24 @@ void start_hardware_node() {
 
         // Fake serial config
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
-        double fake_yaw = static_param::get_param<double>(config, "Serial.data", "yaw_deg");
+        serial::SerialReceiveData fake_data;  // 预加载fake数据
+        if (use_fake_serial) {
+            fake_data.yaw = static_cast<float>(
+                static_param::get_param<double>(config, "Serial.fake_data", "yaw_deg"));
+            fake_data.pitch = static_cast<float>(
+                static_param::get_param<double>(config, "Serial.fake_data", "pitch_deg"));
+            fake_data.roll = static_cast<float>(
+                static_param::get_param<double>(config, "Serial.fake_data", "roll_deg"));
+            fake_data.robot_id = static_cast<uint8_t>(
+                static_param::get_param<int64_t>(config, "Serial.fake_data", "robot_id"));
+            fake_data.enemy_color = static_cast<uint8_t>(
+                static_param::get_param<int64_t>(config, "Serial.fake_data", "enemy_color"));
+            fake_data.bullet_speed = static_cast<float>(
+                static_param::get_param<double>(config, "Serial.fake_data", "bullet_speed"));
+            fake_data.aim_mode = static_cast<uint8_t>(
+                static_param::get_param<int64_t>(config, "Serial.fake_data", "aim_mode"));
+            fake_data.allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
+        }
 
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Serial: {} @ {}", port_name, baudrate);
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Delta_t: {} us", delta_t_us);
@@ -174,7 +171,9 @@ void start_hardware_node() {
             serial::start_serial_communication(port_name, static_cast<int>(baudrate));
             std::this_thread::sleep_for(100ms);  // Wait for serial threads to start
         } else {
-            debug::print(debug::PrintMode::WARNING, "HardwareNode", "Using fake serial data: yaw={}", fake_yaw);
+            debug::print(debug::PrintMode::WARNING, "HardwareNode",
+                "Using fake serial: color={}, bullet_speed={:.1f}",
+                fake_data.enemy_color, fake_data.bullet_speed);
             // 创建空的接收队列
             umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
         }
@@ -193,14 +192,14 @@ void start_hardware_node() {
 
         debug::print(debug::PrintMode::LOG, "HardwareNode", "Hardware node started");
 
-        // IMU buffer for time matching
-        std::deque<ImuData> imu_buffer;
+        // 串口数据缓冲区，用于时间同步匹配
+        std::deque<TimestampedSerialData> serial_buffer;
         constexpr size_t max_buffer_size = 500;
 
         // FPS统计
         stats::FpsStats stats("HardwareNode", "synced");
-        stats.set_extra_info([&imu_buffer]() {
-            return fmt::format("imu_buf: {}", imu_buffer.size());
+        stats.set_extra_info([&serial_buffer]() {
+            return fmt::format("buf: {}", serial_buffer.size());
         });
 
         // 4. Main loop
@@ -218,19 +217,19 @@ void start_hardware_node() {
                 frame.frame_id = cam.frame_id;
                 frame.timestamp = cam_time;
 
-                // 根据是否使用fake serial决定IMU数据来源
+                // 根据是否使用fake serial决定数据来源
                 bool synced = false;
                 if (use_fake_serial) {
-                    frame.imu = {cam_time, static_cast<float>(fake_yaw), 0.0f, 0.0f};
-                    frame.imu_valid = true;
+                    frame.serial_data = fake_data;
+                    frame.serial_valid = true;
                     synced = true;
                 } else {
-                    drain_queue_to_buffer(recv_queue->get(), imu_buffer, max_buffer_size);
+                    drain_queue_to_buffer(recv_queue->get(), serial_buffer, max_buffer_size);
 
                     auto target = cam_time - std::chrono::microseconds(delta_t_us);
-                    if (auto imu = find_closest_imu(imu_buffer, target)) {
-                        frame.imu = *imu;
-                        frame.imu_valid = true;
+                    if (auto data = find_closest_serial_data(serial_buffer, target)) {
+                        frame.serial_data = *data;
+                        frame.serial_valid = true;
                         synced = true;
                     }
                 }
