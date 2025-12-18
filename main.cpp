@@ -62,9 +62,9 @@ int main() {
 
     debug::print(debug::PrintMode::INFO, "Main", "Hardware node ready, starting detector...");
 
-    // 启动检测器节点线程
+    // 启动检测器节点线程 (颜色从串口获取，不使用默认值)
     std::thread detector_thread([]() {
-        autoaim::start_detector_node(autoaim::detector::EnemyColor::RED);
+        autoaim::start_detector_node();
     });
 
     debug::print(debug::PrintMode::INFO, "Main", "All threads started");
