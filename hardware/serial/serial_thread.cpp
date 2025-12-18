@@ -2,10 +2,7 @@
 // Created by 霍睿 on 25-3-2.
 //
 #include <chrono>
-#include <iostream>
 #include <thread>
-#include <fmt/color.h>
-#include <fmt/format.h>
 
 #include "plugin/debug/logger.hpp"
 #include "protocol/uart_protocol.hpp"
@@ -25,7 +22,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
         auto vision_transmit = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
         auto send_enabled = umt::BasicObjManager<bool>::find_or_create("serial_send_enabled", true);
 
-        fmt::print(fmt::fg(fmt::color::green), "[INFO] 串口发送线程启动成功\n");
+        debug::print(debug::PrintMode::LOG, "SerialSender", "Sender thread started");
 
         int fps = 0, fps_count = 0;
         auto t1 = std::chrono::system_clock::now();
@@ -46,7 +43,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                 if (SerialUtils::vision_data_to_packet(vision_data, packet)) {
                     // 发送数据包
                     if (!transceiver->send_packet(packet)) {
-                        fmt::print(fmt::fg(fmt::color::yellow), "[WARNING] 发送数据包失败\n");
+                        debug::print(debug::PrintMode::WARNING, "SerialSender", "Failed to send packet");
                     } else {
                         // 更新FPS统计
                         fps_count++;
@@ -55,24 +52,24 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                             fps = fps_count;
                             fps_count = 0;
                             t1 = t2;
-                            fmt::print(fmt::fg(fmt::color::cyan), "[INFO] 串口发送帧率: {} fps\n", fps);
+                            debug::print(debug::PrintMode::INFO, "SerialSender", "TX FPS: {}", fps);
                         }
                     }
                 } else {
-                    fmt::print(fmt::fg(fmt::color::yellow), "[WARNING] 视觉数据转换失败\n");
+                    debug::print(debug::PrintMode::WARNING, "SerialSender", "Failed to convert vision data");
                 }
 
                 // 短暂休眠避免过度占用CPU
                 std::this_thread::sleep_for(5ms);
 
             } catch (const std::exception& e) {
-                fmt::print(fmt::fg(fmt::color::red), "[ERROR] 发送线程异常: {}\n", e.what());
+                debug::print(debug::PrintMode::ERROR, "SerialSender", "Exception: {}", e.what());
                 std::this_thread::sleep_for(100ms);
             }
         }
 
     } catch (const std::exception& e) {
-        fmt::print(fmt::fg(fmt::color::red), "[ERROR] 串口发送线程初始化失败: {}\n", e.what());
+        debug::print(debug::PrintMode::ERROR, "SerialSender", "Init failed: {}", e.what());
     }
 }
 
@@ -82,7 +79,7 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
         auto receive_queue = umt::BasicObjManager<ReceiveQueue>::find_or_create("receive_queue");
         auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
 
-        fmt::print(fmt::fg(fmt::color::green), "[INFO] 串口接收线程启动成功\n");
+        debug::print(debug::PrintMode::LOG, "SerialReceiver", "Receiver thread started");
 
         while (true) {
             try {
@@ -117,13 +114,13 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                 }
 
             } catch (const std::exception& e) {
-                fmt::print(fmt::fg(fmt::color::red), "[ERROR] 接收线程异常: {}\n", e.what());
+                debug::print(debug::PrintMode::ERROR, "SerialReceiver", "Exception: {}", e.what());
                 std::this_thread::sleep_for(10ms);
             }
         }
 
     } catch (const std::exception& e) {
-        fmt::print(fmt::fg(fmt::color::red), "[ERROR] 串口接收线程初始化失败: {}\n", e.what());
+        debug::print(debug::PrintMode::ERROR, "SerialReceiver", "Init failed: {}", e.what());
     }
 }
 
@@ -134,25 +131,58 @@ class SerialManager {
 public:
     SerialManager() = delete;
 
+    // 重试配置
+    static constexpr int MAX_RETRY_COUNT = 5;
+    static constexpr int RETRY_INTERVAL_MS = 2000;
+
     /**
      * @brief 启动串口收发线程（共享同一个串口实例）
      * @param port_path 串口设备路径
      * @param baud_rate 波特率
+     *
+     * 如果串口打开失败，会重试 MAX_RETRY_COUNT 次
+     * 重试全部失败后程序退出
      */
     static void start_serial_threads(const std::string& port_path = "/dev/ttyUSB0", int baud_rate = 115200) {
-        fmt::print(fmt::fg(fmt::color::green), "[INFO] 正在启动串口管理器: {} @ {}\n", port_path, baud_rate);
+        debug::print(debug::PrintMode::INFO, "SerialManager", "Starting: {} @ {}", port_path, baud_rate);
 
-        try {
-            // 创建串口协议实例（共享）
-            auto uart = std::make_shared<UartProtocol>(port_path, baud_rate);
+        std::shared_ptr<UartProtocol> uart = nullptr;
+        int retry_count = 0;
 
-            // 尝试打开串口
-            if (!uart->open()) {
-                fmt::print(fmt::fg(fmt::color::red), "[ERROR] 无法打开串口 {}: {}\n",
-                          port_path, uart->error_message());
-                return;
+        // 重试打开串口
+        while (retry_count < MAX_RETRY_COUNT) {
+            try {
+                uart = std::make_shared<UartProtocol>(port_path, baud_rate);
+
+                if (uart->open()) {
+                    debug::print(debug::PrintMode::LOG, "SerialManager", "Port {} opened", port_path);
+                    break;
+                }
+
+                debug::print(debug::PrintMode::WARNING, "SerialManager",
+                    "Open failed ({}/{}): {}", retry_count + 1, MAX_RETRY_COUNT, uart->error_message());
+
+            } catch (const std::exception& e) {
+                debug::print(debug::PrintMode::WARNING, "SerialManager",
+                    "Exception ({}/{}): {}", retry_count + 1, MAX_RETRY_COUNT, e.what());
             }
 
+            retry_count++;
+            if (retry_count < MAX_RETRY_COUNT) {
+                debug::print(debug::PrintMode::INFO, "SerialManager",
+                    "Retry in {} seconds...", RETRY_INTERVAL_MS / 1000);
+                std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_INTERVAL_MS));
+            }
+        }
+
+        // 重试全部失败，退出程序
+        if (!uart || !uart->is_open()) {
+            debug::print(debug::PrintMode::ERROR, "SerialManager",
+                "Port {} open failed after {} retries, exiting", port_path, MAX_RETRY_COUNT);
+            std::exit(1);
+        }
+
+        try {
             // 创建TransceiverManager（共享）
             auto transceiver = std::make_shared<TransceiverManager<16>>(uart);
 
@@ -162,10 +192,11 @@ public:
             // 启动接收线程
             std::thread([transceiver]() { serial_receiver_run(transceiver); }).detach();
 
-            fmt::print(fmt::fg(fmt::color::green), "[INFO] 串口收发线程启动完成\n");
+            debug::print(debug::PrintMode::LOG, "SerialManager", "TX/RX threads started");
 
         } catch (const std::exception& e) {
-            fmt::print(fmt::fg(fmt::color::red), "[ERROR] 串口管理器启动失败: {}\n", e.what());
+            debug::print(debug::PrintMode::ERROR, "SerialManager", "Start failed: {}", e.what());
+            std::exit(1);
         }
     }
 };
@@ -193,7 +224,7 @@ bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& pac
 
         return true;
     } catch (const std::exception& e) {
-        debug::print(debug::PrintMode::ERROR, "SerialUtils", "Error in vision_data_to_packet: {}", e.what());
+        debug::print(debug::PrintMode::ERROR, "SerialUtils", "vision_data_to_packet: {}", e.what());
         return false;
     }
 }
@@ -216,7 +247,7 @@ bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceive
 
         return true;
     } catch (const std::exception& e) {
-        debug::print(debug::PrintMode::ERROR, "SerialUtils", "Error in packet_to_receive_data: {}", e.what());
+        debug::print(debug::PrintMode::ERROR, "SerialUtils", "packet_to_receive_data: {}", e.what());
         return false;
     }
 }
