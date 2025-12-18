@@ -4,14 +4,16 @@ set(lib_name "plugin")
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
+find_package(fmt REQUIRED)
 
 
 # Collect debug source
 aux_source_directory(./debug debug_src)
 aux_source_directory(./param param_src)
+aux_source_directory(./plotter plotter_src)
 
 # Create plugin library
-add_library(${lib_name} STATIC ${debug_src} ${param_src})
+add_library(${lib_name} STATIC ${debug_src} ${param_src} ${plotter_src})
 
 target_include_directories(${lib_name} PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -23,4 +25,5 @@ target_link_libraries(${lib_name} PUBLIC
         ${OpenCV_LIBS}
         Eigen3::Eigen
         tomlplusplus::tomlplusplus
+        fmt::fmt
 )
