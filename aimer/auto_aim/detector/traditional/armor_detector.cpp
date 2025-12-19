@@ -50,18 +50,22 @@ std::vector<Armor> Detector::detect(const cv::Mat &input) noexcept {
   armors_ = match_lights(lights_);
 
   if (!armors_.empty() && classifier != nullptr) {
-    // 并行处理
+    // 4. 并行提取所有数字图像
     std::for_each(
       std::execution::par, armors_.begin(), armors_.end(), [this, &input](Armor &armor) {
-        // 4. 提取数字图像
         armor.number_img = classifier->extract_number(input, armor);
-        // 5. 分类
-        classifier->classify(input, armor);
-        // 6. 校正角点
-        if (corner_corrector != nullptr) {
-          corner_corrector->correct_corners(armor, gray_img_);
-        }
       });
+
+    // 5. 批量分类 (一次推理，性能更好)
+    classifier->classify_batch(armors_);
+
+    // 6. 并行校正角点
+    if (corner_corrector != nullptr) {
+      std::for_each(
+        std::execution::par, armors_.begin(), armors_.end(), [this](Armor &armor) {
+          corner_corrector->correct_corners(armor, gray_img_);
+        });
+    }
 
     // 7. 移除忽略的类别
     classifier->erase_ignore_classes(armors_);

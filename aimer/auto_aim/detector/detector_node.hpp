@@ -55,6 +55,19 @@ inline void draw_debug_visualization(const cv::Mat& image,
     cv::Mat display;
     cv::resize(debug_img, display, cv::Size(960, 720));
     cv::imshow("Detector Debug", display);
+
+    // 显示数字ROI小图
+    cv::Mat numbers_img = detector->get_all_numbers_image();
+    if (!numbers_img.empty() && numbers_img.rows > 0) {
+        cv::Mat numbers_display;
+        cv::cvtColor(numbers_img, numbers_display, cv::COLOR_GRAY2BGR);
+        // 放大3倍方便查看
+        cv::resize(numbers_display, numbers_display,
+            cv::Size(numbers_display.cols * 3, numbers_display.rows * 3),
+            0, 0, cv::INTER_NEAREST);
+        cv::imshow("Number ROI", numbers_display);
+    }
+
     cv::waitKey(1);
 }
 

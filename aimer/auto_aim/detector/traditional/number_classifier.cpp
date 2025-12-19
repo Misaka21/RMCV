@@ -44,8 +44,9 @@ namespace autoaim::detector {
 NumberClassifier::NumberClassifier(const std::string &model_path,
                                    const std::string &label_path,
                                    const double thre,
+                                   const ClassifierModelType model_type,
                                    const std::vector<std::string> &ignore_classes)
-: threshold(thre), ignore_classes_(ignore_classes) {
+: threshold(thre), model_type_(model_type), input_size_(get_input_size(model_type)), ignore_classes_(ignore_classes) {
   net_ = cv::dnn::readNetFromONNX(model_path);
   std::ifstream label_file(label_path);
   std::string line;
@@ -63,7 +64,6 @@ cv::Mat NumberClassifier::extract_number(const cv::Mat &src, const Armor &armor)
   static const int large_armor_width = 54;
   // 数字ROI尺寸
   static const cv::Size roi_size(20, 28);
-  static const cv::Size input_size(28, 28);
 
   // 透视变换
   cv::Point2f lights_vertices[4] = {
@@ -88,13 +88,40 @@ cv::Mat NumberClassifier::extract_number(const cv::Mat &src, const Armor &armor)
   // 二值化
   cv::cvtColor(number_image, number_image, cv::COLOR_RGB2GRAY);
   cv::threshold(number_image, number_image, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
-  cv::resize(number_image, number_image, input_size);
+
+  // 根据配置的输入尺寸调整大小 (如果不等于ROI尺寸才resize)
+  if (input_size_ != roi_size) {
+    cv::resize(number_image, number_image, input_size_);
+  }
+
   return number_image;
 }
 
+std::pair<double, int> NumberClassifier::decode_output(const cv::Mat &output_row) const noexcept {
+  double confidence;
+  cv::Point class_id_point;
+
+  if (model_type_ == ClassifierModelType::MLP) {
+    // MLP模型输出logits，需要softmax
+    float max_val = *std::max_element(output_row.begin<float>(), output_row.end<float>());
+    cv::Mat softmax_prob;
+    cv::exp(output_row - max_val, softmax_prob);
+    float sum = static_cast<float>(cv::sum(softmax_prob)[0]);
+    softmax_prob /= sum;
+
+    minMaxLoc(softmax_prob.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);
+  } else {
+    // LeNet模型输出已是概率，直接取最大值
+    minMaxLoc(output_row.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);
+  }
+
+  return {confidence, class_id_point.x};
+}
+
 void NumberClassifier::classify(const cv::Mat &src, Armor &armor) noexcept {
-  // 归一化
-  cv::Mat input = armor.number_img / 255.0;
+  // 归一化 (使用convertTo更高效)
+  cv::Mat input;
+  armor.number_img.convertTo(input, CV_32F, 1.0 / 255.0);
 
   // 创建blob
   cv::Mat blob;
@@ -109,15 +136,43 @@ void NumberClassifier::classify(const cv::Mat &src, Armor &armor) noexcept {
   mutex_.unlock();
 
   // 解码输出
-  double confidence;
-  cv::Point class_id_point;
-  minMaxLoc(outputs.reshape(1, 1), nullptr, &confidence, nullptr, &class_id_point);
-  int label_id = class_id_point.x;
+  auto [confidence, label_id] = decode_output(outputs);
 
   armor.confidence = confidence;
   armor.number = class_names_[label_id];
-
   armor.classfication_result = fmt::format("{}:{:.1f}%", armor.number, armor.confidence * 100.0);
+}
+
+void NumberClassifier::classify_batch(std::vector<Armor> &armors) noexcept {
+  if (armors.empty()) return;
+
+  // 收集所有数字图像并归一化
+  std::vector<cv::Mat> inputs;
+  inputs.reserve(armors.size());
+  for (auto &armor : armors) {
+    cv::Mat input;
+    armor.number_img.convertTo(input, CV_32F, 1.0 / 255.0);
+    inputs.push_back(input);
+  }
+
+  // 批量创建blob (将多张图像合并为一个batch)
+  cv::Mat blob;
+  cv::dnn::blobFromImages(inputs, blob);
+
+  // 一次性前向推理
+  net_.setInput(blob);
+  cv::Mat outputs = net_.forward();
+
+  // 解码每个装甲板的输出
+  for (size_t i = 0; i < armors.size(); ++i) {
+    cv::Mat output_row = outputs.row(static_cast<int>(i));
+    auto [confidence, label_id] = decode_output(output_row);
+
+    armors[i].confidence = confidence;
+    armors[i].number = class_names_[label_id];
+    armors[i].classfication_result =
+      fmt::format("{}:{:.1f}%", armors[i].number, armors[i].confidence * 100.0);
+  }
 }
 
 void NumberClassifier::erase_ignore_classes(std::vector<Armor> &armors) noexcept {

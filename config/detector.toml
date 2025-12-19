@@ -15,7 +15,9 @@
 
 [Detector.traditional.classify]
     # 数字分类阈值
-    threshold = 0.8
+    threshold = 0.6
+    # 分类模型类型: "lenet" (28x28) 或 "mlp" (20x28)
+    model_type = "lenet"
     # 分类模型路径 (相对于asset目录)
     model_path = "lenet.onnx"
     label_path = "label.txt"
