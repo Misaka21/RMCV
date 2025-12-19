@@ -45,7 +45,7 @@ int main() {
                 count++;
 
                 debug::print(debug::PrintMode::DEBUG, "TestSerial",
-                    "[{}] yaw: {:.2f}, pitch: {:.2f}, roll: {:.2f}",
+                    "[{}] yaw: {:.5f}, pitch: {:.5f}, roll: {:.5f}",
                     count, data.yaw, data.pitch, data.roll);
             }
 

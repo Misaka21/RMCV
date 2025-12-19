@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "plugin/debug/logger.hpp"
+#include "plugin/stats/fps_stats.hpp"
 #include "protocol/uart_protocol.hpp"
 #include "serial_thread.hpp"
 
@@ -24,8 +25,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
 
         debug::print(debug::PrintMode::INFO, "SerialSender", "Sender thread started");
 
-        int fps = 0, fps_count = 0;
-        auto t1 = std::chrono::system_clock::now();
+        stats::FpsStats fps_stats("SerialSender");
 
         while (true) {
             try {
@@ -45,22 +45,14 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                     if (!transceiver->send_packet(packet)) {
                         debug::print(debug::PrintMode::WARNING, "SerialSender", "Failed to send packet");
                     } else {
-                        // 更新FPS统计
-                        fps_count++;
-                        auto t2 = std::chrono::system_clock::now();
-                        if (std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() >= 1000) {
-                            fps = fps_count;
-                            fps_count = 0;
-                            t1 = t2;
-                            debug::print(debug::PrintMode::INFO, "SerialSender", "TX FPS: {}", fps);
-                        }
+                        fps_stats.update();
                     }
                 } else {
                     debug::print(debug::PrintMode::WARNING, "SerialSender", "Failed to convert vision data");
                 }
 
                 // 短暂休眠避免过度占用CPU
-                std::this_thread::sleep_for(5ms);
+                std::this_thread::sleep_for(1ms);
 
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "SerialSender", "Exception: {}", e.what());
