@@ -36,62 +36,65 @@ namespace autoaim::detector {
 // 传统装甲板检测器
 class Detector {
 public:
-  struct LightParams {
-    // 宽高比
-    double min_ratio;
-    double max_ratio;
-    // 垂直角度
-    double max_angle;
-    // 颜色判断
-    int color_diff_thresh;
-  };
+    struct LightParams {
+        // 宽高比
+        double min_ratio;
+        double max_ratio;
+        // 垂直角度
+        double max_angle;
+        // 颜色判断
+        int color_diff_thresh;
+    };
 
-  struct ArmorParams {
-    double min_light_ratio;
-    // 灯条对距离
-    double min_small_center_distance;
-    double max_small_center_distance;
-    double min_large_center_distance;
-    double max_large_center_distance;
-    // 水平角度
-    double max_angle;
-  };
+    struct ArmorParams {
+        double min_light_ratio;
+        // 灯条对距离
+        double min_small_center_distance;
+        double max_small_center_distance;
+        double min_large_center_distance;
+        double max_large_center_distance;
+        // 水平角度
+        double max_angle;
+    };
 
-  Detector(const int &bin_thres, const EnemyColor &color, const LightParams &l,
-           const ArmorParams &a);
+    Detector(
+        const int& bin_thres,
+        const EnemyColor& color,
+        const LightParams& l,
+        const ArmorParams& a
+    );
 
-  std::vector<Armor> detect(const cv::Mat &input) noexcept;
+    std::vector<Armor> detect(const cv::Mat& input) noexcept;
 
-  cv::Mat preprocess_image(const cv::Mat &input) noexcept;
-  std::vector<Light> find_lights(const cv::Mat &rbg_img,
-                                const cv::Mat &binary_img) noexcept;
-  std::vector<Armor> match_lights(const std::vector<Light> &lights) noexcept;
+    cv::Mat preprocess_image(const cv::Mat& input) noexcept;
+    std::vector<Light> find_lights(const cv::Mat& rbg_img, const cv::Mat& binary_img) noexcept;
+    std::vector<Armor> match_lights(const std::vector<Light>& lights) noexcept;
 
-  // 调试用
-  cv::Mat get_all_numbers_image() const noexcept;
-  void draw_results(cv::Mat &img) const noexcept;
+    // 调试用
+    cv::Mat get_all_numbers_image() const noexcept;
+    void draw_results(cv::Mat& img) const noexcept;
 
-  // 参数
-  int binary_thres;
-  EnemyColor detect_color;
-  LightParams light_params;
-  ArmorParams armor_params;
+    // 参数
+    int binary_thres;
+    EnemyColor detect_color;
+    LightParams light_params;
+    ArmorParams armor_params;
 
-  std::unique_ptr<NumberClassifier> classifier;
-  std::unique_ptr<LightCornerCorrector> corner_corrector;
+    std::unique_ptr<NumberClassifier> classifier;
+    std::unique_ptr<LightCornerCorrector> corner_corrector;
 
-  // 调试信息
-  cv::Mat binary_img;
+    // 调试信息
+    cv::Mat binary_img;
 
 private:
-  bool is_light(const Light &possible_light) noexcept;
-  bool contain_light(const int i,const int j,const std::vector<Light> &lights) noexcept;
-  ArmorType is_armor(const Light &light_1, const Light &light_2) noexcept;
+    bool is_light(const Light& possible_light) noexcept;
+    bool contain_light(const int i, const int j, const std::vector<Light>& lights) noexcept;
+    ArmorType is_armor(const Light& light_1, const Light& light_2) noexcept;
 
-  cv::Mat gray_img_;
+    cv::Mat gray_img_;
 
-  std::vector<Light> lights_;
-  std::vector<Armor> armors_;
+    std::vector<Light> lights_;
+    std::vector<Armor> armors_;
 };
 
 } // namespace autoaim::detector

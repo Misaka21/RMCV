@@ -14,10 +14,10 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include "traditional/types.hpp"
-#include "traditional/armor_detector.hpp"
-#include "plugin/debug/logger.hpp"
 #include "hardware/hardware_node.hpp"
+#include "plugin/debug/logger.hpp"
+#include "traditional/armor_detector.hpp"
+#include "traditional/types.hpp"
 
 namespace autoaim {
 
@@ -32,24 +32,39 @@ struct DetectionResult {
 };
 
 // Debug可视化
-inline void draw_debug_visualization(const cv::Mat& image,
-                                     const DetectionResult& result,
-                                     const hardware::SyncFrame& frame,
-                                     detector::Detector* detector) {
+inline void draw_debug_visualization(
+    const cv::Mat& image,
+    const DetectionResult& result,
+    const hardware::SyncFrame& frame,
+    detector::Detector* detector
+) {
     cv::Mat debug_img = image.clone();
     detector->draw_results(debug_img);
 
-    std::string info = fmt::format("Armors: {} Latency: {:.1f}ms",
-        result.armors.size(), result.detect_latency_ms);
-    cv::putText(debug_img, info, cv::Point(10, 30),
-        cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
+    std::string info =
+        fmt::format("Armors: {} Latency: {:.1f}ms", result.armors.size(), result.detect_latency_ms);
+    cv::putText(
+        debug_img,
+        info,
+        cv::Point(10, 30),
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.7,
+        cv::Scalar(0, 255, 0),
+        2
+    );
 
     if (frame.serial_valid) {
         auto imu = frame.imu();
-        std::string imu_info = fmt::format("IMU: yaw={:.1f} pitch={:.1f}",
-            imu.yaw, imu.pitch);
-        cv::putText(debug_img, imu_info, cv::Point(10, 60),
-            cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
+        std::string imu_info = fmt::format("IMU: yaw={:.1f} pitch={:.1f}", imu.yaw, imu.pitch);
+        cv::putText(
+            debug_img,
+            imu_info,
+            cv::Point(10, 60),
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.7,
+            cv::Scalar(0, 255, 255),
+            2
+        );
     }
 
     cv::Mat display;
@@ -62,9 +77,14 @@ inline void draw_debug_visualization(const cv::Mat& image,
         cv::Mat numbers_display;
         cv::cvtColor(numbers_img, numbers_display, cv::COLOR_GRAY2BGR);
         // 放大3倍方便查看
-        cv::resize(numbers_display, numbers_display,
+        cv::resize(
+            numbers_display,
+            numbers_display,
             cv::Size(numbers_display.cols * 3, numbers_display.rows * 3),
-            0, 0, cv::INTER_NEAREST);
+            0,
+            0,
+            cv::INTER_NEAREST
+        );
         cv::imshow("Number ROI", numbers_display);
     }
 
@@ -77,6 +97,6 @@ void start_detector_node();
 // 运行时设置敌方颜色
 void set_enemy_color(detector::EnemyColor color);
 
-}  // namespace autoaim
+} // namespace autoaim
 
-#endif  // DETECTOR_NODE_HPP
+#endif // DETECTOR_NODE_HPP

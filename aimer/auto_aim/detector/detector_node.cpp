@@ -5,8 +5,8 @@
 
 #include <memory>
 
-#include "detector_node.hpp"
 #include "detector_factory.hpp"
+#include "detector_node.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "umt/umt.hpp"
@@ -22,8 +22,12 @@ void set_enemy_color(detector::EnemyColor color) {
     if (g_detector) {
         g_detector->detect_color = color;
     }
-    debug::print(debug::PrintMode::INFO, "DetectorNode", "Enemy color set to {}",
-                 color == detector::EnemyColor::RED ? "RED" : "BLUE");
+    debug::print(
+        debug::PrintMode::INFO,
+        "DetectorNode",
+        "Enemy color set to {}",
+        color == detector::EnemyColor::RED ? "RED" : "BLUE"
+    );
 }
 
 void start_detector_node() {
@@ -57,13 +61,21 @@ void start_detector_node() {
 
                 // 必须有有效串口数据才处理
                 if (!frame.serial_valid) {
-                    debug::print(debug::PrintMode::WARNING, "DetectorNode", "No valid serial data, skipping frame");
+                    debug::print(
+                        debug::PrintMode::WARNING,
+                        "DetectorNode",
+                        "No valid serial data, skipping frame"
+                    );
                     continue;
                 }
 
                 // 颜色必须从串口获取
                 if (frame.serial_data.enemy_color == 0) {
-                    debug::print(debug::PrintMode::WARNING, "DetectorNode", "Invalid enemy color from serial");
+                    debug::print(
+                        debug::PrintMode::WARNING,
+                        "DetectorNode",
+                        "Invalid enemy color from serial"
+                    );
                     continue;
                 }
                 detector::EnemyColor current_color = (frame.serial_data.enemy_color == 1)
@@ -78,8 +90,10 @@ void start_detector_node() {
                 auto detect_start = SteadyClock::now();
                 auto armors = g_detector->detect(frame.image);
                 auto detect_end = SteadyClock::now();
-                float latency = std::chrono::duration_cast<std::chrono::microseconds>(
-                    detect_end - detect_start).count() / 1000.0f;
+                float latency =
+                    std::chrono::duration_cast<std::chrono::microseconds>(detect_end - detect_start)
+                        .count()
+                    / 1000.0f;
 
                 // 构建结果
                 DetectionResult result;
@@ -99,7 +113,11 @@ void start_detector_node() {
                 }
 
             } catch (const umt::MessageError_Timeout&) {
-                debug::print(debug::PrintMode::WARNING, "DetectorNode", "Timeout waiting for frame");
+                debug::print(
+                    debug::PrintMode::WARNING,
+                    "DetectorNode",
+                    "Timeout waiting for frame"
+                );
             }
         }
 
@@ -114,4 +132,4 @@ void start_detector_node() {
     }
 }
 
-}  // namespace autoaim
+} // namespace autoaim

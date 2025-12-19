@@ -24,30 +24,32 @@
 namespace autoaim::detector {
 
 struct SymmetryAxis {
-  cv::Point2f centroid;
-  cv::Point2f direction;
-  float mean_val;  // 平均亮度
+    cv::Point2f centroid;
+    cv::Point2f direction;
+    float mean_val; // 平均亮度
 };
 
 // 灯条角点校正器
 // 使用PCA算法找到灯条的对称轴，然后沿对称轴根据亮度梯度找到角点
 class LightCornerCorrector {
 public:
-  explicit LightCornerCorrector() noexcept {}
+    explicit LightCornerCorrector() noexcept {}
 
-  // 校正装甲板灯条的角点
-  void correct_corners(Armor &armor, const cv::Mat &gray_img);
+    // 校正装甲板灯条的角点
+    void correct_corners(Armor& armor, const cv::Mat& gray_img);
 
 private:
-  // 查找灯条的对称轴
-  SymmetryAxis find_symmetry_axis(const cv::Mat &gray_img, const Light &light);
+    // 查找灯条的对称轴
+    SymmetryAxis find_symmetry_axis(const cv::Mat& gray_img, const Light& light);
 
-  // 查找灯条的角点
-  cv::Point2f find_corner(const cv::Mat &gray_img,
-                         const Light &light,
-                         const SymmetryAxis &axis,
-                         std::string order);
+    // 查找灯条的角点
+    cv::Point2f find_corner(
+        const cv::Mat& gray_img,
+        const Light& light,
+        const SymmetryAxis& axis,
+        std::string order
+    );
 };
 
-}  // namespace autoaim::detector
-#endif  // ARMOR_DETECTOR_LIGHT_CORNER_CORRECTOR_HPP_
+} // namespace autoaim::detector
+#endif // ARMOR_DETECTOR_LIGHT_CORNER_CORRECTOR_HPP_

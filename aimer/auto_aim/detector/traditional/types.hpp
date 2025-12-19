@@ -44,115 +44,110 @@ constexpr double FIFTTEN_DEGREE_RAD = 15 * CV_PI / 180;
 
 // 装甲板类型
 enum class ArmorType { SMALL, LARGE, INVALID };
-inline std::string armor_type_to_string(const ArmorType &type) {
-  switch (type) {
-    case ArmorType::SMALL:
-      return "small";
-    case ArmorType::LARGE:
-      return "large";
-    default:
-      return "invalid";
-  }
+inline std::string armor_type_to_string(const ArmorType& type) {
+    switch (type) {
+        case ArmorType::SMALL:
+            return "small";
+        case ArmorType::LARGE:
+            return "large";
+        default:
+            return "invalid";
+    }
 }
 
 // 灯条结构体
-struct Light : public cv::RotatedRect {
-  Light() = default;
-  explicit Light(const std::vector<cv::Point> &contour)
-  : cv::RotatedRect(cv::minAreaRect(contour)), color(EnemyColor::WHITE) {
-    assert(!contour.empty());
+struct Light: public cv::RotatedRect {
+    Light() = default;
+    explicit Light(const std::vector<cv::Point>& contour):
+        cv::RotatedRect(cv::minAreaRect(contour)),
+        color(EnemyColor::WHITE) {
+        assert(!contour.empty());
 
-    center = std::accumulate(
-      contour.begin(),
-      contour.end(),
-      cv::Point2f(0, 0),
-      [n = static_cast<float>(contour.size())](const cv::Point2f &a, const cv::Point &b) {
-        return a + cv::Point2f(b.x, b.y) / n;
-      });
+        center = std::accumulate(
+            contour.begin(),
+            contour.end(),
+            cv::Point2f(0, 0),
+            [n = static_cast<float>(contour.size())](const cv::Point2f& a, const cv::Point& b) {
+                return a + cv::Point2f(b.x, b.y) / n;
+            }
+        );
 
-    cv::Point2f p[4];
-    this->points(p);
-    std::sort(p, p + 4, [](const cv::Point2f &a, const cv::Point2f &b) { return a.y < b.y; });
-    top = (p[0] + p[1]) / 2;
-    bottom = (p[2] + p[3]) / 2;
+        cv::Point2f p[4];
+        this->points(p);
+        std::sort(p, p + 4, [](const cv::Point2f& a, const cv::Point2f& b) { return a.y < b.y; });
+        top = (p[0] + p[1]) / 2;
+        bottom = (p[2] + p[3]) / 2;
 
-    length = cv::norm(top - bottom);
-    width = cv::norm(p[0] - p[1]);
+        length = cv::norm(top - bottom);
+        width = cv::norm(p[0] - p[1]);
 
-    axis = top - bottom;
-    axis = axis / cv::norm(axis);
+        axis = top - bottom;
+        axis = axis / cv::norm(axis);
 
-    // 计算倾斜角度（灯条与水平线的夹角）
-    tilt_angle = std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y));
-    tilt_angle = tilt_angle / CV_PI * 180;
-  }
-  EnemyColor color;
-  cv::Point2f top, bottom, center;
-  cv::Point2f axis;
-  double length;
-  double width;
-  float tilt_angle;
+        // 计算倾斜角度（灯条与水平线的夹角）
+        tilt_angle = std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y));
+        tilt_angle = tilt_angle / CV_PI * 180;
+    }
+    EnemyColor color;
+    cv::Point2f top, bottom, center;
+    cv::Point2f axis;
+    double length;
+    double width;
+    float tilt_angle;
 };
 
 // 装甲板结构体
 struct Armor {
-  static constexpr const int N_LANDMARKS = 6;
-  static constexpr const int N_LANDMARKS_2 = N_LANDMARKS * 2;
-  Armor() = default;
-  Armor(const Light &l1, const Light &l2) {
-    if (l1.center.x < l2.center.x) {
-      left_light = l1, right_light = l2;
-    } else {
-      left_light = l2, right_light = l1;
+    static constexpr const int N_LANDMARKS = 6;
+    static constexpr const int N_LANDMARKS_2 = N_LANDMARKS * 2;
+    Armor() = default;
+    Armor(const Light& l1, const Light& l2) {
+        if (l1.center.x < l2.center.x) {
+            left_light = l1, right_light = l2;
+        } else {
+            left_light = l2, right_light = l1;
+        }
+
+        center = (left_light.center + right_light.center) / 2;
     }
 
-    center = (left_light.center + right_light.center) / 2;
-  }
-
-  // 构建物体坐标系中的点，从左下角开始顺时针排列
-  template <typename PointType>
-  static inline std::vector<PointType> buildObjectPoints(const double &w,
-                                                         const double &h) noexcept {
-    if constexpr (N_LANDMARKS == 4) {
-      return {PointType(0, w / 2, -h / 2),
-              PointType(0, w / 2, h / 2),
-              PointType(0, -w / 2, h / 2),
-              PointType(0, -w / 2, -h / 2)};
-    } else {
-      return {PointType(0, w / 2, -h / 2),
-              PointType(0, w / 2, 0),
-              PointType(0, w / 2, h / 2),
-              PointType(0, -w / 2, h / 2),
-              PointType(0, -w / 2, 0),
-              PointType(0, -w / 2, -h / 2)};
+    // 构建物体坐标系中的点，从左下角开始顺时针排列
+    template<typename PointType>
+    static inline std::vector<PointType>
+    buildObjectPoints(const double& w, const double& h) noexcept {
+        if constexpr (N_LANDMARKS == 4) {
+            return { PointType(0, w / 2, -h / 2),
+                     PointType(0, w / 2, h / 2),
+                     PointType(0, -w / 2, h / 2),
+                     PointType(0, -w / 2, -h / 2) };
+        } else {
+            return { PointType(0, w / 2, -h / 2), PointType(0, w / 2, 0),
+                     PointType(0, w / 2, h / 2),  PointType(0, -w / 2, h / 2),
+                     PointType(0, -w / 2, 0),     PointType(0, -w / 2, -h / 2) };
+        }
     }
-  }
 
-  // 获取关键点，从左下角开始顺时针排列
-  std::vector<cv::Point2f> landmarks() const {
-    if constexpr (N_LANDMARKS == 4) {
-      return {left_light.bottom, left_light.top, right_light.top, right_light.bottom};
-    } else {
-      return {left_light.bottom,
-              left_light.center,
-              left_light.top,
-              right_light.top,
-              right_light.center,
-              right_light.bottom};
+    // 获取关键点，从左下角开始顺时针排列
+    std::vector<cv::Point2f> landmarks() const {
+        if constexpr (N_LANDMARKS == 4) {
+            return { left_light.bottom, left_light.top, right_light.top, right_light.bottom };
+        } else {
+            return { left_light.bottom, left_light.center,  left_light.top,
+                     right_light.top,   right_light.center, right_light.bottom };
+        }
     }
-  }
 
-  // 灯条对
-  Light left_light, right_light;
-  cv::Point2f center;
-  ArmorType type;
+    // 灯条对
+    Light left_light, right_light;
+    cv::Point2f center;
+    ArmorType type;
 
-  // 数字识别
-  cv::Mat number_img;
-  std::string number;
-  float confidence;
-  std::string classfication_result;
+    // 数字识别
+    cv::Mat number_img;
+    std::string number;
+    float confidence;
+    std::string classfication_result;
 };
 
-}  // namespace autoaim::detector
-#endif  // ARMOR_DETECTOR_ARMOR_HPP_
+} // namespace autoaim::detector
+#endif // ARMOR_DETECTOR_ARMOR_HPP_
