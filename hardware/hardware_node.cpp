@@ -203,11 +203,16 @@ void start_hardware_node() {
         });
 
         // 4. Main loop
+        int consecutive_errors = 0;
+        const int MAX_CONSECUTIVE_ERRORS = 3;  // 连续失败3次后退出
+
         while (true) {
             try {
                 // Capture image
                 cv::Mat& img = cam.capture();
                 if (img.empty()) continue;
+
+                consecutive_errors = 0;  // 成功后重置计数
 
                 TimePoint cam_time = SteadyClock::now();
 
@@ -242,7 +247,15 @@ void start_hardware_node() {
                 stats.update(0, synced);
 
             } catch (const std::exception& e) {
-                debug::print(debug::PrintMode::ERROR, "HardwareNode", "Loop error: {}", e.what());
+                consecutive_errors++;
+                debug::print(debug::PrintMode::ERROR, "HardwareNode",
+                    "Loop error ({}/{}): {}", consecutive_errors, MAX_CONSECUTIVE_ERRORS, e.what());
+
+                if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+                    debug::print(debug::PrintMode::FATAL, "HardwareNode",
+                        "Too many consecutive errors, camera disconnected?");
+                    std::exit(1);
+                }
                 std::this_thread::sleep_for(100ms);
             }
         }

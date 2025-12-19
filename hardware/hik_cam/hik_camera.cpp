@@ -92,10 +92,9 @@ void HikCam::open() {
 
 auto HikCam::capture() -> cv::Mat& {
     MV_FRAME_OUT stImageInfo = {0};
-    const int maxRetries = 5;
     int numRetries = 0;
 
-    while (numRetries < maxRetries) {
+    while (numRetries < MAX_RETRY_ATTEMPTS) {
         _nRet = MV_CC_GetImageBuffer(_handle, &stImageInfo, 1000);
         if (_nRet == MV_OK) {
             unsigned char* pData = static_cast<unsigned char*>(stImageInfo.pBufAddr);
@@ -124,10 +123,10 @@ auto HikCam::capture() -> cv::Mat& {
         }
     }
 
-    if (numRetries == maxRetries) {
+    if (numRetries == MAX_RETRY_ATTEMPTS) {
         throw std::runtime_error(fmt::format(
             "Get Image failed after {} retries, last error code: 0x{:x}",
-            maxRetries, _nRet
+            MAX_RETRY_ATTEMPTS, _nRet
         ));
     }
 
