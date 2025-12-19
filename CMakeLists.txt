@@ -3,12 +3,22 @@ project(RMCV)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE Release)
+
+# VTune 性能分析选项
+option(ENABLE_PROFILING "Enable profiling support for VTune/perf" OFF)
+
 find_program(CCACHE_PROGRAM ccache)
 if (CCACHE_PROGRAM)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
 endif ()
 add_compile_options(-Wall -Werror=return-type -Wno-unused-variable)
-if (CMAKE_BUILD_TYPE STREQUAL Release)
+
+# 性能分析模式：保持优化但添加调试符号和帧指针
+if (ENABLE_PROFILING)
+    message(STATUS "Profiling mode enabled - adding debug symbols and frame pointers")
+    add_compile_options(-O3 -g -fno-omit-frame-pointer -march=native)
+    # 不使用 LTO，便于符号解析
+elseif (CMAKE_BUILD_TYPE STREQUAL Release)
     add_compile_options(-O3 -flto -march=native)
 elseif (CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo)
     add_compile_options(-O3 -flto -march=native -g)
@@ -32,6 +42,7 @@ add_compile_definitions(
 )
 
 message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}--------------------")
+message(STATUS "--------------------ENABLE_PROFILING: ${ENABLE_PROFILING}--------------------")
 
 find_package(OpenCV REQUIRED)
 find_package(fmt REQUIRED)
