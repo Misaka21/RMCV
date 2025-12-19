@@ -10,7 +10,7 @@
     debug = true
     # 二值化阈值
     binary_thres = 100
-    # 是否开启灯条角点PCA校正
+    # 是否开启灯条角点最小二乘校正
     use_pca = true
 
 [Detector.traditional.classify]

@@ -53,7 +53,6 @@ void LightCornerCorrector::correct_corners(Armor &armor, const cv::Mat &gray_img
 }
 
 SymmetryAxis LightCornerCorrector::find_symmetry_axis(const cv::Mat &gray_img, const Light &light) {
-  constexpr float MAX_BRIGHTNESS = 25;
   constexpr float SCALE = 0.07;
 
   // 缩放边界框
@@ -71,40 +70,33 @@ SymmetryAxis LightCornerCorrector::find_symmetry_axis(const cv::Mat &gray_img, c
   light_box.width = std::min(light_box.width, gray_img.cols - light_box.x);
   light_box.height = std::min(light_box.height, gray_img.rows - light_box.y);
 
-  // 获取归一化的灯条图像
+  // 获取灯条图像
   cv::Mat roi = gray_img(light_box);
   float mean_val = cv::mean(roi)[0];
-  roi.convertTo(roi, CV_32F);
-  cv::normalize(roi, roi, 0, MAX_BRIGHTNESS, cv::NORM_MINMAX);
 
-  // 计算质心
-  cv::Moments moments = cv::moments(roi, false);
-  cv::Point2f centroid = cv::Point2f(moments.m10 / moments.m00, moments.m01 / moments.m00) +
+  // 用图像矩计算亮度加权质心
+  cv::Moments m = cv::moments(roi, false);
+  cv::Point2f centroid = cv::Point2f(m.m10 / m.m00, m.m01 / m.m00) +
                          cv::Point2f(light_box.x, light_box.y);
 
-  // 初始化点云
-  std::vector<cv::Point2f> points;
-  for (int i = 0; i < roi.rows; i++) {
-    for (int j = 0; j < roi.cols; j++) {
-      for (int k = 0; k < std::round(roi.at<float>(i, j)); k++) {
-        points.emplace_back(cv::Point2f(j, i));
-      }
+  // 用 fitLine 最小二乘法获得稳定的轴方向
+  // 对 ROI 二值化，提取轮廓点
+  cv::Mat binary;
+  cv::threshold(roi, binary, mean_val, 255, cv::THRESH_BINARY);
+
+  std::vector<cv::Point> points;
+  cv::findNonZero(binary, points);
+
+  cv::Point2f axis = light.axis;  // fallback
+  if (points.size() >= 6) {
+    cv::Vec4f line;
+    cv::fitLine(points, line, cv::DIST_L2, 0, 0.01, 0.01);
+    // line = [vx, vy, x0, y0]，方向向量
+    axis = cv::Point2f(line[0], line[1]);
+    // 确保轴向上（y < 0）
+    if (axis.y > 0) {
+      axis = -axis;
     }
-  }
-  cv::Mat points_mat = cv::Mat(points).reshape(1);
-
-  // PCA主成分分析
-  auto pca = cv::PCA(points_mat, cv::Mat(), cv::PCA::DATA_AS_ROW);
-
-  // 获取对称轴
-  cv::Point2f axis =
-    cv::Point2f(pca.eigenvectors.at<float>(0, 0), pca.eigenvectors.at<float>(0, 1));
-
-  // 归一化轴向量
-  axis = axis / cv::norm(axis);
-
-  if (axis.y > 0) {
-    axis = -axis;
   }
 
   return SymmetryAxis{.centroid = centroid, .direction = axis, .mean_val = mean_val};
