@@ -3,11 +3,11 @@
     #@bool 是否通过sn码查找相机,false则查找第0个
     use_camera_sn = true
     #@string 相机sn码
-    camera_sn = "00G07828078"
+    camera_sn = "DA5555190"
     #@bool 使用从MVS中导出的配置文件
     use_config_from_file = true
     #@string 配置文件在config文件夹中的路径
-    config_file_path = "MV-CA016-10UC_00G07828078.mfs"
+    config_file_path = "MV-CA016-10UC_DA5555190.mfs"
     #@bool 是否从camera.config中设置参数,会覆盖上文中file中的参数
     use_camera_config = true
 
@@ -34,11 +34,11 @@
 
 [Serial]
     port_name = "/dev/ttyUSB0"
-    baudrate = 921600
+    baudrate = 115200
     data_print_debug = false
     ignore_crc = false
     # 不接串口时使用虚拟数据
-    use_fake_serial_data = true
+    use_fake_serial_data = false
 
 # fake serial 虚拟数据配置
 [Serial.fake_data]
