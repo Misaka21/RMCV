@@ -71,12 +71,8 @@ void start_detector_node() {
 
                 // 颜色必须从串口获取
                 if (frame.serial_data.enemy_color == 0) {
-                    debug::print(
-                        debug::PrintMode::WARNING,
-                        "DetectorNode",
-                        "Invalid enemy color from serial"
-                    );
-                    continue;
+                    frame.serial_data.enemy_color = 1;
+                    //continue;
                 }
                 detector::EnemyColor current_color = (frame.serial_data.enemy_color == 1)
                     ? detector::EnemyColor::RED
