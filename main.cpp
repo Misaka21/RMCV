@@ -24,6 +24,7 @@ void signal_handler(int sig) {
     auto det_running = umt::BasicObjManager<bool>::find_or_create("detector_running", false);
     hw_running->get() = false;
     det_running->get() = false;
+    std::exit(1);
 }
 
 int main() {

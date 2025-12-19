@@ -6,7 +6,7 @@ DeviceLinkThroughputLimitMode	Off
 ReverseX	0
 ReverseY	0
 PixelFormat	BayerRG8
-ADCBitDepth	Bits_12
+ADCBitDepth	Bits_8
 DecimationHorizontal	DecimationHorizontal1
 DecimationVertical	DecimationVertical1
 AcquisitionMode	Continuous
@@ -16,13 +16,13 @@ AcquisitionFrameRateEnable	1
 TriggerCacheEnable	0
 ExposureMode	Timed
 ExposureTimeMode	Standard
-ExposureTime	4000
+ExposureTime	2500
 ExposureAuto	Off
 AutoExposureTimeLowerLimit	15
 AutoExposureTimeUpperLimit	5840
 SequencerMode	Off
 SequencerConfigurationMode	Off
-Gain	16.0114
+Gain	16.9854
 GainAuto	Off
 AutoGainLowerLimit	0
 AutoGainUpperLimit	16.9807
