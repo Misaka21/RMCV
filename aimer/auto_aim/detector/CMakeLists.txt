@@ -2,8 +2,8 @@
 # Detector 模块 CMakeLists.txt
 # ==============================================================================
 
-# 添加 traditional 检测器子目录
-add_subdirectory(traditional)
+# 添加 detector_rv 检测器子目录
+add_subdirectory(detector_rv)
 
 # 创建 detector_node 库
 add_library(detector_node STATIC
@@ -32,5 +32,5 @@ target_include_directories(detector INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/common
 )
 
-# 链接 traditional 检测器和 detector_node
+# 链接 detector_rv 检测器和 detector_node
 target_link_libraries(detector INTERFACE detector_traditional detector_node)

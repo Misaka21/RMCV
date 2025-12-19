@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "plugin/param/static_config.hpp"
-#include "traditional/armor_detector.hpp"
-#include "traditional/light_corner_corrector.hpp"
-#include "traditional/number_classifier.hpp"
+#include "detector_rv/armor_detector.hpp"
+#include "detector_rv/light_corner_corrector.hpp"
+#include "detector_rv/number_classifier.hpp"
 
 namespace autoaim::detector {
 

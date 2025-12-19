@@ -1,4 +1,4 @@
-# traditional detector library
+# detector_rv detector library
 add_library(detector_traditional STATIC
     armor_detector.cpp
     number_classifier.cpp

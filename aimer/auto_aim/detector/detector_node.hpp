@@ -16,8 +16,8 @@
 
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
-#include "traditional/armor_detector.hpp"
-#include "traditional/types.hpp"
+#include "detector_rv/armor_detector.hpp"
+#include "detector_rv/types.hpp"
 
 namespace autoaim {
 
