@@ -56,8 +56,8 @@ struct CameraConfig {
 // Constants
 // ============================================================================
 
-constexpr int MAX_RETRY_ATTEMPTS = 5;
-constexpr int RETRY_DELAY_SECONDS = 2;
+constexpr int MAX_RETRY_ATTEMPTS = 3;
+constexpr int RETRY_DELAY_SECONDS = 3;
 constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;
 
 // ============================================================================
