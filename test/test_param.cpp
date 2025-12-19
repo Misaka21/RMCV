@@ -31,7 +31,7 @@ int main() {
         "test",
         "toml:{}",
         server_param);
-    debug::print("log", "param", runtime_param::get_param<std::string>("database.server"));
+    debug::print("debug", "param", runtime_param::get_param<std::string>("database.server"));
 
     debug::print("info", "main", "main_start");
     return 0;

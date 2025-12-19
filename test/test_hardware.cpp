@@ -27,7 +27,7 @@ int main() {
     // Subscribe to sync frames
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
 
-    debug::print(debug::PrintMode::LOG, "TestHardware", "Subscribed to sync_frame, waiting for data...");
+    debug::print(debug::PrintMode::INFO, "TestHardware", "Subscribed to sync_frame, waiting for data...");
 
     int frame_count = 0;
     int sync_count = 0;

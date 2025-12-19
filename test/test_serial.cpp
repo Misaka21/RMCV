@@ -30,7 +30,7 @@ int main() {
         // Get receive queue
         auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
 
-        debug::print(debug::PrintMode::LOG, "TestSerial", "Serial started, monitoring receive queue...");
+        debug::print(debug::PrintMode::INFO, "TestSerial", "Serial started, monitoring receive queue...");
 
         // Monitor loop
         int count = 0;

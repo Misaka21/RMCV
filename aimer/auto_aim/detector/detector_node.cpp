@@ -32,7 +32,7 @@ void start_detector_node() {
     try {
         // 1. Create detector (初始颜色会从串口获取)
         g_detector = detector::create_detector_from_config(detector::EnemyColor::RED);
-        debug::print(debug::PrintMode::LOG, "DetectorNode", "Detector created from config");
+        debug::print(debug::PrintMode::INFO, "DetectorNode", "Detector created from config");
 
         // 2. Setup UMT
         umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
@@ -43,7 +43,7 @@ void start_detector_node() {
         auto config = static_param::parse_file("detector.toml");
         bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");
 
-        debug::print(debug::PrintMode::LOG, "DetectorNode", "Detector node started");
+        debug::print(debug::PrintMode::INFO, "DetectorNode", "Detector node started");
 
         stats::FpsStats stats("DetectorNode", "detected");
 
@@ -109,7 +109,8 @@ void start_detector_node() {
         }
 
     } catch (const std::exception& e) {
-        debug::print(debug::PrintMode::ERROR, "DetectorNode", "Init failed: {}", e.what());
+        debug::print(debug::PrintMode::FATAL, "DetectorNode", "Init failed: {}", e.what());
+        std::exit(1);
     }
 }
 

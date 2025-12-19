@@ -190,7 +190,7 @@ void start_hardware_node() {
         // 通知其他线程硬件节点已开始发布（初始为false，发布后设为true）
         auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
 
-        debug::print(debug::PrintMode::LOG, "HardwareNode", "Hardware node started");
+        debug::print(debug::PrintMode::INFO, "HardwareNode", "Hardware node started");
 
         // 串口数据缓冲区，用于时间同步匹配
         std::deque<TimestampedSerialData> serial_buffer;
@@ -248,7 +248,8 @@ void start_hardware_node() {
         }
 
     } catch (const std::exception& e) {
-        debug::print(debug::PrintMode::ERROR, "HardwareNode", "Init failed: {}", e.what());
+        debug::print(debug::PrintMode::FATAL, "HardwareNode", "Init failed: {}", e.what());
+        std::exit(1);
     }
 }
 

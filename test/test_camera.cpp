@@ -58,7 +58,7 @@ int main() {
         camera::HikCam cam(cam_config);
         cam.open();
 
-        debug::print(debug::PrintMode::LOG, "TestCamera", "Camera opened, starting capture...");
+        debug::print(debug::PrintMode::INFO, "TestCamera", "Camera opened, starting capture...");
 
         int fps_count = 0;
         auto fps_time = std::chrono::steady_clock::now();

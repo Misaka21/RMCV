@@ -63,9 +63,10 @@ void HikCam::open() {
     }
 
     if (!devices_found) {
-        throw std::runtime_error(fmt::format(
-            "No devices found after {} attempts!", MAX_RETRY_ATTEMPTS));
+        debug::print(debug::PrintMode::FATAL,
+            "Camera","No devices found after {} attempts!", MAX_RETRY_ATTEMPTS);
         std::exit(1);
+
     }
 
     // 2. 尝试通过SN打开相机（如果配置了SN）

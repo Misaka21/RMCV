@@ -22,7 +22,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
         auto vision_transmit = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
         auto send_enabled = umt::BasicObjManager<bool>::find_or_create("serial_send_enabled", true);
 
-        debug::print(debug::PrintMode::LOG, "SerialSender", "Sender thread started");
+        debug::print(debug::PrintMode::INFO, "SerialSender", "Sender thread started");
 
         int fps = 0, fps_count = 0;
         auto t1 = std::chrono::system_clock::now();
@@ -79,7 +79,7 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
         auto receive_queue = umt::BasicObjManager<ReceiveQueue>::find_or_create("receive_queue");
         auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
 
-        debug::print(debug::PrintMode::LOG, "SerialReceiver", "Receiver thread started");
+        debug::print(debug::PrintMode::INFO, "SerialReceiver", "Receiver thread started");
 
         while (true) {
             try {
@@ -155,7 +155,7 @@ public:
                 uart = std::make_shared<UartProtocol>(port_path, baud_rate);
 
                 if (uart->open()) {
-                    debug::print(debug::PrintMode::LOG, "SerialManager", "Port {} opened", port_path);
+                    debug::print(debug::PrintMode::INFO, "SerialManager", "Port {} opened", port_path);
                     break;
                 }
 
@@ -177,7 +177,7 @@ public:
 
         // 重试全部失败，退出程序
         if (!uart || !uart->is_open()) {
-            debug::print(debug::PrintMode::ERROR, "SerialManager",
+            debug::print(debug::PrintMode::FATAL, "SerialManager",
                 "Port {} open failed after {} retries, exiting", port_path, MAX_RETRY_COUNT);
             std::exit(1);
         }
@@ -192,10 +192,10 @@ public:
             // 启动接收线程
             std::thread([transceiver]() { serial_receiver_run(transceiver); }).detach();
 
-            debug::print(debug::PrintMode::LOG, "SerialManager", "TX/RX threads started");
+            debug::print(debug::PrintMode::INFO, "SerialManager", "TX/RX threads started");
 
         } catch (const std::exception& e) {
-            debug::print(debug::PrintMode::ERROR, "SerialManager", "Start failed: {}", e.what());
+            debug::print(debug::PrintMode::FATAL, "SerialManager", "Start failed: {}", e.what());
             std::exit(1);
         }
     }

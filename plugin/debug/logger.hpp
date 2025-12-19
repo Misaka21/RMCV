@@ -41,12 +41,12 @@ namespace fmt = ::fmt;
 namespace fs = std::filesystem;
 
 enum class PrintMode {
-    LOG,
-    INFO,
-    DEBUG,
-    WARNING,
-    ERROR,
-    SILENT
+    DEBUG,    // 调试信息
+    INFO,     // 一般信息
+    WARNING,  // 警告，但可继续
+    ERROR,    // 错误，可能影响功能
+    FATAL,    // 致命错误，程序终止
+    SILENT    // 静默（过滤用）
 };
 
 // Eigen format for logging
@@ -54,19 +54,19 @@ inline const Eigen::IOFormat kLongCsvFmt(
     Eigen::FullPrecision, Eigen::FullPrecision, ", ", ";\n", "[", "]", "\n{", "}");
 
 inline const std::unordered_map<PrintMode, fmt::color> PRINT_COLOR = {
-    {PrintMode::LOG, fmt::color::green},
-    {PrintMode::INFO, fmt::color::white},
+    {PrintMode::DEBUG, fmt::color::cyan},
+    {PrintMode::INFO, fmt::color::green},
     {PrintMode::WARNING, fmt::color::yellow},
     {PrintMode::ERROR, fmt::color::red},
-    {PrintMode::DEBUG, fmt::color::cyan},
+    {PrintMode::FATAL, fmt::color::magenta},
 };
 
 inline const std::unordered_map<PrintMode, std::string> PRINT_PREFIX = {
-    {PrintMode::LOG, "[LOG ]"},
-    {PrintMode::INFO, "[INFO]"},
-    {PrintMode::WARNING, "[WARN]"},
-    {PrintMode::ERROR, "[ERR ]"},
-    {PrintMode::DEBUG, "[DBG ]"}
+    {PrintMode::DEBUG, "[DEBUG]"},
+    {PrintMode::INFO, "[INFO ]"},
+    {PrintMode::WARNING, "[WARN ]"},
+    {PrintMode::ERROR, "[ERROR]"},
+    {PrintMode::FATAL, "[FATAL]"},
 };
 
 /**
@@ -88,7 +88,7 @@ public:
     std::mutex file_mutex;
 
     // Filter settings
-    PrintMode min_mode = PrintMode::LOG;
+    PrintMode min_mode = PrintMode::DEBUG;
 
 private:
     LoggerState() = default;
@@ -207,11 +207,11 @@ inline auto vec_to_str(const std::vector<T>& vec) -> std::string {
 inline auto string_to_mode(const std::string& mode_str) -> PrintMode {
     std::string lower_str = mode_str;
     std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(), ::tolower);
-    if (lower_str == "log") return PrintMode::LOG;
-    if (lower_str == "info") return PrintMode::INFO;
     if (lower_str == "debug") return PrintMode::DEBUG;
+    if (lower_str == "info") return PrintMode::INFO;
     if (lower_str == "warning" || lower_str == "warn") return PrintMode::WARNING;
     if (lower_str == "error" || lower_str == "err") return PrintMode::ERROR;
+    if (lower_str == "fatal") return PrintMode::FATAL;
     return PrintMode::SILENT;
 }
 
