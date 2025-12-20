@@ -33,20 +33,97 @@
 #include <fmt/format.h>
 // project
 #include "types.hpp"
+#include "plugin/param/static_config.hpp"
 
 namespace autoaim::detector {
-Detector::Detector(
-    const int& bin_thres,
-    const EnemyColor& color,
-    const LightParams& l,
-    const ArmorParams& a
-):
-    binary_thres(bin_thres),
-    detect_color(color),
-    light_params(l),
-    armor_params(a) {}
+Detector::Detector(int bin_thres, EnemyColor color, const LightParams& l, const ArmorParams& a)
+    : binary_thres(bin_thres), detect_color(color), light_params(l), armor_params(a) {}
 
-std::vector<Armor> Detector::detect(const cv::Mat& input) noexcept {
+std::unique_ptr<Detector> Detector::from_config(EnemyColor color, const std::string& config_file) {
+    auto config = static_param::parse_file(config_file);
+
+    // 二值化阈值
+    int bin_thres = static_cast<int>(
+        static_param::get_param<int64_t>(config, "Detector.traditional", "binary_thres")
+    );
+    if (bin_thres == 0) bin_thres = 100;
+
+    // 灯条参数
+    LightParams lp;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.light", "min_ratio"); v != 0)
+        lp.min_ratio = v;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.light", "max_ratio"); v != 0)
+        lp.max_ratio = v;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.light", "max_angle"); v != 0)
+        lp.max_angle = v;
+    if (auto v = static_param::get_param<int64_t>(config, "Detector.traditional.light", "color_diff_thresh"); v != 0)
+        lp.color_diff_thresh = static_cast<int>(v);
+
+    // 装甲板参数
+    ArmorParams ap;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.armor", "min_light_ratio"); v != 0)
+        ap.min_light_ratio = v;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.armor", "min_small_center_distance"); v != 0)
+        ap.min_small_center_distance = v;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.armor", "max_small_center_distance"); v != 0)
+        ap.max_small_center_distance = v;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.armor", "min_large_center_distance"); v != 0)
+        ap.min_large_center_distance = v;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.armor", "max_large_center_distance"); v != 0)
+        ap.max_large_center_distance = v;
+    if (auto v = static_param::get_param<double>(config, "Detector.traditional.armor", "max_angle"); v != 0)
+        ap.max_angle = v;
+
+    // 创建检测器
+    auto detector = std::make_unique<Detector>(bin_thres, color, lp, ap);
+
+    // 分类器
+    std::string model_path = static_param::get_param<std::string>(config, "Detector.traditional.classify", "model_path");
+    std::string label_path = static_param::get_param<std::string>(config, "Detector.traditional.classify", "label_path");
+    double threshold = static_param::get_param<double>(config, "Detector.traditional.classify", "threshold");
+    std::string model_type_str = static_param::get_param<std::string>(config, "Detector.traditional.classify", "model_type");
+
+    if (model_path.empty()) model_path = "lenet.onnx";
+    if (label_path.empty()) label_path = "label.txt";
+    if (threshold == 0) threshold = 0.8;
+    if (model_type_str.empty()) model_type_str = "lenet";
+
+    detector->classifier = std::make_unique<NumberClassifier>(
+        std::string(ASSET_DIR) + "/" + model_path,
+        std::string(ASSET_DIR) + "/" + label_path,
+        threshold,
+        parse_model_type(model_type_str),
+        std::vector<std::string>{"negative"}
+    );
+
+    // PCA角点校正
+    if (static_param::get_param<bool>(config, "Detector.traditional", "use_pca")) {
+        detector->corner_corrector = std::make_unique<LightCornerCorrector>();
+    }
+
+    return detector;
+}
+
+// IDetector 接口实现
+std::vector<DetectedArmor> Detector::detect(const cv::Mat& input) {
+    auto internal_armors = detect_internal(input);
+
+    // 转换为公共类型
+    std::vector<DetectedArmor> result;
+    result.reserve(internal_armors.size());
+    for (const auto& armor : internal_armors) {
+        result.push_back(DetectedArmor::from_internal(armor));
+    }
+    return result;
+}
+
+cv::Mat Detector::debug_image() const {
+    // 返回二值化图像作为调试信息
+    return binary_img.clone();
+}
+
+// 内部检测实现
+std::vector<Armor> Detector::detect_internal(const cv::Mat& input) noexcept {
     // 1. 预处理图像
     binary_img = preprocess_image(input);
     // 2. 寻找灯条

@@ -16,18 +16,18 @@
 
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
-#include "detector_rv/armor_detector.hpp"
-#include "detector_rv/types.hpp"
+#include "common/detector_interface.hpp"
+#include "common/types.hpp"
 
 namespace autoaim {
 
 using TimePoint = std::chrono::steady_clock::time_point;
 
-// 检测结果
+// 检测结果 (使用公共类型)
 struct DetectionResult {
     int frame_id = 0;
     TimePoint timestamp;
-    std::vector<detector::Armor> armors;
+    std::vector<detector::DetectedArmor> armors;
     float detect_latency_ms = 0;
 };
 
@@ -36,10 +36,41 @@ inline void draw_debug_visualization(
     const cv::Mat& image,
     const DetectionResult& result,
     const hardware::SyncFrame& frame,
-    detector::Detector* detector
+    const std::vector<detector::DetectedArmor>& armors
 ) {
     cv::Mat debug_img = image.clone();
-    detector->draw_results(debug_img);
+
+    // 绘制装甲板
+    for (const auto& armor : armors) {
+        if (armor.landmarks.size() >= 4) {
+            // 绘制轮廓
+            for (size_t i = 0; i < armor.landmarks.size(); ++i) {
+                cv::line(
+                    debug_img,
+                    armor.landmarks[i],
+                    armor.landmarks[(i + 1) % armor.landmarks.size()],
+                    cv::Scalar(0, 255, 0),
+                    2,
+                    cv::LINE_AA
+                );
+            }
+            // 显示数字和置信度
+            std::string text = fmt::format(
+                "{} {:.2f}",
+                armor.number.empty() ? "?" : armor.number,
+                armor.confidence
+            );
+            cv::putText(
+                debug_img,
+                text,
+                armor.center - cv::Point2f(20, 10),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.6,
+                cv::Scalar(0, 255, 255),
+                2
+            );
+        }
+    }
 
     std::string info =
         fmt::format("Armors: {} Latency: {:.1f}ms", result.armors.size(), result.detect_latency_ms);
@@ -70,24 +101,6 @@ inline void draw_debug_visualization(
     cv::Mat display;
     cv::resize(debug_img, display, cv::Size(960, 720));
     cv::imshow("Detector Debug", display);
-
-    // 显示数字ROI小图
-    cv::Mat numbers_img = detector->get_all_numbers_image();
-    if (!numbers_img.empty() && numbers_img.rows > 0) {
-        cv::Mat numbers_display;
-        cv::cvtColor(numbers_img, numbers_display, cv::COLOR_GRAY2BGR);
-        // 放大3倍方便查看
-        cv::resize(
-            numbers_display,
-            numbers_display,
-            cv::Size(numbers_display.cols * 3, numbers_display.rows * 3),
-            0,
-            0,
-            cv::INTER_NEAREST
-        );
-        cv::imshow("Number ROI", numbers_display);
-    }
-
     cv::waitKey(1);
 }
 

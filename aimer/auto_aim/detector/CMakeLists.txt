@@ -2,8 +2,19 @@
 # Detector 模块 CMakeLists.txt
 # ==============================================================================
 
-# 添加 detector_rv 检测器子目录
+# 检测器选项
+option(ENABLE_YOLO_DETECTOR "Enable YOLO detector (requires OpenVINO)" OFF)
+
+# 添加传统检测器 (始终编译)
 add_subdirectory(detector_rv)
+
+# 可选: YOLO检测器
+if(ENABLE_YOLO_DETECTOR)
+    # add_subdirectory(detector_yolo)
+    message(STATUS "YOLO detector: ENABLED")
+else()
+    message(STATUS "YOLO detector: DISABLED")
+endif()
 
 # 创建 detector_node 库
 add_library(detector_node STATIC
@@ -24,6 +35,12 @@ target_link_libraries(detector_node PUBLIC
     fmt::fmt
 )
 
+# 传递编译宏
+if(ENABLE_YOLO_DETECTOR)
+    target_compile_definitions(detector_node PUBLIC ENABLE_YOLO_DETECTOR)
+    # target_link_libraries(detector_node PUBLIC detector_yolo)
+endif()
+
 # 创建 detector 统一接口库
 add_library(detector INTERFACE)
 
@@ -32,5 +49,5 @@ target_include_directories(detector INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/common
 )
 
-# 链接 detector_rv 检测器和 detector_node
+# 链接检测器
 target_link_libraries(detector INTERFACE detector_traditional detector_node)

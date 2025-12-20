@@ -23,54 +23,36 @@
 #include <numeric>
 #include <string>
 // 3rd party
-#include <Eigen/Dense>
 #include <opencv2/core.hpp>
 #include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
 
+// 公共类型
+#include "../common/types.hpp"
+
 namespace autoaim::detector {
 
-// 敌方颜色枚举
-enum class EnemyColor { RED, BLUE, WHITE };
+// 15度对应的弧度 (内部使用)
+constexpr double FIFTEEN_DEGREE_RAD = 15 * CV_PI / 180;
 
-// 装甲板尺寸，单位：m
-constexpr double SMALL_ARMOR_WIDTH = 133.0 / 1000.0; // 135
-constexpr double SMALL_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
-constexpr double LARGE_ARMOR_WIDTH = 225.0 / 1000.0;
-constexpr double LARGE_ARMOR_HEIGHT = 50.0 / 1000.0; // 55
+// ============================================================================
+// 内部类型 - 仅供传统检测器使用
+// ============================================================================
 
-// 15度对应的弧度
-constexpr double FIFTTEN_DEGREE_RAD = 15 * CV_PI / 180;
-
-// 装甲板类型
-enum class ArmorType { SMALL, LARGE, INVALID };
-inline std::string armor_type_to_string(const ArmorType& type) {
-    switch (type) {
-        case ArmorType::SMALL:
-            return "small";
-        case ArmorType::LARGE:
-            return "large";
-        default:
-            return "invalid";
-    }
-}
-
-// 灯条结构体
-struct Light: public cv::RotatedRect {
+/**
+ * @brief 灯条结构体 - 传统检测器内部使用
+ */
+struct Light : public cv::RotatedRect {
     Light() = default;
-    explicit Light(const std::vector<cv::Point>& contour):
-        cv::RotatedRect(cv::minAreaRect(contour)),
-        color(EnemyColor::WHITE) {
+    explicit Light(const std::vector<cv::Point>& contour)
+        : cv::RotatedRect(cv::minAreaRect(contour)), color(EnemyColor::WHITE) {
         assert(!contour.empty());
 
         center = std::accumulate(
-            contour.begin(),
-            contour.end(),
-            cv::Point2f(0, 0),
+            contour.begin(), contour.end(), cv::Point2f(0, 0),
             [n = static_cast<float>(contour.size())](const cv::Point2f& a, const cv::Point& b) {
                 return a + cv::Point2f(b.x, b.y) / n;
-            }
-        );
+            });
 
         cv::Point2f p[4];
         this->points(p);
@@ -88,6 +70,7 @@ struct Light: public cv::RotatedRect {
         tilt_angle = std::atan2(std::abs(top.x - bottom.x), std::abs(top.y - bottom.y));
         tilt_angle = tilt_angle / CV_PI * 180;
     }
+
     EnemyColor color;
     cv::Point2f top, bottom, center;
     cv::Point2f axis;
@@ -96,58 +79,74 @@ struct Light: public cv::RotatedRect {
     float tilt_angle;
 };
 
-// 装甲板结构体
+/**
+ * @brief 装甲板结构体 - 传统检测器内部使用
+ *
+ * 包含灯条对信息，用于检测过程
+ * 最终输出时转换为 DetectedArmor
+ */
 struct Armor {
-    static constexpr const int N_LANDMARKS = 6;
-    static constexpr const int N_LANDMARKS_2 = N_LANDMARKS * 2;
+    static constexpr int N_LANDMARKS = 4;
+    static constexpr int N_LANDMARKS_2 = N_LANDMARKS * 2;
+
     Armor() = default;
     Armor(const Light& l1, const Light& l2) {
         if (l1.center.x < l2.center.x) {
-            left_light = l1, right_light = l2;
+            left_light = l1;
+            right_light = l2;
         } else {
-            left_light = l2, right_light = l1;
+            left_light = l2;
+            right_light = l1;
         }
-
         center = (left_light.center + right_light.center) / 2;
     }
 
     // 构建物体坐标系中的点，从左下角开始顺时针排列
     template<typename PointType>
-    static inline std::vector<PointType>
-    buildObjectPoints(const double& w, const double& h) noexcept {
+    static std::vector<PointType> buildObjectPoints(double w, double h) noexcept {
         if constexpr (N_LANDMARKS == 4) {
-            return { PointType(0, w / 2, -h / 2),
-                     PointType(0, w / 2, h / 2),
-                     PointType(0, -w / 2, h / 2),
-                     PointType(0, -w / 2, -h / 2) };
+            return {
+                PointType(0, w / 2, -h / 2),
+                PointType(0, w / 2, h / 2),
+                PointType(0, -w / 2, h / 2),
+                PointType(0, -w / 2, -h / 2)
+            };
         } else {
-            return { PointType(0, w / 2, -h / 2), PointType(0, w / 2, 0),
-                     PointType(0, w / 2, h / 2),  PointType(0, -w / 2, h / 2),
-                     PointType(0, -w / 2, 0),     PointType(0, -w / 2, -h / 2) };
+            return {
+                PointType(0, w / 2, -h / 2),
+                PointType(0, w / 2, 0),
+                PointType(0, w / 2, h / 2),
+                PointType(0, -w / 2, h / 2),
+                PointType(0, -w / 2, 0),
+                PointType(0, -w / 2, -h / 2)
+            };
         }
     }
 
     // 获取关键点，从左下角开始顺时针排列
     std::vector<cv::Point2f> landmarks() const {
         if constexpr (N_LANDMARKS == 4) {
-            return { left_light.bottom, left_light.top, right_light.top, right_light.bottom };
+            return {left_light.bottom, left_light.top, right_light.top, right_light.bottom};
         } else {
-            return { left_light.bottom, left_light.center,  left_light.top,
-                     right_light.top,   right_light.center, right_light.bottom };
+            return {
+                left_light.bottom, left_light.center, left_light.top,
+                right_light.top, right_light.center, right_light.bottom
+            };
         }
     }
 
     // 灯条对
     Light left_light, right_light;
     cv::Point2f center;
-    ArmorType type;
+    ArmorType type = ArmorType::INVALID;
 
     // 数字识别
     cv::Mat number_img;
     std::string number;
-    float confidence;
+    float confidence = 0.5f;
     std::string classfication_result;
 };
 
 } // namespace autoaim::detector
-#endif // ARMOR_DETECTOR_ARMOR_HPP_
+
+#endif // ARMOR_DETECTOR_TYPES_HPP_

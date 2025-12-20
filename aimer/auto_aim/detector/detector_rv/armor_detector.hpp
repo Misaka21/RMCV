@@ -27,44 +27,61 @@
 #include <opencv2/core.hpp>
 #include <opencv2/core/types.hpp>
 // project
+#include "../common/detector_interface.hpp"
 #include "light_corner_corrector.hpp"
 #include "number_classifier.hpp"
 #include "types.hpp"
 
 namespace autoaim::detector {
 
-// 传统装甲板检测器
-class Detector {
+/**
+ * @brief 传统装甲板检测器
+ *
+ * 基于灯条匹配的装甲板检测算法
+ * 实现 DetectorInterface 接口，可通过工厂创建
+ */
+class Detector : public DetectorInterface {
 public:
     struct LightParams {
-        // 宽高比
-        double min_ratio;
-        double max_ratio;
-        // 垂直角度
-        double max_angle;
-        // 颜色判断
-        int color_diff_thresh;
+        double min_ratio = 0.08;
+        double max_ratio = 0.4;
+        double max_angle = 40.0;
+        int color_diff_thresh = 25;
     };
 
     struct ArmorParams {
-        double min_light_ratio;
-        // 灯条对距离
-        double min_small_center_distance;
-        double max_small_center_distance;
-        double min_large_center_distance;
-        double max_large_center_distance;
-        // 水平角度
-        double max_angle;
+        double min_light_ratio = 0.6;
+        double min_small_center_distance = 0.8;
+        double max_small_center_distance = 3.2;
+        double min_large_center_distance = 1.8;
+        double max_large_center_distance = 6.4;
+        double max_angle = 35.0;
     };
 
-    Detector(
-        const int& bin_thres,
-        const EnemyColor& color,
-        const LightParams& l,
-        const ArmorParams& a
+    Detector(int bin_thres, EnemyColor color, const LightParams& l, const ArmorParams& a);
+
+    /**
+     * @brief 从配置文件创建检测器
+     * @param color 敌方颜色
+     * @param config_file 配置文件名 (默认 detector.toml)
+     */
+    static std::unique_ptr<Detector> from_config(
+        EnemyColor color,
+        const std::string& config_file = "detector.toml"
     );
 
-    std::vector<Armor> detect(const cv::Mat& input) noexcept;
+    // ============================================================================
+    // IDetector 接口实现
+    // ============================================================================
+
+    std::vector<DetectedArmor> detect(const cv::Mat& input) override;
+    void set_enemy_color(EnemyColor color) override { detect_color = color; }
+    EnemyColor get_enemy_color() const override { return detect_color; }
+    cv::Mat debug_image() const override;
+
+    // ============================================================================
+    // 内部方法 (供调试和扩展使用)
+    // ============================================================================
 
     cv::Mat preprocess_image(const cv::Mat& input) noexcept;
     std::vector<Light> find_lights(const cv::Mat& rbg_img, const cv::Mat& binary_img) noexcept;
@@ -74,7 +91,7 @@ public:
     cv::Mat get_all_numbers_image() const noexcept;
     void draw_results(cv::Mat& img) const noexcept;
 
-    // 参数
+    // 参数 (public for factory configuration)
     int binary_thres;
     EnemyColor detect_color;
     LightParams light_params;
@@ -88,11 +105,13 @@ public:
 
 private:
     bool is_light(const Light& possible_light) noexcept;
-    bool contain_light(const int i, const int j, const std::vector<Light>& lights) noexcept;
+    bool contain_light(int i, int j, const std::vector<Light>& lights) noexcept;
     ArmorType is_armor(const Light& light_1, const Light& light_2) noexcept;
 
-    cv::Mat gray_img_;
+    // 内部检测 (返回内部Armor类型)
+    std::vector<Armor> detect_internal(const cv::Mat& input) noexcept;
 
+    cv::Mat gray_img_;
     std::vector<Light> lights_;
     std::vector<Armor> armors_;
 };

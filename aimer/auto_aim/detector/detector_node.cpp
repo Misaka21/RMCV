@@ -15,12 +15,12 @@ namespace autoaim {
 
 using SteadyClock = std::chrono::steady_clock;
 
-// Global detector instance
-static std::unique_ptr<detector::Detector> g_detector = nullptr;
+// Global detector instance (使用接口类型)
+static std::unique_ptr<detector::DetectorInterface> g_detector = nullptr;
 
 void set_enemy_color(detector::EnemyColor color) {
     if (g_detector) {
-        g_detector->detect_color = color;
+        g_detector->set_enemy_color(color);
     }
     debug::print(
         debug::PrintMode::INFO,
@@ -78,8 +78,8 @@ void start_detector_node() {
                     ? detector::EnemyColor::RED
                     : detector::EnemyColor::BLUE;
 
-                if (g_detector->detect_color != current_color) {
-                    g_detector->detect_color = current_color;
+                if (g_detector->get_enemy_color() != current_color) {
+                    g_detector->set_enemy_color(current_color);
                 }
 
                 // 运行检测
@@ -105,7 +105,7 @@ void start_detector_node() {
 
                 // Debug可视化
                 if (debug_mode) {
-                    draw_debug_visualization(frame.image, result, frame, g_detector.get());
+                    draw_debug_visualization(frame.image, result, frame, result.armors);
                 }
 
             } catch (const umt::MessageError_Timeout&) {
