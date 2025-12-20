@@ -775,3 +775,204 @@ Closes: #234, #235
   - 禁止添加 "Co-Authored-By: Claude <noreply@anthropic.com>"
   - 禁止添加任何其他AI工具生成的标记
   - 只包含人为编写的提交内容
+
+## 设计规划: Predictor 与火控数据结构
+
+### 为什么要分线程？
+
+与 rm.cv.fans（Predictor和火控在同一线程）不同，本项目分线程的原因：
+
+1. **火控需要更高频率**: Predictor 约 30Hz（受相机帧率限制），火控想 100Hz 插值
+2. **火控计算很重**: 弹道解算/MPC 耗时长，不想阻塞 Predictor
+
+### 核心设计：时间戳 + 速度 → 插值
+
+火控在 Predictor 两次更新之间（~33ms）需要自己做短期预测：
+
+```cpp
+// 火控插值逻辑
+double dt = current_time - snapshot.timestamp;  // 关键：需要时间戳
+
+// 装甲板位置插值
+Eigen::Vector3d predicted_pos = armor.position + armor.velocity * dt;
+
+// 陀螺相位插值
+double predicted_phase = spin.phase + spin.omega * dt;
+```
+
+### 命名空间结构
+```
+namespace aimer::predictor {
+    struct ArmorState;        // 单个装甲板状态
+    struct SpinState;         // 陀螺运动状态
+    struct VehicleState;      // 单车整体状态
+    struct BattlefieldSnapshot; // 战场快照 (所有车)
+}
+```
+
+### 核心数据结构
+
+#### 1. ArmorState - 单个装甲板滤波状态
+```cpp
+struct ArmorState {
+    int armor_id = -1;
+
+    // 3D位置/速度 (世界坐标系) - 速度用于插值！
+    Eigen::Vector3d position;
+    Eigen::Vector3d velocity;
+
+    // 状态
+    double last_seen_time = 0;
+    bool visible = false;
+};
+```
+
+#### 2. SpinState - 陀螺运动状态
+```cpp
+struct SpinState {
+    bool active = false;
+    double omega = 0;       // 角速度 (rad/s) - 用于相位插值
+    double phase = 0;       // 当前相位 (rad)
+    double radius = 0;      // 陀螺半径 (m)
+};
+```
+
+#### 3. VehicleState - 单车整体状态
+```cpp
+struct VehicleState {
+    int target_id = -1;
+    EnemyType enemy_type;
+    bool alive = false;
+
+    // 整车中心 + 速度 (用于插值)
+    Eigen::Vector3d center_pos;
+    Eigen::Vector3d center_vel;
+
+    // 陀螺状态 (omega用于相位插值)
+    SpinState spin;
+
+    // 装甲板状态 (位置+速度，用于插值)
+    std::array<ArmorState, 4> armors;
+    int armor_count = 0;
+    int best_armor_idx = -1;
+
+    // 时间戳 (关键！火控用于计算dt)
+    double timestamp = 0;
+};
+```
+
+#### 4. BattlefieldSnapshot - 战场快照
+```cpp
+constexpr int MAX_ENEMY_NUMBER = 8;
+
+struct BattlefieldSnapshot {
+    // 所有车辆状态 (索引 = 目标编号)
+    std::array<VehicleState, MAX_ENEMY_NUMBER + 1> vehicles;
+
+    // 位掩码
+    uint16_t detection_mask = 0;  // 当前帧检测到的车
+    uint16_t alive_mask = 0;      // 模型存活的车
+
+    // 自身状态
+    RobotState self_state;
+
+    // 时间戳 (关键！)
+    double timestamp = 0;
+    int frame_id = 0;
+
+    // 辅助方法
+    bool is_alive(int id) const;
+    const VehicleState& get(int id) const;
+
+    template<typename Func>
+    void for_each_alive(Func&& func) const;
+};
+```
+
+### 数据流
+```
+Predictor (30Hz)                         火控 (100Hz)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+检测 + EKF更新
+    ↓
+导出 Snapshot (带时间戳+速度)
+    ↓
+UMT::push ─────────────────→ UMT::pop (非阻塞)
+                                    ↓
+                             dt = now - snapshot.timestamp
+                                    ↓
+                             pos' = pos + vel * dt (插值)
+                             phase' = phase + omega * dt
+                                    ↓
+                             弹道解算 / MPC
+                                    ↓
+                             RobotCmd → 串口
+```
+
+### 使用示例
+```cpp
+// ========== Predictor (30Hz) ==========
+umt::Publisher<BattlefieldSnapshot> pub("battlefield");
+
+void predictor_loop() {
+    // ... EKF更新 ...
+
+    BattlefieldSnapshot snapshot;
+    snapshot.timestamp = get_current_time();  // 关键！
+
+    for (int i = 1; i <= 8; ++i) {
+        auto& v = snapshot.vehicles[i];
+        v.timestamp = snapshot.timestamp;
+
+        // 从滤波器导出位置和速度
+        v.center_pos = filter.predict_pos(0);
+        v.center_vel = filter.predict_vel(0);  // 必须有速度！
+
+        // 陀螺状态
+        v.spin.omega = top_model.get_omega();
+        v.spin.phase = top_model.get_phase();
+    }
+
+    pub.push(snapshot);
+}
+
+// ========== 火控 (100Hz) ==========
+umt::Subscriber<BattlefieldSnapshot> sub("battlefield");
+
+void fire_control_loop() {
+    // 非阻塞获取最新快照
+    auto snapshot = sub.pop_for(5);  // 5ms超时
+
+    double now = get_current_time();
+    double dt = now - snapshot.timestamp;  // 计算时间差
+
+    // 选择目标
+    int target_id = select_target(snapshot);
+    const auto& target = snapshot.get(target_id);
+
+    // 插值预测当前位置
+    Eigen::Vector3d current_pos =
+        target.center_pos + target.center_vel * dt;
+
+    double current_phase =
+        target.spin.phase + target.spin.omega * dt;
+
+    // 弹道解算 / MPC
+    auto cmd = solve_trajectory(current_pos, current_phase, ...);
+
+    serial_send(cmd);
+}
+```
+
+### 与 rm.cv.fans 的区别
+
+| 方面 | rm.cv.fans | 本项目 |
+|-----|-----------|--------|
+| 架构 | 单线程，直接调用 | 分线程，消息传递 |
+| 快照结构 | 无 | BattlefieldSnapshot |
+| 火控频率 | 与Predictor相同 | 可独立更高 |
+| 插值 | 不需要 | 需要（时间戳+速度） |
+
+### 参考
+- rm.cv.fans: `EnemyState[]` + `EnemyModelInterface*[]` 数组管理多车
+- 关键区别: rm.cv.fans 不需要快照结构，因为同一线程直接调用
