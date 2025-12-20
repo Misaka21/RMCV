@@ -43,29 +43,37 @@ inline void draw_debug_visualization(
     // 绘制装甲板
     for (const auto& armor : armors) {
         if (armor.landmarks.size() >= 4) {
+            // 用我方颜色绘制 (敌方红色 → 我方蓝色线)
+            cv::Scalar draw_color = (armor.color == detector::EnemyColor::RED)
+                ? cv::Scalar(255, 0, 0)   // 敌方红色 → 蓝色线
+                : cv::Scalar(0, 0, 255);  // 敌方蓝色 → 红色线
+
             // 绘制轮廓
             for (size_t i = 0; i < armor.landmarks.size(); ++i) {
                 cv::line(
                     debug_img,
                     armor.landmarks[i],
                     armor.landmarks[(i + 1) % armor.landmarks.size()],
-                    cv::Scalar(0, 255, 0),
+                    draw_color,
                     2,
                     cv::LINE_AA
                 );
             }
-            // 显示数字和置信度
+
+            // 显示: 数字 类型 置信度%
+            char type_char = (armor.type == detector::ArmorType::LARGE) ? 'L' : 'S';
             std::string text = fmt::format(
-                "{} {:.2f}",
+                "{} {} {:.0f}%",
                 detector::armor_number_to_string(armor.number),
-                armor.confidence
+                type_char,
+                armor.confidence * 100
             );
             cv::putText(
                 debug_img,
                 text,
-                armor.center - cv::Point2f(20, 10),
+                armor.center - cv::Point2f(30, 10),
                 cv::FONT_HERSHEY_SIMPLEX,
-                0.6,
+                0.5,
                 cv::Scalar(0, 255, 255),
                 2
             );
