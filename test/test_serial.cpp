@@ -43,10 +43,10 @@ int main() {
                 auto data = queue.front();
                 queue.pop();
                 count++;
-
-                debug::print(debug::PrintMode::DEBUG, "TestSerial",
-                    "[{}] yaw: {:.5f}, pitch: {:.5f}, roll: {:.5f}",
-                    count, data.yaw, data.pitch, data.roll);
+                if (count%100==0)
+                    debug::print(debug::PrintMode::DEBUG, "TestSerial",
+                        "[{}] yaw: {:.5f}, pitch: {:.5f}, roll: {:.5f}",
+                        count, data.yaw, data.pitch, data.roll);
             }
 
             // Print stats every second
