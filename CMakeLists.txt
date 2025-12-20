@@ -60,8 +60,7 @@ include_directories(umt)
 
 add_subdirectory(plugin)
 add_subdirectory(hardware)
-add_subdirectory(aimer/common)
-add_subdirectory(aimer/auto_aim/detector)
+add_subdirectory(aimer)
 
 add_executable(RMCV2026 main.cpp)
 target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector)
