@@ -1,6 +1,6 @@
 //
-// Created by nuc11 on 2025/10/5.
-// 公共类型定义 - 消息传递与状态结构
+// 公共类型定义 - 数据流结构
+// 定义各层级间传递的消息类型
 //
 
 #ifndef AIMER_COMMON_TYPES_HPP
@@ -14,6 +14,9 @@
 #include <Eigen/Geometry>
 #include <opencv2/core/mat.hpp>
 
+#include "aimer/auto_aim/common/types.hpp"  // DetectedArmor, EnemyColor 等
+#include "hardware/hardware_node.hpp"        // hardware::SyncFrame
+
 namespace aimer {
 
 using TimePoint = std::chrono::steady_clock::time_point;
@@ -23,18 +26,18 @@ using TimePoint = std::chrono::steady_clock::time_point;
 // ============================================================================
 
 /**
- * @brief 机器人状态 - 包含所有下位机数据
+ * @brief 机器人状态 - 从 hardware::SyncFrame 提取
  *
- * 设计原则：
- * - 从 SerialReceiveData 构建，但不依赖其头文件
- * - 使用四元数而非欧拉角
- * - 时间戳使用本机采集时间
+ * 设计原则:
+ * - 使用四元数表示姿态
+ * - 时间戳为本机采集时间
+ * - 透传到每个处理阶段
  */
 struct RobotState {
     // IMU姿态 (云台坐标系 → 世界坐标系)
     Eigen::Quaterniond q_imu = Eigen::Quaterniond::Identity();
 
-    // 云台速度 (云台坐标系下的vx, vy)
+    // 自身速度 (世界坐标系, m/s) - 动打动用
     Eigen::Vector2d velocity = Eigen::Vector2d::Zero();
 
     // 弹速 (m/s)
@@ -54,147 +57,61 @@ struct RobotState {
 
     RobotState() = default;
 
-    /**
-     * @brief 从欧拉角构建 (ZYX顺序)
-     * @param yaw 偏航角 (度)
-     * @param pitch 俯仰角 (度)
-     * @param roll 横滚角 (度)
-     */
-    static Eigen::Quaterniond euler_to_quaternion(float yaw, float pitch, float roll) {
-        constexpr double deg2rad = M_PI / 180.0;
-        double cy = std::cos(yaw * deg2rad * 0.5);
-        double sy = std::sin(yaw * deg2rad * 0.5);
-        double cp = std::cos(pitch * deg2rad * 0.5);
-        double sp = std::sin(pitch * deg2rad * 0.5);
-        double cr = std::cos(roll * deg2rad * 0.5);
-        double sr = std::sin(roll * deg2rad * 0.5);
+    // 从 hardware::SyncFrame 构建
+    static RobotState from_sync_frame(const hardware::SyncFrame& frame) {
+        RobotState state;
+        if (frame.serial_valid) {
+            const auto& s = frame.serial_data;
+            state.set_euler(s.yaw, s.pitch, s.roll);
+            state.bullet_speed = s.bullet_speed;
+            state.enemy_color = s.enemy_color;
+            state.aim_mode = s.aim_mode;
+            state.allow_fire = s.allow_fire;
+        }
+        state.timestamp = frame.timestamp;
+        return state;
+    }
 
-        Eigen::Quaterniond q;
-        q.w() = cy * cp * cr + sy * sp * sr;
-        q.x() = cy * cp * sr - sy * sp * cr;
-        q.y() = cy * sp * cr + sy * cp * sr;
-        q.z() = sy * cp * cr - cy * sp * sr;
-        return q;
+    // 从欧拉角构建四元数 (ZYX顺序, 输入为角度)
+    void set_euler(float yaw_deg, float pitch_deg, float roll_deg) {
+        constexpr double deg2rad = M_PI / 180.0;
+        Eigen::AngleAxisd yaw_rot(yaw_deg * deg2rad, Eigen::Vector3d::UnitZ());
+        Eigen::AngleAxisd pitch_rot(pitch_deg * deg2rad, Eigen::Vector3d::UnitY());
+        Eigen::AngleAxisd roll_rot(roll_deg * deg2rad, Eigen::Vector3d::UnitX());
+        q_imu = yaw_rot * pitch_rot * roll_rot;
+    }
+
+    // 获取敌方颜色枚举
+    autoaim::EnemyColor get_enemy_color() const {
+        switch (enemy_color) {
+            case 1: return autoaim::EnemyColor::RED;
+            case 2: return autoaim::EnemyColor::BLUE;
+            default: return autoaim::EnemyColor::WHITE;
+        }
     }
 };
 
 // ============================================================================
-// 2. 同步帧 (SyncFrame)
+// 2. 检测结果 (DetectionResult)
 // ============================================================================
 
 /**
- * @brief 同步帧 - 相机图像 + 机器人状态
+ * @brief 检测结果 - Detector层输出
  *
- * 由硬件层生成，传递给检测器
- * cv::Mat 使用浅拷贝，无额外开销
- */
-struct SyncFrame {
-    cv::Mat image;
-    int frame_id = 0;
-    RobotState state;
-
-    SyncFrame() = default;
-    SyncFrame(cv::Mat img, int id, const RobotState& s)
-        : image(std::move(img)), frame_id(id), state(s) {}
-};
-
-// ============================================================================
-// 3. 装甲板信息 (Armor)
-// ============================================================================
-
-/**
- * @brief 装甲板检测结果
- */
-struct Armor {
-    // 装甲板四角点 (图像坐标，左上顺时针)
-    std::array<cv::Point2f, 4> corners;
-
-    // 装甲板中心 (图像坐标)
-    cv::Point2f center;
-
-    // 装甲板ID (0-8: 对应数字，负数表示未识别)
-    int id = -1;
-
-    // 置信度 [0, 1]
-    float confidence = 0.0f;
-
-    // 装甲板类型 (0=小装甲板, 1=大装甲板)
-    int type = 0;
-
-    // PnP解算结果 (相机坐标系)
-    Eigen::Vector3d position_camera = Eigen::Vector3d::Zero();
-    bool pnp_valid = false;
-
-    Armor() = default;
-};
-
-// ============================================================================
-// 4. 检测结果 (DetectionResult)
-// ============================================================================
-
-/**
- * @brief 检测结果 - 传递给预测器
- *
- * 不再包含原始图像，只保留必要的状态信息
+ * 装甲板列表 + 透传的机器人状态
  */
 struct DetectionResult {
-    std::vector<Armor> armors;
+    std::vector<autoaim::DetectedArmor> armors;
     int frame_id = 0;
     RobotState state;
+    float latency_ms = 0;  // 检测耗时
 
     DetectionResult() = default;
-    DetectionResult(std::vector<Armor> a, int id, const RobotState& s)
-        : armors(std::move(a)), frame_id(id), state(s) {}
 
     bool empty() const { return armors.empty(); }
     size_t size() const { return armors.size(); }
 };
 
-// ============================================================================
-// 5. 预测结果 (PredictResult)
-// ============================================================================
+}  // namespace aimer
 
-/**
- * @brief 预测结果 - 传递给弹道解算
- */
-struct PredictResult {
-    // 预测目标位置 (世界坐标系)
-    Eigen::Vector3d target_world = Eigen::Vector3d::Zero();
-
-    // 预测目标速度 (世界坐标系)
-    Eigen::Vector3d target_vel = Eigen::Vector3d::Zero();
-
-    // 目标ID
-    int target_id = -1;
-
-    // 是否有有效目标
-    bool valid = false;
-
-    int frame_id = 0;
-    RobotState state;
-
-    PredictResult() = default;
-};
-
-// ============================================================================
-// 6. 发射指令 (FireCommand)
-// ============================================================================
-
-/**
- * @brief 发射指令 - 发送给下位机
- */
-struct FireCommand {
-    float yaw = 0.0f;    // 目标偏航角 (rad)
-    float pitch = 0.0f;  // 目标俯仰角 (rad)
-    float distance = 0.0f;  // 目标距离 (m)
-    int target_id = 0;   // 目标ID
-    bool fire = false;   // 是否开火
-
-    FireCommand() = default;
-    FireCommand(float y, float p, float d, int id, bool f)
-        : yaw(y), pitch(p), distance(d), target_id(id), fire(f) {}
-};
-
-} // namespace aimer
-
-#endif // AIMER_COMMON_TYPES_HPP
+#endif  // AIMER_COMMON_TYPES_HPP

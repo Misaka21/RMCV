@@ -1,50 +1,38 @@
 //
 // Detector Node - 检测节点
-// 订阅sync_frame，运行装甲板检测，发布检测结果
+// 订阅 sync_frame，运行装甲板检测，发布检测结果
 //
 
 #ifndef DETECTOR_NODE_HPP
 #define DETECTOR_NODE_HPP
-
-#include <chrono>
-#include <vector>
 
 #include <fmt/format.h>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include "hardware/hardware_node.hpp"
-#include "plugin/debug/logger.hpp"
+#include "hardware/hardware_node.hpp"  // hardware::SyncFrame
+#include "aimer/common/types.hpp"      // aimer::RobotState, aimer::DetectionResult
 #include "common/detector_interface.hpp"
-#include "common/types.hpp"
+#include "common/types.hpp"            // autoaim::DetectedArmor
 
 namespace autoaim {
 
-using TimePoint = std::chrono::steady_clock::time_point;
-
-// 检测结果 (使用公共类型)
-struct DetectionResult {
-    int frame_id = 0;
-    TimePoint timestamp;
-    std::vector<detector::DetectedArmor> armors;
-    float detect_latency_ms = 0;
-};
-
-// Debug可视化
+/**
+ * @brief 绘制调试可视化
+ */
 inline void draw_debug_visualization(
     const cv::Mat& image,
-    const DetectionResult& result,
-    const hardware::SyncFrame& frame,
-    const std::vector<detector::DetectedArmor>& armors
+    const aimer::DetectionResult& result,
+    const hardware::SyncFrame& frame
 ) {
     cv::Mat debug_img = image.clone();
 
     // 绘制装甲板
-    for (const auto& armor : armors) {
+    for (const auto& armor : result.armors) {
         if (armor.landmarks.size() >= 4) {
             // 用我方颜色绘制 (敌方红色 → 我方蓝色线)
-            cv::Scalar draw_color = (armor.color == detector::EnemyColor::RED)
+            cv::Scalar draw_color = (armor.color == EnemyColor::RED)
                 ? cv::Scalar(255, 0, 0)   // 敌方红色 → 蓝色线
                 : cv::Scalar(0, 0, 255);  // 敌方蓝色 → 红色线
 
@@ -61,10 +49,10 @@ inline void draw_debug_visualization(
             }
 
             // 显示: 数字 类型 置信度%
-            char type_char = (armor.type == detector::ArmorType::LARGE) ? 'L' : 'S';
+            char type_char = (armor.type == ArmorType::LARGE) ? 'L' : 'S';
             std::string text = fmt::format(
                 "{} {} {:.0f}%",
-                detector::armor_number_to_string(armor.number),
+                armor_number_to_string(armor.number),
                 type_char,
                 armor.confidence * 100
             );
@@ -80,8 +68,12 @@ inline void draw_debug_visualization(
         }
     }
 
-    std::string info =
-        fmt::format("Armors: {} Latency: {:.1f}ms", result.armors.size(), result.detect_latency_ms);
+    // 显示统计信息
+    std::string info = fmt::format(
+        "Armors: {} Latency: {:.1f}ms",
+        result.armors.size(),
+        result.latency_ms
+    );
     cv::putText(
         debug_img,
         info,
@@ -92,9 +84,13 @@ inline void draw_debug_visualization(
         2
     );
 
+    // 显示IMU信息
     if (frame.serial_valid) {
-        auto imu = frame.imu();
-        std::string imu_info = fmt::format("IMU: yaw={:.1f} pitch={:.1f}", imu.yaw, imu.pitch);
+        std::string imu_info = fmt::format(
+            "IMU: yaw={:.1f} pitch={:.1f}",
+            frame.serial_data.yaw,
+            frame.serial_data.pitch
+        );
         cv::putText(
             debug_img,
             imu_info,
@@ -112,12 +108,14 @@ inline void draw_debug_visualization(
     cv::waitKey(1);
 }
 
-// 启动检测节点 (颜色从串口获取)
+/**
+ * @brief 启动检测节点
+ *
+ * 订阅: Message<hardware::SyncFrame> "sync_frame"
+ * 发布: Message<aimer::DetectionResult> "detections"
+ */
 void start_detector_node();
 
-// 运行时设置敌方颜色
-void set_enemy_color(detector::EnemyColor color);
+}  // namespace autoaim
 
-} // namespace autoaim
-
-#endif // DETECTOR_NODE_HPP
+#endif  // DETECTOR_NODE_HPP

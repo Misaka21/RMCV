@@ -15,22 +15,8 @@ namespace autoaim {
 
 using SteadyClock = std::chrono::steady_clock;
 
-// Global detector instance (使用接口类型)
-static std::unique_ptr<detector::DetectorInterface> g_detector = nullptr;
-
-void set_enemy_color(detector::EnemyColor color) {
-    if (g_detector) {
-        g_detector->set_enemy_color(color);
-    }
-    debug::print(
-        debug::PrintMode::INFO,
-        "DetectorNode",
-        "Enemy color set to {}",
-        color == detector::EnemyColor::RED ? "RED" : "BLUE"
-    );
-}
-
 void start_detector_node() {
+    std::unique_ptr<detector::DetectorInterface> g_detector = nullptr;
     debug::print(debug::PrintMode::INFO, "DetectorNode", "Starting detector node...");
 
     try {
@@ -40,7 +26,7 @@ void start_detector_node() {
 
         // 2. Setup UMT
         umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
-        umt::Publisher<DetectionResult> pub("detection_result");
+        umt::Publisher<aimer::DetectionResult> pub("detections");
         auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
 
         // 从配置文件读取 debug 模式
@@ -92,11 +78,11 @@ void start_detector_node() {
                     / 1000.0f;
 
                 // 构建结果
-                DetectionResult result;
+                aimer::DetectionResult result;
                 result.frame_id = frame.frame_id;
-                result.timestamp = frame.timestamp;
+                result.state = aimer::RobotState::from_sync_frame(frame);
                 result.armors = std::move(armors);
-                result.detect_latency_ms = latency;
+                result.latency_ms = latency;
 
                 pub.push(result);
 
@@ -105,7 +91,7 @@ void start_detector_node() {
 
                 // Debug可视化
                 if (debug_mode) {
-                    draw_debug_visualization(frame.image, result, frame, result.armors);
+                    draw_debug_visualization(frame.image, result, frame);
                 }
 
             } catch (const umt::MessageError_Timeout&) {
