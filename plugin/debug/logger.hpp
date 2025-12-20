@@ -129,6 +129,7 @@ inline std::string get_timestamp_for_filename() {
  *
  * Directory structure: {LOG_DIR}/{timestamp}_{suffix}/ 或 {LOG_DIR}/{timestamp}/
  *   - run.log: log file
+ *   - config/: 配置文件快照
  *   - *.avi: video recordings
  */
 inline std::string init_session(const std::string& suffix = "") {
@@ -154,6 +155,17 @@ inline std::string init_session(const std::string& suffix = "") {
     if (state.log_file.is_open()) {
         state.log_file << fmt::format("=== Session started at {} ===\n", get_current_time_string());
         state.log_file.flush();
+    }
+
+    // 保存配置快照
+    std::string config_snapshot_dir = state.session_path + "/config";
+    fs::create_directories(config_snapshot_dir);
+    for (const auto& entry : fs::directory_iterator(CONFIG_DIR)) {
+        if (entry.path().extension() == ".toml") {
+            fs::copy_file(entry.path(),
+                          config_snapshot_dir + "/" + entry.path().filename().string(),
+                          fs::copy_options::overwrite_existing);
+        }
     }
 
     return state.session_path;
