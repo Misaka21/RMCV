@@ -60,6 +60,7 @@ include_directories(umt)
 
 add_subdirectory(plugin)
 add_subdirectory(hardware)
+add_subdirectory(aimer/common)
 add_subdirectory(aimer/auto_aim/detector)
 
 add_executable(RMCV2026 main.cpp)
@@ -76,6 +77,9 @@ target_link_libraries(test_camera ${OpenCV_LIBS} fmt::fmt plugin hardware)
 
 add_executable(test_hardware test/test_hardware.cpp)
 target_link_libraries(test_hardware ${OpenCV_LIBS} fmt::fmt plugin hardware)
+
+add_executable(test_transformer test/test_transformer.cpp)
+target_link_libraries(test_transformer ${OpenCV_LIBS} fmt::fmt aimer_common)
 
 
 # ... (在你现有的 add_subdirectory 之后)
