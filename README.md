@@ -1,4 +1,4 @@
-# RMCV
+# RMCV2026
 
 RoboMaster Computer Vision - 机器人视觉系统
 
@@ -6,16 +6,59 @@ RoboMaster Computer Vision - 机器人视觉系统
 
 RMCV 是一个用于 RoboMaster 机器人的视觉识别与自动瞄准系统，采用 C++17 开发。
 
-## 主要模块
+## 项目结构
 
-| 模块 | 说明 |
-|-----|------|
-| `hardware/` | 硬件抽象层 (相机、串口) |
-| `aimer/` | 自动瞄准系统 |
-| `plugin/` | 插件系统 (日志、参数管理) |
-| `umt/` | 线程间通信框架 |
+```
+RMCV2026/
+├── aimer/                      # 自动瞄准系统
+│   ├── common/                 # 公共模块
+│   │   ├── math/               # 数学工具 (坐标转换等)
+│   │   └── transformer/        # TF坐标变换系统
+│   └── auto_aim/               # 自瞄核心
+│       └── detector/           # 目标检测
+│           ├── detector_rv/    # 传统视觉检测器
+│           └── detector_yolo/  # YOLO检测器 (可选)
+│
+├── hardware/                   # 硬件抽象层
+│   ├── hik_cam/                # 海康相机驱动
+│   └── serial/                 # 串口通信
+│
+├── plugin/                     # 插件系统
+│   ├── debug/                  # 日志系统
+│   └── param/                  # 参数管理 (静态/动态)
+│
+├── umt/                        # 线程间通信框架
+│   ├── Message.hpp             # 发布-订阅消息
+│   ├── ObjManager.hpp          # 类对象管理
+│   └── BasicObjManager.hpp     # 基础类型管理
+│
+├── config/                     # 配置文件
+│   ├── camera.yaml             # 相机标定参数 (静态)
+│   ├── aimer.toml              # 瞄准参数 (动态热更新)
+│   └── hardware.toml           # 硬件配置
+│
+└── test/                       # 测试程序
+```
 
-## 编译
+## 快速开始
+
+### 依赖安装
+
+```bash
+# Ubuntu/Debian
+sudo apt install cmake libopencv-dev libfmt-dev libeigen3-dev
+
+# tomlplusplus (header-only)
+git clone https://github.com/marzer/tomlplusplus.git
+sudo cp -r tomlplusplus/include/toml++ /usr/local/include/
+
+# pybind11
+sudo apt install pybind11-dev
+
+# HIK MVS SDK - 从海康官网下载安装
+```
+
+### 编译
 
 ```bash
 mkdir build && cd build
@@ -23,19 +66,120 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 ```
 
-## 依赖
+### 运行
 
-- CMake 3.16+
-- OpenCV
-- fmt
-- Eigen3
-- tomlplusplus
-- pybind11
-- HIK MVS SDK
+```bash
+./RMCV2026
+```
 
-## 文档
+### 测试
 
-详细开发文档请参考各模块的头文件注释。
+```bash
+./test_transformer   # 坐标变换测试
+./test_param         # 参数系统测试
+./test_camera        # 相机测试
+./test_serial        # 串口测试
+```
+
+## 核心模块
+
+### 坐标变换系统 (TF)
+
+编译期路径推导 + 运行期动态参数的坐标变换系统。
+
+```cpp
+#include "aimer/common/transformer/transformer.hpp"
+
+// 初始化
+tf::init();
+
+// Camera -> World 变换
+Eigen::Vector3d p_world = tf::cam_to_world(p_cam, q_imu);
+
+// 里程计积分
+tf::update_odometry(Eigen::Vector3d(vx, vy, 0), dt, q_imu);
+```
+
+**坐标系定义：**
+
+| 坐标系 | 说明 | 轴向 |
+|--------|------|------|
+| World | 上电时云台位置 | X右 Y下 Z前 |
+| Imu | IMU芯片坐标系 | 硬件定义 |
+| Gimbal | 云台坐标系 | X右 Y下 Z前 |
+| Camera | 相机坐标系 | X右 Y下 Z前 |
+| Barrel | 枪口坐标系 | X右 Y下 Z前 |
+
+详细文档：[aimer/common/transformer/README.md](aimer/common/transformer/README.md)
+
+### 参数系统
+
+**静态参数** (YAML, 启动时加载)：
+```cpp
+tf::init();  // 加载 config/camera.yaml
+```
+
+**动态参数** (TOML, 运行时热更新)：
+```cpp
+runtime_param::parameter_run("aimer.toml");
+double value = runtime_param::get_param<double>("section.key");
+```
+
+### UMT 线程通信
+
+```cpp
+// 发布-订阅
+umt::Publisher<MyData> pub("channel");
+umt::Subscriber<MyData> sub("channel");
+pub.push(data);
+auto msg = sub.pop();
+
+// 共享对象
+auto obj = umt::BasicObjManager<float>::find_or_create("threshold", 0.5f);
+obj->get() = 0.8f;
+```
+
+## 配置文件
+
+### camera.yaml (静态标定)
+
+```yaml
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]  # IMU安装修正
+R_camera2gimbal: [1, 0, 0, 0, 1, 0, 0, 0, 1]   # 相机安装角度
+camera_matrix: [fx, 0, cx, 0, fy, cy, 0, 0, 1] # 相机内参
+distort_coeffs: [k1, k2, p1, p2, k3]           # 畸变系数
+```
+
+### aimer.toml (动态调参)
+
+```toml
+[Transformer]
+camera_offset_x = 0.0   # 相机偏移 (米)
+camera_offset_y = 0.0
+camera_offset_z = 0.0
+barrel_offset_x = 0.0   # 枪口偏移 (米)
+barrel_offset_y = 0.055
+barrel_offset_z = 0.0
+```
+
+## 开发规范
+
+### 代码风格
+
+- 使用 `.clang-format` 格式化代码
+- 命名规范：类 `CamelCase`，函数/变量 `snake_case`
+- 注释使用中文，日志输出使用英文
+
+### Git 提交
+
+```
+✨ feat: 新功能
+🐛 fix: 修复bug
+📝 docs: 文档更新
+♻️ refactor: 重构
+✅ test: 测试
+🔧 chore: 配置/构建
+```
 
 ## 许可证
 
