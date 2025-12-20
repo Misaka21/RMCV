@@ -2,8 +2,8 @@
 // 检测器类型定义 - 转发到 auto_aim/common/types.hpp
 //
 
-#ifndef DETECTOR_COMMON_TYPES_HPP
-#define DETECTOR_COMMON_TYPES_HPP
+#ifndef AIMER_AUTOAIM_DETECTOR_TYPES_HPP
+#define AIMER_AUTOAIM_DETECTOR_TYPES_HPP
 
 #include "aimer/auto_aim/common/types.hpp"
 
@@ -25,6 +25,6 @@ using autoaim::SMALL_ARMOR_HEIGHT;
 using autoaim::LARGE_ARMOR_WIDTH;
 using autoaim::LARGE_ARMOR_HEIGHT;
 
-} // namespace autoaim::detector
+}  // namespace autoaim::detector
 
-#endif // DETECTOR_COMMON_TYPES_HPP
+#endif  // AIMER_AUTOAIM_DETECTOR_TYPES_HPP

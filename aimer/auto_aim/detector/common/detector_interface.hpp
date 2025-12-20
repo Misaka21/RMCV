@@ -3,8 +3,8 @@
 // 所有检测器实现都必须继承此接口
 //
 
-#ifndef DETECTOR_INTERFACE_HPP
-#define DETECTOR_INTERFACE_HPP
+#ifndef AIMER_AUTOAIM_DETECTOR_INTERFACE_HPP
+#define AIMER_AUTOAIM_DETECTOR_INTERFACE_HPP
 
 #include <memory>
 #include <vector>
@@ -56,6 +56,6 @@ enum class DetectorType {
     YOLO          // YOLO检测 (神经网络)
 };
 
-} // namespace autoaim::detector
+}  // namespace autoaim::detector
 
-#endif // DETECTOR_INTERFACE_HPP
+#endif  // AIMER_AUTOAIM_DETECTOR_INTERFACE_HPP

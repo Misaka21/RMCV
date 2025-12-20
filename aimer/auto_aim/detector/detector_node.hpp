@@ -3,8 +3,8 @@
 // 订阅 sync_frame，运行装甲板检测，发布检测结果
 //
 
-#ifndef DETECTOR_NODE_HPP
-#define DETECTOR_NODE_HPP
+#ifndef AIMER_AUTOAIM_DETECTOR_NODE_HPP
+#define AIMER_AUTOAIM_DETECTOR_NODE_HPP
 
 #include <fmt/format.h>
 #include <opencv2/core/mat.hpp>
@@ -14,7 +14,7 @@
 #include "hardware/hardware_node.hpp"  // hardware::SyncFrame
 #include "aimer/common/types.hpp"      // aimer::RobotState, aimer::DetectionResult
 #include "common/detector_interface.hpp"
-#include "common/types.hpp"            // autoaim::DetectedArmor
+#include "common/types.hpp"            // aimer::autoaim::DetectedArmor
 
 namespace autoaim {
 
@@ -32,7 +32,7 @@ inline void draw_debug_visualization(
     for (const auto& armor : result.armors) {
         if (armor.landmarks.size() >= 4) {
             // 用我方颜色绘制 (敌方红色 → 我方蓝色线)
-            cv::Scalar draw_color = (armor.color == EnemyColor::RED)
+            cv::Scalar draw_color = (armor.color == detector::EnemyColor::RED)
                 ? cv::Scalar(255, 0, 0)   // 敌方红色 → 蓝色线
                 : cv::Scalar(0, 0, 255);  // 敌方蓝色 → 红色线
 
@@ -49,10 +49,10 @@ inline void draw_debug_visualization(
             }
 
             // 显示: 数字 类型 置信度%
-            char type_char = (armor.type == ArmorType::LARGE) ? 'L' : 'S';
+            char type_char = (armor.type == detector::ArmorType::LARGE) ? 'L' : 'S';
             std::string text = fmt::format(
                 "{} {} {:.0f}%",
-                armor_number_to_string(armor.number),
+                detector::armor_number_to_string(armor.number),
                 type_char,
                 armor.confidence * 100
             );
@@ -118,4 +118,4 @@ void start_detector_node();
 
 }  // namespace autoaim
 
-#endif  // DETECTOR_NODE_HPP
+#endif  // AIMER_AUTOAIM_DETECTOR_NODE_HPP

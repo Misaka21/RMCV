@@ -3,8 +3,8 @@
 // 所有自瞄模块共享的类型
 //
 
-#ifndef AUTOAIM_COMMON_TYPES_HPP
-#define AUTOAIM_COMMON_TYPES_HPP
+#ifndef AIMER_AUTOAIM_COMMON_TYPES_HPP
+#define AIMER_AUTOAIM_COMMON_TYPES_HPP
 
 #include <string>
 #include <unordered_map>
@@ -171,6 +171,6 @@ struct DetectedArmor {
     }
 };
 
-} // namespace autoaim
+}  // namespace autoaim
 
-#endif // AUTOAIM_COMMON_TYPES_HPP
+#endif  // AIMER_AUTOAIM_COMMON_TYPES_HPP

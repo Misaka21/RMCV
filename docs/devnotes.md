@@ -1,3 +1,36 @@
+# 12.20
+数据结构：
+对于架构：用 aimer 作为顶层
+```
+  aimer/                              // 目录结构
+  ├── common/                         // 公共类型
+  ├── auto_aim/                       // 自瞄
+  │   ├── detector/
+  │   └── predictor/
+  └── energy/                         // 能量机关
+
+// 命名空间结构
+namespace aimer {
+// 公共类型 (RobotState, SyncFrame转换等)
+struct RobotState { ... };
+}
+namespace autoaim {
+  // 自瞄专用类型
+  enum class ArmorType { ... };
+  struct DetectedArmor { ... };
+
+  namespace detector { ... }
+  namespace predictor { ... }
+}
+
+namespace energy {
+  // 能量机关
+  namespace detector { ... }
+  namespace predictor { ... }
+}
+```
+
+
 # 12.18
 数据流如下：
 相机发布mat和时间辍，同时与接收线程的数据进行绑定，然后两个一起打包，而不是只打包imu。打包后发布
