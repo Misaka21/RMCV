@@ -2,18 +2,20 @@
 # 本参数表角度均为角度制，物理量为国际单位。
 # 本文件严格区分参数的数据类型，比如 10.0 不能改成 10
 
-#transformer
 [Transformer]
+# Camera → Imu 平移 (米, 在Imu坐标系下)
+# x: 右, y: 下, z: 前
+camera_offset_x = 0.0
+camera_offset_y = 0.0
+camera_offset_z = 0.0
 
-
-
-
-
+# Barrel → Imu 平移 (米, 在Imu坐标系下)
+# 例: 枪口在相机下方5.5cm
+barrel_offset_x = 0.0
+barrel_offset_y = 0.055
+barrel_offset_z = 0.0
 
 #autoaim
-
-
-
-
+[AutoAim]
 
 
