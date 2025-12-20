@@ -57,7 +57,7 @@ inline void draw_debug_visualization(
             // 显示数字和置信度
             std::string text = fmt::format(
                 "{} {:.2f}",
-                armor.number.empty() ? "?" : armor.number,
+                detector::armor_number_to_string(armor.number),
                 armor.confidence
             );
             cv::putText(

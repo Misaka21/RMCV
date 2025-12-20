@@ -7,6 +7,7 @@
 #define DETECTOR_COMMON_TYPES_HPP
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -28,6 +29,78 @@ inline std::string armor_type_to_string(ArmorType type) {
         case ArmorType::SMALL: return "small";
         case ArmorType::LARGE: return "large";
         default: return "invalid";
+    }
+}
+
+// ============================================================================
+// 3. 数字识别结果
+// ============================================================================
+
+// 装甲板数字/标签
+enum class ArmorNumber {
+    UNKNOWN = -1,
+    HERO = 1,        // 1号 (英雄) - 大装甲板
+    ENGINEER = 2,    // 2号 (工程)
+    INFANTRY_3 = 3,  // 3号 (步兵)
+    INFANTRY_4 = 4,  // 4号 (步兵)
+    INFANTRY_5 = 5,  // 5号 (步兵)
+    OUTPOST = 6,     // 前哨站
+    SENTRY = 7,      // 哨兵
+    BASE = 8         // 基地 - 大小都有
+};
+
+// 字符串 ↔ 枚举映射
+inline const std::unordered_map<std::string, ArmorNumber> STR_TO_ARMOR_NUMBER = {
+    {"1", ArmorNumber::HERO},
+    {"2", ArmorNumber::ENGINEER},
+    {"3", ArmorNumber::INFANTRY_3},
+    {"4", ArmorNumber::INFANTRY_4},
+    {"5", ArmorNumber::INFANTRY_5},
+    {"outpost", ArmorNumber::OUTPOST},
+    {"sentry", ArmorNumber::SENTRY},
+    {"base", ArmorNumber::BASE}
+};
+
+inline const std::unordered_map<ArmorNumber, std::string> ARMOR_NUMBER_TO_STR = {
+    {ArmorNumber::UNKNOWN, "unknown"},
+    {ArmorNumber::HERO, "1"},
+    {ArmorNumber::ENGINEER, "2"},
+    {ArmorNumber::INFANTRY_3, "3"},
+    {ArmorNumber::INFANTRY_4, "4"},
+    {ArmorNumber::INFANTRY_5, "5"},
+    {ArmorNumber::OUTPOST, "outpost"},
+    {ArmorNumber::SENTRY, "sentry"},
+    {ArmorNumber::BASE, "base"}
+};
+
+inline ArmorNumber string_to_armor_number(const std::string& s) {
+    auto it = STR_TO_ARMOR_NUMBER.find(s);
+    return (it != STR_TO_ARMOR_NUMBER.end()) ? it->second : ArmorNumber::UNKNOWN;
+}
+
+inline std::string armor_number_to_string(ArmorNumber n) {
+    auto it = ARMOR_NUMBER_TO_STR.find(n);
+    return (it != ARMOR_NUMBER_TO_STR.end()) ? it->second : "unknown";
+}
+
+/**
+ * @brief 根据数字识别结果修正装甲板类型
+ *
+ * 规则:
+ * - 1号(英雄): 必定大装甲板
+ * - base(基地): 保持检测结果 (大小都有)
+ * - 其他: 必定小装甲板
+ */
+inline ArmorType correct_armor_type(ArmorType detected, ArmorNumber number) {
+    switch (number) {
+        case ArmorNumber::HERO:
+            return ArmorType::LARGE;
+        case ArmorNumber::BASE:
+            return detected;  // 基地大小都有，保持检测结果
+        case ArmorNumber::UNKNOWN:
+            return detected;  // 未识别，保持检测结果
+        default:
+            return ArmorType::SMALL;
     }
 }
 
@@ -58,11 +131,11 @@ struct DetectedArmor {
     // 装甲板中心 (图像坐标)
     cv::Point2f center;
 
-    // 装甲板类型
+    // 装甲板类型 (已根据数字识别修正)
     ArmorType type = ArmorType::INVALID;
 
     // 数字识别结果
-    std::string number;
+    ArmorNumber number = ArmorNumber::UNKNOWN;
     float confidence = 0.0f;
 
     DetectedArmor() = default;
@@ -88,15 +161,22 @@ struct DetectedArmor {
 
     /**
      * @brief 从内部Armor类型转换 (供传统检测器使用)
+     *
+     * 会根据数字识别结果修正装甲板类型
      */
     template<typename InternalArmor>
     static DetectedArmor from_internal(const InternalArmor& armor) {
         DetectedArmor result;
         result.landmarks = armor.landmarks();
         result.center = armor.center;
-        result.type = armor.type;
-        result.number = armor.number;
         result.confidence = armor.confidence;
+
+        // 转换数字识别结果
+        result.number = string_to_armor_number(armor.number);
+
+        // 根据数字修正装甲板类型
+        result.type = correct_armor_type(armor.type, result.number);
+
         return result;
     }
 };
