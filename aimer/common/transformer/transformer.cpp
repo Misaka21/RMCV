@@ -41,7 +41,7 @@ Eigen::Matrix4d Transform<Frame::Barrel, Frame::Gimbal>::get(const Eigen::Quater
 }
 
 bool init(const std::string& yaml_file) {
-    std::string yaml_path = std::string(CONFIG_DIR) + yaml_file;
+    std::string yaml_path = std::string(CONFIG_DIR) + "/" + yaml_file;
     cv::FileStorage fs(yaml_path, cv::FileStorage::READ);
     if (!fs.isOpened()) {
         debug::print(debug::PrintMode::ERROR, "Transformer", "Failed to open: {}", yaml_path);

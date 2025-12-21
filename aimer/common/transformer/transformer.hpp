@@ -265,12 +265,48 @@ inline Eigen::Vector3d world_to_gimbal(const Eigen::Vector3d& p, const Eigen::Qu
     return point<Frame::World, Frame::Gimbal>(p, q);
 }
 
+inline Eigen::Vector3d world_to_camera(const Eigen::Vector3d& p, const Eigen::Quaterniond& q) {
+    return point<Frame::World, Frame::Camera>(p, q);
+}
+
 inline YpdCoord cam_to_world_ypd(const Eigen::Vector3d& p_cam, const Eigen::Quaterniond& q) {
     return math::xyz_to_ypd(cam_to_world(p_cam, q));
 }
 
 inline YpdCoord barrel_ypd(const Eigen::Vector3d& p_world, const Eigen::Quaterniond& q) {
     return math::xyz_to_ypd(world_to_barrel(p_world, q));
+}
+
+/**
+ * @brief 将世界坐标点投影到图像像素坐标
+ * @param p_world 世界坐标系中的点
+ * @param q_imu IMU四元数
+ * @param valid 输出参数，表示投影是否有效（点在相机前方）
+ * @return 图像像素坐标
+ */
+inline cv::Point2f world_to_pixel(const Eigen::Vector3d& p_world, const Eigen::Quaterniond& q_imu, bool& valid) {
+    // World → Camera
+    Eigen::Vector3d p_cam = world_to_camera(p_world, q_imu);
+
+    // 检查点是否在相机前方 (相机坐标系: z前)
+    // Camera坐标系: x右, y下, z前
+    if (p_cam.z() <= 0.1) {  // 至少10cm前方
+        valid = false;
+        return cv::Point2f(-1, -1);
+    }
+
+    // 投影到像素坐标
+    const cv::Mat& K = get_camera_matrix();
+    double fx = K.at<double>(0, 0);
+    double fy = K.at<double>(1, 1);
+    double cx = K.at<double>(0, 2);
+    double cy = K.at<double>(1, 2);
+
+    double u = fx * p_cam.x() / p_cam.z() + cx;
+    double v = fy * p_cam.y() / p_cam.z() + cy;
+
+    valid = true;
+    return cv::Point2f(static_cast<float>(u), static_cast<float>(v));
 }
 
 } // namespace tf
