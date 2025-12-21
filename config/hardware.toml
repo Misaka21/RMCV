@@ -39,6 +39,10 @@
     ignore_crc = false
     # 不接串口时使用虚拟数据
     use_fake_serial_data = false
+    # IMU符号修正: 如果云台抬头时pitch变小，需要设为true
+    imu_pitch_negate = false
+    # IMU符号修正: 如果云台右倾时roll变小，需要设为true
+    imu_roll_negate = true
 
 # fake serial 虚拟数据配置
 [Serial.fake_data]

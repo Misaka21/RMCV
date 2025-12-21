@@ -141,6 +141,10 @@ void start_hardware_node() {
         int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
         int64_t delta_t_us = static_param::get_param<int64_t>(config, "TimeSync", "delta_t_us");
 
+        // IMU pitch/roll取反配置
+        bool imu_pitch_negate = static_param::get_param<bool>(config, "Serial", "imu_pitch_negate");
+        bool imu_roll_negate = static_param::get_param<bool>(config, "Serial", "imu_roll_negate");
+
         // Fake serial config
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
         serial::SerialReceiveData fake_data;  // 预加载fake数据
@@ -236,6 +240,16 @@ void start_hardware_node() {
                         frame.serial_data = *data;
                         frame.serial_valid = true;
                         synced = true;
+                    }
+                }
+
+                // 应用IMU pitch/roll取反
+                if (frame.serial_valid) {
+                    if (imu_pitch_negate) {
+                        frame.serial_data.pitch = -frame.serial_data.pitch;
+                    }
+                    if (imu_roll_negate) {
+                        frame.serial_data.roll = -frame.serial_data.roll;
                     }
                 }
 
