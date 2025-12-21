@@ -8,8 +8,10 @@
 
 // Project headers
 #include "aimer/auto_aim/detector/detector_node.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 #include "umt/umt.hpp"
 
 // 全局运行标志
@@ -34,6 +36,18 @@ int main() {
 
     // 初始化日志系统
     debug::init_session();
+
+    // 启动运行时参数热重载线程 (内部有无限循环，必须在单独线程运行)
+    std::thread param_thread([]() {
+        runtime_param::parameter_run("aimer.toml");
+    });
+    param_thread.detach();  // 分离线程，程序退出时自动结束
+
+    // 等待参数加载完成
+    runtime_param::wait_for_param("ok");
+
+    // 初始化坐标变换系统
+    tf::init("camera.yaml");
 
     fmt::print(fmt::fg(fmt::color::gold),
                "====================================================================\n"
