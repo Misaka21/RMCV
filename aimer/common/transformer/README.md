@@ -9,20 +9,16 @@
 **上电时刻的云台坐标系**，作为固定参考系用于预测和跟踪。
 
 ```
-              Z (前，上电时云台朝向)
-             ╱
-            ╱
-           ╱
-          └──────→ X (右)
+          z (上)
           │
-          │
-          ↓ Y (下)
+    y ←───┼───→ x (前，上电时云台朝向)
+   (左)   │
 ```
 
 - **原点**：上电时刻云台位置（后续通过里程计积分更新）
-- **X轴**：上电时云台右侧
-- **Y轴**：上电时云台下方
-- **Z轴**：上电时云台前方
+- **X轴**：上电时云台前方（枪管朝向）
+- **Y轴**：上电时云台左侧
+- **Z轴**：上电时云台上方
 - **特点**：与 Gimbal 坐标系方向定义一致，上电时 `q_imu = Identity`
 
 **为什么这样定义？**
@@ -44,20 +40,16 @@ IMU 硬件定义的坐标系，可能因为安装方式而"歪着"。
 修正 IMU 安装偏差后的云台坐标系，是我们真正想要的"云台姿态"。
 
 ```
-              Z (前，云台朝向)
-             ╱
-            ╱
-           ╱
-          └──────→ X (右)
+          z (上)
           │
-          │
-          ↓ Y (下)
+    y ←───┼───→ x (前，云台/枪管朝向)
+   (左)   │
 ```
 
 - **原点**：云台旋转中心
-- **X轴**：云台右侧
-- **Y轴**：云台下方
-- **Z轴**：云台前方（朝向敌人）
+- **X轴**：云台前方（枪管朝向敌人）
+- **Y轴**：云台左侧
+- **Z轴**：云台上方
 
 **为什么需要 Gimbal？**
 
@@ -193,16 +185,15 @@ distort_coeffs: [k1, k2, p1, p2, k3]
 ```toml
 [Transformer]
 # Camera → Gimbal 平移 (米)
-# 相机在云台坐标系下的位置
-camera_offset_x = 0.0    # 右为正
-camera_offset_y = 0.0    # 下为正
-camera_offset_z = 0.0    # 前为正
+# 坐标系: x前, y左, z上 (ROS惯例)
+camera_offset_x = 0.0    # 前为正
+camera_offset_y = 0.0    # 左为正
+camera_offset_z = 0.0    # 上为正
 
 # Barrel → Gimbal 平移 (米)
-# 枪口在云台坐标系下的位置
-barrel_offset_x = 0.0    # 右为正
-barrel_offset_y = 0.055  # 下为正 (枪口在云台下方5.5cm)
-barrel_offset_z = 0.0    # 前为正
+barrel_offset_x = 0.0    # 前为正
+barrel_offset_y = 0.0    # 左为正
+barrel_offset_z = -0.055 # 上为正 (枪口在云台下方5.5cm)
 ```
 
 ---
@@ -301,9 +292,9 @@ tf::reset_odometry();
 
 ```
 里程计数据 (Gimbal坐标系)
-├── vx (右为正)
-├── vy (下为正，通常为0)
-└── vz (前为正，通常为0)
+├── vx (前为正，枪管朝向)
+├── vy (左为正)
+└── vz (上为正，通常为0)
         │
         ▼
   转换到 World 坐标系
@@ -325,23 +316,23 @@ tf::reset_odometry();
 
 ## 7. 常见问题
 
-### Q1: 枪口在相机下方，barrel_offset_y 是正还是负？
+### Q1: 枪口在相机下方，barrel_offset_z 是正还是负？
 
-**正**。因为 Y 轴向下，枪口在下方意味着 Y 坐标增大。
+**负**。因为 Z 轴向上，枪口在下方意味着 Z 坐标减小。
 
 ```
-Gimbal/Camera 原点 ●
-                   │
-                   │ +Y (向下)
-                   ▼
-Barrel 原点        ●
+Gimbal 原点 ●
+            │
+            │ -Z (向下)
+            ▼
+Barrel 原点 ●
 
-barrel_offset_y = +0.055  (5.5cm)
+barrel_offset_z = -0.055  (下方5.5cm)
 ```
 
-### Q2: 相机在云台右侧，camera_offset_x 是正还是负？
+### Q2: 相机在云台前方，camera_offset_x 是正还是负？
 
-**正**。X 轴向右，相机在右侧意味着 X 坐标增大。
+**正**。X 轴向前，相机在前方意味着 X 坐标增大。
 
 ### Q3: R_gimbal2imubody 是什么？
 
@@ -386,9 +377,9 @@ p_cam = tf::point<tf::Frame::World, tf::Frame::Camera>(p_world, q);
 ### Q7: 里程计的 vx, vy 分别是什么方向？
 
 在 **Gimbal 坐标系**下：
-- `vx`：右为正（X轴方向）
-- `vy`：下为正（Y轴方向，地面机器人通常为0）
-- `vz`：前为正（Z轴方向，通常为0）
+- `vx`：前为正（X轴方向，枪管朝向）
+- `vy`：左为正（Y轴方向）
+- `vz`：上为正（Z轴方向，通常为0）
 
 注意：这是云台坐标系下的速度，不是底盘坐标系。
 
@@ -398,13 +389,13 @@ p_cam = tf::point<tf::Frame::World, tf::Frame::Camera>(p_world, q);
 
 | 坐标系 | 原点 | X轴 | Y轴 | Z轴 |
 |--------|------|-----|-----|-----|
-| World | 上电时云台位置 | 右 | 下 | 前 |
+| World | 上电时云台位置 | 前 | 左 | 上 |
 | Imu | IMU芯片 | (由硬件定义) | | |
-| Gimbal | 云台中心 | 右 | 下 | 前 |
+| Gimbal | 云台中心 | 前 | 左 | 上 |
 | Camera | 相机光心 | 右(u) | 下(v) | 前(光轴) |
-| Barrel | 枪口中心 | 右 | 下 | 前 |
+| Barrel | 枪口中心 | 前 | 左 | 上 |
 
-**注意**：World 和 Gimbal 方向定义一致，上电时两者重合。
+**注意**：Camera 坐标系保持 OpenCV 惯例 (x右 y下 z前)，其他均为 ROS 惯例 (x前 y左 z上)。
 
 ---
 
@@ -413,10 +404,10 @@ p_cam = tf::point<tf::Frame::World, tf::Frame::Camera>(p_world, q);
 | 参数 | 来源 | 含义 | 例子 |
 |------|------|------|------|
 | `R_gimbal2imubody` | YAML | IMU安装偏差 | 单位阵=装正 |
-| `R_camera2gimbal` | YAML | 相机安装角度 | 单位阵=正对 |
-| `camera_offset_x` | TOML | 相机在云台右侧距离 | 0.01 = 右1cm |
-| `camera_offset_y` | TOML | 相机在云台下方距离 | 0.05 = 下5cm |
-| `camera_offset_z` | TOML | 相机在云台前方距离 | 0.02 = 前2cm |
-| `barrel_offset_x` | TOML | 枪口在云台右侧距离 | |
-| `barrel_offset_y` | TOML | 枪口在云台下方距离 | 0.055 = 下5.5cm |
-| `barrel_offset_z` | TOML | 枪口在云台前方距离 | |
+| `R_camera2gimbal` | YAML | 相机坐标系转换 | OpenCV→ROS |
+| `camera_offset_x` | TOML | 相机在云台前方距离 | 0.02 = 前2cm |
+| `camera_offset_y` | TOML | 相机在云台左侧距离 | 0.01 = 左1cm |
+| `camera_offset_z` | TOML | 相机在云台上方距离 | 0.05 = 上5cm |
+| `barrel_offset_x` | TOML | 枪口在云台前方距离 | |
+| `barrel_offset_y` | TOML | 枪口在云台左侧距离 | |
+| `barrel_offset_z` | TOML | 枪口在云台上方距离 | -0.055 = 下5.5cm |

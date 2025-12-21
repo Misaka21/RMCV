@@ -111,24 +111,26 @@ inline double get_theta(const Eigen::Vector2d& v) noexcept {
 // 4. 坐标转换 (xyz ↔ ypd)
 // ============================================================================
 
-// 直角坐标 → 球坐标 (x前, y左, z上)
+// 直角坐标 → 球坐标 (x前, y左, z上) - ROS惯例
+// yaw: 从x轴(前)向y轴(左)的角度，左为正
+// pitch: 从水平面向z轴(上)的角度，上为正
 inline YpdCoord xyz_to_ypd(const Eigen::Vector3d& xyz) noexcept {
     double x = xyz.x(), y = xyz.y(), z = xyz.z();
     double dis_xy = std::sqrt(x * x + y * y);
     return {
-        std::atan2(y, x),       // yaw
-        std::atan2(z, dis_xy),  // pitch
+        std::atan2(y, x),       // yaw: 左为正
+        std::atan2(z, dis_xy),  // pitch: 上为正
         xyz.norm()              // distance
     };
 }
 
-// 球坐标 → 直角坐标
+// 球坐标 → 直角坐标 (x前, y左, z上)
 inline Eigen::Vector3d ypd_to_xyz(const YpdCoord& ypd) noexcept {
     double cos_pitch = std::cos(ypd.pitch);
     return {
-        ypd.dis * cos_pitch * std::cos(ypd.yaw),
-        ypd.dis * cos_pitch * std::sin(ypd.yaw),
-        ypd.dis * std::sin(ypd.pitch)
+        ypd.dis * cos_pitch * std::cos(ypd.yaw),  // x = 前
+        ypd.dis * cos_pitch * std::sin(ypd.yaw),  // y = 左
+        ypd.dis * std::sin(ypd.pitch)             // z = 上
     };
 }
 
@@ -137,9 +139,9 @@ inline Eigen::Vector3d ypd_to_xyz(const Eigen::Vector3d& ypd) noexcept {
     double yaw = ypd.x(), pitch = ypd.y(), dis = ypd.z();
     double cos_pitch = std::cos(pitch);
     return {
-        dis * cos_pitch * std::cos(yaw),
-        dis * cos_pitch * std::sin(yaw),
-        dis * std::sin(pitch)
+        dis * cos_pitch * std::cos(yaw),  // x = 前
+        dis * cos_pitch * std::sin(yaw),  // y = 左
+        dis * std::sin(pitch)             // z = 上
     };
 }
 
