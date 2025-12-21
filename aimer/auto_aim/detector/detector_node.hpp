@@ -13,10 +13,61 @@
 
 #include "hardware/hardware_node.hpp"  // hardware::SyncFrame
 #include "aimer/common/types.hpp"      // aimer::RobotState, aimer::DetectionResult
+#include "aimer/common/transformer/transformer.hpp"  // tf::world_to_pixel
 #include "common/detector_interface.hpp"
 #include "common/types.hpp"            // aimer::autoaim::DetectedArmor
 
 namespace autoaim {
+
+/**
+ * @brief 绘制世界坐标系地面网格，用于验证坐标变换是否正确
+ * @param img 要绘制的图像
+ * @param q_imu IMU四元数
+ * @param grid_size 网格间距 (米)
+ * @param range 绘制范围 (米)
+ * @param ground_z 地面高度 (米，相对于上电时云台位置)
+ */
+inline void draw_world_ground_grid(
+    cv::Mat& img,
+    const Eigen::Quaterniond& q_imu,
+    double grid_size = 0.5,
+    double range = 10.0,
+    double ground_z = -0.5  // 假设地面在云台下方30cm
+) {
+    // 世界坐标系: x前, y左, z上
+    // 地面是z = ground_z的平面
+    for (double x = 0; x <= range; x += grid_size) {
+        for (double y = -range; y <= range; y += grid_size) {
+            Eigen::Vector3d p_world(x, y, ground_z);
+            bool valid = false;
+            cv::Point2f pixel = tf::world_to_pixel(p_world, q_imu, valid);
+
+            if (valid && pixel.x >= 0 && pixel.x < img.cols && pixel.y >= 0 && pixel.y < img.rows) {
+                // 前方用绿色，左右用不同亮度
+                int brightness = static_cast<int>(255 - std::abs(y) / range * 150);
+                cv::Scalar color(0, brightness, 0);
+
+                // X轴上的点用红色标记
+                if (std::abs(y) < 0.01) {
+                    color = cv::Scalar(0, 0, 255);  // 红色
+                }
+                // Y轴上的点用蓝色标记 (x=0的情况)
+                if (std::abs(x) < 0.01) {
+                    color = cv::Scalar(255, 0, 0);  // 蓝色
+                }
+
+                cv::circle(img, pixel, 4, color, -1, cv::LINE_AA);
+
+                // 在整米处标注距离
+                if (std::abs(y) < 0.01 && static_cast<int>(x) == x) {
+                    cv::putText(img, fmt::format("{}m", static_cast<int>(x)),
+                        pixel + cv::Point2f(5, -5),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255, 255, 255), 1);
+                }
+            }
+        }
+    }
+}
 
 /**
  * @brief 绘制调试可视化
@@ -27,6 +78,11 @@ inline void draw_debug_visualization(
     const hardware::SyncFrame& frame
 ) {
     cv::Mat debug_img = image.clone();
+
+    // 绘制世界坐标系地面网格
+    if (frame.serial_valid) {
+        draw_world_ground_grid(debug_img, result.state.q_imu);
+    }
 
     // 绘制装甲板
     for (const auto& armor : result.armors) {
@@ -103,8 +159,8 @@ inline void draw_debug_visualization(
     }
 
     cv::Mat display;
-    cv::resize(debug_img, display, cv::Size(960, 720));
-    cv::imshow("Detector Debug", display);
+    //cv::resize(debug_img, display, cv::Size(960, 720));
+    cv::imshow("Detector Debug", debug_img);
     cv::waitKey(1);
 }
 

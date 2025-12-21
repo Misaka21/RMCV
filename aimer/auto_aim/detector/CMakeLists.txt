@@ -31,6 +31,7 @@ target_link_libraries(detector_node PUBLIC
     detector_traditional
     plugin
     hardware
+    aimer_common
     ${OpenCV_LIBS}
     fmt::fmt
 )
