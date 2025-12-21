@@ -80,6 +80,9 @@ target_link_libraries(test_hardware ${OpenCV_LIBS} fmt::fmt plugin hardware)
 add_executable(test_transformer test/test_transformer.cpp)
 target_link_libraries(test_transformer ${OpenCV_LIBS} fmt::fmt aimer_common)
 
+add_executable(test_imu test/test_imu.cpp)
+target_link_libraries(test_imu ${OpenCV_LIBS} fmt::fmt plugin hardware)
+
 
 # ... (在你现有的 add_subdirectory 之后)
 
