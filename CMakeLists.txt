@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(RMCV)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_BUILD_TYPE Release)
+#set(CMAKE_BUILD_TYPE Release)
 
 # VTune 性能分析选项
 option(ENABLE_PROFILING "Enable profiling support for VTune/perf" OFF)

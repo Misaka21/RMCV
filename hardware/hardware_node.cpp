@@ -255,7 +255,12 @@ void start_hardware_node() {
 
                 // Publish
                 pub.push(frame);
-                hardware_running->get() = true;
+
+                // 只有串口同步后才通知其他线程硬件就绪
+                if (frame.serial_valid && !hardware_running->get()) {
+                    hardware_running->get() = true;
+                    debug::print(debug::PrintMode::INFO, "HardwareNode", "Serial synced, hardware ready");
+                }
 
                 // 更新统计
                 stats.update(0, synced);
