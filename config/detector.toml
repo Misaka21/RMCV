@@ -26,7 +26,7 @@
 
 [Detector.traditional.light]
     # 灯条最小长宽比
-    min_ratio = 0.08
+    min_ratio = 0.01
     # 灯条最大长宽比
     max_ratio = 0.4
     # 灯条最大倾斜角度
