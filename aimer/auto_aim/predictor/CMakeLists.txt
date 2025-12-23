@@ -21,6 +21,7 @@ target_link_libraries(predictor PUBLIC
     enemy_state
     enemy_model
     aimer_common
+    plugin
     ${OpenCV_LIBS}
     Eigen3::Eigen
     fmt::fmt

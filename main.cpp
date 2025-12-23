@@ -8,6 +8,7 @@
 
 // Project headers
 #include "aimer/auto_aim/detector/detector_node.hpp"
+#include "aimer/auto_aim/predictor/predictor_node.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
@@ -24,8 +25,10 @@ void signal_handler(int sig) {
     // 通知所有线程停止
     auto hw_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
     auto det_running = umt::BasicObjManager<bool>::find_or_create("detector_running", false);
+    auto pred_running = umt::BasicObjManager<bool>::find_or_create("predictor_running", false);
     hw_running->get() = false;
     det_running->get() = false;
+    pred_running->get() = false;
     std::exit(1);
 }
 
@@ -82,6 +85,11 @@ int main() {
         autoaim::start_detector_node();
     });
 
+    // 启动预测器节点线程
+    std::thread predictor_thread([]() {
+        autoaim::predictor::start_predictor_node();
+    });
+
     debug::print(debug::PrintMode::INFO, "Main", "All threads started");
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 系统启动完成，按 Ctrl+C 退出\n");
 
@@ -97,6 +105,9 @@ int main() {
     }
     if (detector_thread.joinable()) {
         detector_thread.join();
+    }
+    if (predictor_thread.joinable()) {
+        predictor_thread.join();
     }
 
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 程序正常退出\n");
