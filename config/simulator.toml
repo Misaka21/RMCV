@@ -3,7 +3,7 @@
 
 [Simulator]
 # ROS2 Topic名称 (来自at_vision_simulator)
-image_topic = "/image_raw"
+image_topic = "/image_compressed"
 gimbal_pose_topic = "/gimbal_pose"
 
 # 模拟串口数据 (替代真实电控)

@@ -14,10 +14,11 @@
 #include <Eigen/Geometry>
 #include <fmt/format.h>
 #include <opencv2/core/mat.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 // ROS2
 #include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <message_filters/subscriber.h>
@@ -50,7 +51,7 @@ struct SyncedData {
 
 class SimulatorSubscriber : public rclcpp::Node {
 public:
-    using ImageMsg = sensor_msgs::msg::Image;
+    using ImageMsg = sensor_msgs::msg::CompressedImage;
     using PoseMsg = geometry_msgs::msg::PoseStamped;
     using SyncPolicy = message_filters::sync_policies::ApproximateTime<ImageMsg, PoseMsg>;
 
@@ -58,8 +59,9 @@ public:
         : Node("simulator_subscriber")
         , config_(config)
     {
-        // QoS 设置
-        rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
+        // QoS 设置 - 使用 RELIABLE 以匹配模拟器
+        rmw_qos_profile_t qos_profile = rmw_qos_profile_default;
+        qos_profile.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
         qos_profile.depth = 10;
 
         // 创建 message_filters 订阅器
@@ -98,9 +100,12 @@ private:
         try {
             SyncedData data;
 
-            // 图像转换 (使用 toCvShare 避免拷贝)
-            auto cv_ptr = cv_bridge::toCvShare(img_msg, "bgr8");
-            data.image = cv_ptr->image.clone();  // 必须clone，因为msg会被释放
+            // CompressedImage 解码
+            data.image = cv::imdecode(cv::Mat(img_msg->data), cv::IMREAD_COLOR);
+            if (data.image.empty()) {
+                RCLCPP_WARN(get_logger(), "Failed to decode compressed image");
+                return;
+            }
 
             // 四元数
             auto& q = pose_msg->pose.orientation;

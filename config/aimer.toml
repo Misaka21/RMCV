@@ -14,7 +14,28 @@ barrel_offset_x = 0.0   # 枪口在云台前方距离
 barrel_offset_y = 0.0   # 枪口在云台左侧距离
 barrel_offset_z = -0.055  # 枪口在云台下方5.5cm (z负=下)
 
-#autoaim
 [AutoAim]
+
+# ============================================================================
+# Predictor 消抖/过滤参数
+# ============================================================================
+[AutoAim.Predictor]
+
+# 面积过滤
+existing_armor_area_ratio = 0.30   # 已存在装甲板的最小面积比例
+new_armor_area_ratio = 0.40        # 新装甲板的最小面积比例
+
+# 距离过滤
+min_distance = 0.1                 # 最小有效距离 (m)，过近可能是误识别
+max_distance = 15.0                # 最大有效距离 (m)
+new_armor_max_distance = 10.0      # 新装甲板最大距离 (m)，防止远处误识别
+
+# 跳变过滤
+jump_distance_limit = 1.2          # 相邻帧最大位置跳变 (m)
+existing_armor_distance = 0.5      # 判断"已存在装甲板"的距离阈值 (m)
+
+# 超时
+lost_timeout = 0.5                 # 丢失目标超时 (s)
+armor_credit_time = 0.1            # 装甲板滤波器信用时间 (s)
 
 

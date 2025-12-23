@@ -83,6 +83,7 @@ void start_detector_node() {
                 result.state = aimer::RobotState::from_sync_frame(frame);
                 result.armors = std::move(armors);
                 result.latency_ms = latency;
+                result.img = frame.image;  // 传递图像给后续节点
 
                 pub.push(result);
 

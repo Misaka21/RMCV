@@ -12,9 +12,11 @@
 #include <thread>
 
 #include <fmt/color.h>
+#include <opencv2/highgui.hpp>
 
 #include "simulator/simulator_node.hpp"
 #include "aimer/auto_aim/detector/detector_node.hpp"
+#include "aimer/auto_aim/predictor/predictor_node.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
@@ -78,14 +80,26 @@ int main() {
         autoaim::start_detector_node();
     });
 
-    fmt::print(fmt::fg(fmt::color::green), "[INFO] Benchmark running. Press Ctrl+C to stop.\n");
+    // 启动预测器
+    fmt::print(fmt::fg(fmt::color::green), "[INFO] Starting predictor...\n");
+    std::thread predictor_thread([]() {
+        autoaim::predictor::start_predictor_node();
+    });
 
+    fmt::print(fmt::fg(fmt::color::green), "[INFO] Benchmark running. Press Ctrl+C or 'q' to stop.\n");
+
+    // 主线程处理 OpenCV GUI 事件 (必须在主线程)
     while (g_running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        int key = cv::waitKey(1);  // 30ms，约33fps
+        if (key == 'q' || key == 27) {  // q 或 ESC
+            g_running = false;
+            break;
+        }
     }
 
     if (simulator_thread.joinable()) simulator_thread.join();
     if (detector_thread.joinable()) detector_thread.join();
+    if (predictor_thread.joinable()) predictor_thread.join();
 
     fmt::print(fmt::fg(fmt::color::green), "[INFO] Done.\n");
     return 0;

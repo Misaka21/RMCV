@@ -105,6 +105,7 @@ struct DetectionResult {
     int frame_id = 0;
     RobotState state;
     float latency_ms = 0;  // 检测耗时
+    cv::Mat img;           // 原始图像 (可选，调试用)
 
     DetectionResult() = default;
 

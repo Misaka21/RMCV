@@ -68,19 +68,6 @@ private:
 
     // 陀螺状态
     SpinState spin_;
-
-    // ==================== 消抖参数 ====================
-
-    static constexpr double EXISTING_ARMOR_AREA_RATIO = 0.30;
-    static constexpr double NEW_ARMOR_AREA_RATIO = 0.40;
-    static constexpr double EXISTING_ARMOR_DISTANCE = 0.5;  // 位置匹配阈值 (m)
-    static constexpr double JUMP_DISTANCE_LIMIT = 1.2;
-    static constexpr double MIN_DIST = 0.5;
-    static constexpr double MAX_DIST = 15.0;
-    static constexpr double NEW_ARMOR_MAX_DIST = 10.0;
-    static constexpr double MAX_Z_TO_V = 1.2;
-    static constexpr double LOST_TIMEOUT = 0.5;
-    static constexpr double ARMOR_CREDIT_TIME = 0.1;
 };
 
 }  // namespace autoaim::predictor

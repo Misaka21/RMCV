@@ -1,6 +1,8 @@
 /**
  * @file vehicle_model.cpp
  * @brief 车辆运动模型实现
+ *
+ * 过滤逻辑参考 rm.cv.fans/aimer/auto_aim/predictor/enemy/enemy_state.cpp
  */
 
 #include "vehicle_model.hpp"
@@ -8,23 +10,81 @@
 #include <algorithm>
 #include <cmath>
 
+#include <fmt/color.h>
+
 #include "aimer/common/math/math.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
+
+// ============================================================================
+// 辅助函数: 读取运行时参数
+// ============================================================================
+
+namespace {
+
+// 默认参数值
+constexpr double DEFAULT_EXISTING_ARMOR_AREA_RATIO = 0.30;
+constexpr double DEFAULT_NEW_ARMOR_AREA_RATIO = 0.40;
+constexpr double DEFAULT_JUMP_DISTANCE_LIMIT = 1.2;
+constexpr double DEFAULT_NEW_ARMOR_MAX_DIST = 10.0;
+constexpr double DEFAULT_LOST_TIMEOUT = 0.5;
+constexpr double DEFAULT_ARMOR_CREDIT_TIME = 0.1;
+
+// 辅助函数: 安全读取运行时参数，找不到时返回默认值
+double get_double_param(const std::string& name, double default_val) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_val;
+}
+
+double get_existing_armor_area_ratio() {
+    return get_double_param("AutoAim.Predictor.existing_armor_area_ratio", DEFAULT_EXISTING_ARMOR_AREA_RATIO);
+}
+
+double get_new_armor_area_ratio() {
+    return get_double_param("AutoAim.Predictor.new_armor_area_ratio", DEFAULT_NEW_ARMOR_AREA_RATIO);
+}
+
+double get_jump_distance_limit() {
+    return get_double_param("AutoAim.Predictor.jump_distance_limit", DEFAULT_JUMP_DISTANCE_LIMIT);
+}
+
+double get_new_armor_max_distance() {
+    return get_double_param("AutoAim.Predictor.new_armor_max_distance", DEFAULT_NEW_ARMOR_MAX_DIST);
+}
+
+double get_lost_timeout() {
+    return get_double_param("AutoAim.Predictor.lost_timeout", DEFAULT_LOST_TIMEOUT);
+}
+
+double get_armor_credit_time() {
+    return get_double_param("AutoAim.Predictor.armor_credit_time", DEFAULT_ARMOR_CREDIT_TIME);
+}
+
+}  // namespace
+
+// ============================================================================
+// VehicleModel 实现
+// ============================================================================
 
 VehicleModel::VehicleModel(int target_id, EnemyType enemy_type)
     : target_id_(target_id),
       enemy_type_(enemy_type),
-      armor_model_(ARMOR_CREDIT_TIME) {}
+      armor_model_(get_armor_credit_time()) {}
 
 void VehicleModel::update(const std::vector<ArmorObservation>& observations, double timestamp) {
     ++frame_count_;
 
-    // 1. 消抖过滤
+    // 1. 消抖过滤 (参考 rm.cv.fans screened_armors)
     auto filtered = filter(observations, prev_armors_);
 
     if (filtered.empty()) {
-        if (initialized_ && (timestamp - last_update_time_) > LOST_TIMEOUT) {
+        if (initialized_ && (timestamp - last_update_time_) > get_lost_timeout()) {
             reset();
         }
         return;
@@ -39,6 +99,18 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
     armor_model_.update(armors_with_id, timestamp);
 
+    // DEBUG: 输出装甲板数量和 ID
+    if (armors_with_id.size() > 1 || armor_model_.size() > 1) {
+        fmt::print(fmt::fg(fmt::color::orange),
+            "[T{}] obs:{} filtered:{} active:{} filters:{}\n",
+            target_id_, observations.size(), filtered.size(),
+            armors_with_id.size(), armor_model_.size());
+        for (const auto& a : armors_with_id) {
+            fmt::print("  armor id={} pos=({:.2f},{:.2f},{:.2f})\n",
+                a.id, a.pos().x(), a.pos().y(), a.pos().z());
+        }
+    }
+
     if (!initialized_) {
         initialized_ = true;
     }
@@ -50,6 +122,16 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     prev_timestamp_ = timestamp;
 }
 
+/**
+ * @brief 过滤无效观测 (参考 rm.cv.fans EnemyState::screened_armors)
+ *
+ * 过滤规则:
+ * 1. 面积过小: 已存在装甲板 < max_area * 0.30, 新装甲板 < max_area * 0.40
+ * 2. 距离过远: 新装甲板 > 10.0m
+ * 3. 跳变过大: 相邻帧位置跳变 > 1.2m
+ *
+ * 注意: 不检查 MIN_DIST 和 z_to_v (与 rm.cv.fans 保持一致)
+ */
 std::vector<ArmorObservation> VehicleModel::filter(
     const std::vector<ArmorObservation>& raw,
     const std::vector<ArmorObservation>& last
@@ -58,6 +140,13 @@ std::vector<ArmorObservation> VehicleModel::filter(
 
     if (raw.empty()) return result;
 
+    // 读取运行时参数
+    const double existing_area_ratio = get_existing_armor_area_ratio();
+    const double new_area_ratio = get_new_armor_area_ratio();
+    const double jump_limit = get_jump_distance_limit();
+    const double new_max_dist = get_new_armor_max_distance();
+
+    // 找最大面积
     double max_area = 0;
     for (const auto& a : raw) {
         if (!a.valid) continue;
@@ -65,45 +154,51 @@ std::vector<ArmorObservation> VehicleModel::filter(
         if (area > max_area) max_area = area;
     }
 
-    double dt = last_update_time_ - prev_timestamp_;
-    bool do_jump_check = !last.empty() && dt > 0 && dt < LOST_TIMEOUT;
-
     for (const auto& a : raw) {
         if (!a.valid) continue;
 
         double area = math::get_area(a.pts);
 
-        // 用位置匹配判断是否是已存在的装甲板 (ID 还未分配)
-        bool is_existing = false;
-        double min_dist_to_last = 1e9;
+        // 找到与上一帧最近的距离
+        double closest = 1e9;
         for (const auto& o : last) {
             double d = (a.pos - o.pos).norm();
-            if (d < min_dist_to_last) min_dist_to_last = d;
+            if (d < closest) closest = d;
         }
-        // 距离小于阈值认为是同一个装甲板
-        is_existing = !last.empty() && min_dist_to_last < EXISTING_ARMOR_DISTANCE;
 
-        double area_thresh = is_existing
-            ? max_area * EXISTING_ARMOR_AREA_RATIO
-            : max_area * NEW_ARMOR_AREA_RATIO;
-        if (area < area_thresh) continue;
+        // 规则1: 相邻帧跳变过大
+        if (!last.empty() && closest > jump_limit) {
+            continue;
+        }
 
-        double dist = a.distance();
-        if (dist < MIN_DIST || dist > MAX_DIST) continue;
-        if (!is_existing && dist > NEW_ARMOR_MAX_DIST) continue;
-        if (std::abs(a.z_to_v) > MAX_Z_TO_V) continue;
+        // 判断是否是已存在的装甲板 (用位置匹配，因为 ID 还未分配)
+        bool is_existing = !last.empty() && closest < 0.5;
 
-        if (do_jump_check) {
-            if (min_dist_to_last > JUMP_DISTANCE_LIMIT) continue;
+        // 规则2: 面积过小
+        if (is_existing) {
+            if (area < max_area * existing_area_ratio) {
+                continue;
+            }
+        } else {
+            // 新装甲板
+            if (area < max_area * new_area_ratio) {
+                continue;
+            }
+            // 规则3: 新装甲板距离过远
+            if (a.distance() > new_max_dist) {
+                continue;
+            }
         }
 
         result.push_back(a);
     }
 
+    // 按 z_to_v 排序 (正对的优先)
     std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
         return a.z_to_v < b.z_to_v;
     });
 
+    // 最多保留 4 块装甲板
     if (result.size() > 4) {
         result.resize(4);
     }

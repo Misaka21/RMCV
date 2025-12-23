@@ -87,7 +87,7 @@ target_link_libraries(test_imu ${OpenCV_LIBS} fmt::fmt plugin hardware)
 # Simulator测试 (需要ROS2环境)
 if(SIMULATOR_FOUND)
     add_executable(test_simulator test/test_simulator.cpp)
-    target_link_libraries(test_simulator ${OpenCV_LIBS} fmt::fmt plugin hardware simulator detector)
+    target_link_libraries(test_simulator ${OpenCV_LIBS} fmt::fmt plugin hardware simulator detector predictor)
     message(STATUS "test_simulator will be built (ROS2 found)")
 endif()
 
