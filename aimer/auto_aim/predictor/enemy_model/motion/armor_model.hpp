@@ -30,9 +30,71 @@
 
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
-#include "aimer/common/filter/position_ekf_ypd.hpp"
+#include "aimer/common/filter/adaptive_ekf.hpp"
+#include "aimer/common/math/math.hpp"
 
 namespace autoaim::predictor {
+
+// ============================================================================
+// EKF 预测/观测函数
+// ============================================================================
+
+/**
+ * @brief 匀速预测函数 (CV模型)
+ *
+ * 状态: [yaw, vyaw, pitch, vpitch, dis, vdis]
+ * 转移: pos' = pos + vel * dt, vel' = vel
+ */
+struct YpdCVPredict {
+    double dt;
+
+    explicit YpdCVPredict(double delta_t) : dt(delta_t) {}
+
+    template<typename T>
+    void operator()(const T x_in[6], T x_out[6]) const {
+        x_out[0] = x_in[0] + T(dt) * x_in[1];  // yaw
+        x_out[1] = x_in[1];
+        x_out[2] = x_in[2] + T(dt) * x_in[3];  // pitch
+        x_out[3] = x_in[3];
+        x_out[4] = x_in[4] + T(dt) * x_in[5];  // dis
+        x_out[5] = x_in[5];
+    }
+};
+
+/**
+ * @brief 直接观测函数 (YPD → YPD)
+ */
+struct YpdDirectMeasure {
+    template<typename T>
+    void operator()(const T x[6], T y[3]) const {
+        y[0] = x[0];  // yaw
+        y[1] = x[2];  // pitch
+        y[2] = x[4];  // dis
+    }
+};
+
+// ============================================================================
+// 角度处理工具
+// ============================================================================
+
+/// 将角度归一化到 (-π, π]
+inline double normalize_angle(double angle) {
+    while (angle > M_PI)  angle -= 2 * M_PI;
+    while (angle <= -M_PI) angle += 2 * M_PI;
+    return angle;
+}
+
+/// 获取最近的等价角度 (处理±π跨越)
+inline double get_closest_angle(double target, double current) {
+    double diff = target - current;
+    while (diff > M_PI)  diff -= 2 * M_PI;
+    while (diff < -M_PI) diff += 2 * M_PI;
+    return current + diff;
+}
+
+// ============================================================================
+// FilterThread - 单个装甲板滤波器
+// ============================================================================
 
 /**
  * @brief 单个装甲板滤波线程
@@ -42,6 +104,12 @@ namespace autoaim::predictor {
  */
 class FilterThread {
 public:
+    using Ekf = filter::AdaptiveEkf<6, 3>;
+    using VectorX = Eigen::Matrix<double, 6, 1>;
+    using VectorY = Eigen::Matrix<double, 3, 1>;
+    using MatrixXX = Eigen::Matrix<double, 6, 6>;
+    using MatrixYY = Eigen::Matrix<double, 3, 3>;
+
     /**
      * @brief 构造
      * @param armor 初始装甲板数据
@@ -52,8 +120,6 @@ public:
 
     /**
      * @brief 更新滤波器
-     * @param armor 新的装甲板数据
-     * @param timestamp 时间戳
      */
     void update(const ArmorData& armor, double timestamp);
 
@@ -97,9 +163,19 @@ private:
     double last_update_time_ = 0;    // 最后更新时间
     double credit_time_;             // 超时阈值
 
-    // YPD坐标系EKF滤波器 (自动微分)
-    filter::PositionEkfYpd ekf_;
+    // EKF 滤波器
+    Ekf ekf_;
+
+    // 噪声参数
+    static constexpr double Q_POS = 0.01;   // 位置过程噪声
+    static constexpr double Q_VEL = 0.1;    // 速度过程噪声
+    static constexpr double R_ANGLE = 0.01; // 角度观测噪声
+    static constexpr double R_DIS_1M = 0.01;// 1m处距离噪声
 };
+
+// ============================================================================
+// ArmorModel - 装甲板运动模型
+// ============================================================================
 
 /**
  * @brief 装甲板运动模型

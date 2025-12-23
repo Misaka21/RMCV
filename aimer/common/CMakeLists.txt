@@ -8,7 +8,6 @@ add_library(aimer_common STATIC
     # 头文件 (便于IDE识别)
     math/math.hpp
     filter/adaptive_ekf.hpp
-    filter/position_ekf_ypd.hpp
     types.hpp
 )
 

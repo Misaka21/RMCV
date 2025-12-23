@@ -7,8 +7,6 @@
 
 #include <cmath>
 
-#include "aimer/common/math/math.hpp"
-
 namespace autoaim::predictor {
 
 // ============================================================================
@@ -17,13 +15,52 @@ namespace autoaim::predictor {
 
 FilterThread::FilterThread(const ArmorData& armor, double timestamp, double credit_time)
     : armor_(armor), last_update_time_(timestamp), credit_time_(credit_time) {
-    // 使用XYZ位置初始化YPD滤波器
-    ekf_.init(armor.pos(), timestamp);
+    // XYZ → YPD
+    math::YpdCoord ypd = math::xyz_to_ypd(armor.pos());
+
+    // 初始化状态: [yaw, 0, pitch, 0, dis, 0]
+    VectorX x0;
+    x0 << ypd.yaw, 0, ypd.pitch, 0, ypd.dis, 0;
+    ekf_.init(x0);
 }
 
 void FilterThread::update(const ArmorData& armor, double timestamp) {
-    // 使用XYZ位置更新 (内部自动转换为YPD)
-    ekf_.update(armor.pos(), timestamp);
+    double dt = timestamp - last_update_time_;
+    if (dt <= 0) return;
+
+    // XYZ → YPD
+    math::YpdCoord ypd = math::xyz_to_ypd(armor.pos());
+
+    // 构建噪声矩阵
+    MatrixXX Q = MatrixXX::Zero();
+    Q(0, 0) = Q(2, 2) = Q(4, 4) = Q_POS * dt;
+    Q(1, 1) = Q(3, 3) = Q(5, 5) = Q_VEL * dt;
+
+    MatrixYY R = MatrixYY::Zero();
+    R(0, 0) = R(1, 1) = R_ANGLE;
+    R(2, 2) = R_DIS_1M * ypd.dis * ypd.dis;
+
+    // 预测
+    YpdCVPredict predict_func(dt);
+    ekf_.predict_forward(predict_func, Q);
+
+    // 处理角度±π跨越
+    VectorX x = ekf_.get_x();
+    double yaw_close = get_closest_angle(ypd.yaw, x[0]);
+    double pitch_close = get_closest_angle(ypd.pitch, x[2]);
+
+    // 观测更新
+    VectorY y;
+    y << yaw_close, pitch_close, ypd.dis;
+
+    YpdDirectMeasure measure_func;
+    ekf_.update_forward(measure_func, y, R);
+
+    // 归一化角度
+    VectorX x_new = ekf_.get_x();
+    x_new[0] = normalize_angle(x_new[0]);
+    x_new[2] = normalize_angle(x_new[2]);
+    ekf_.set_x(x_new);
 
     // 保存
     armor_ = armor;
@@ -34,20 +71,40 @@ bool FilterThread::credit(double current_time) const {
     return (current_time - last_update_time_) <= credit_time_;
 }
 
-Eigen::Vector3d FilterThread::predict_pos(double timestamp) const {
-    return ekf_.predict_pos(timestamp);
-}
-
-Eigen::Vector3d FilterThread::predict_vel(double timestamp) const {
-    return ekf_.predict_vel(timestamp);
-}
-
 math::YpdCoord FilterThread::predict_ypd(double timestamp) const {
-    return ekf_.predict_ypd(timestamp);
+    double dt = timestamp - last_update_time_;
+    YpdCVPredict predict_func(dt);
+    auto res = ekf_.predict(predict_func);
+    return math::YpdCoord(res.x_p[0], res.x_p[2], res.x_p[4]);
 }
 
 math::YpdCoord FilterThread::predict_ypd_v(double timestamp) const {
-    return ekf_.predict_ypd_v(timestamp);
+    double dt = timestamp - last_update_time_;
+    YpdCVPredict predict_func(dt);
+    auto res = ekf_.predict(predict_func);
+    return math::YpdCoord(res.x_p[1], res.x_p[3], res.x_p[5]);
+}
+
+Eigen::Vector3d FilterThread::predict_pos(double timestamp) const {
+    return math::ypd_to_xyz(predict_ypd(timestamp));
+}
+
+Eigen::Vector3d FilterThread::predict_vel(double timestamp) const {
+    math::YpdCoord ypd = predict_ypd(timestamp);
+    math::YpdCoord ypd_v = predict_ypd_v(timestamp);
+
+    // 雅可比矩阵 ∂xyz/∂ypd
+    double cy = std::cos(ypd.yaw), sy = std::sin(ypd.yaw);
+    double cp = std::cos(ypd.pitch), sp = std::sin(ypd.pitch);
+    double d = ypd.dis;
+
+    Eigen::Matrix3d J;
+    J(0, 0) = -d * cp * sy;  J(0, 1) = -d * sp * cy;  J(0, 2) = cp * cy;
+    J(1, 0) =  d * cp * cy;  J(1, 1) = -d * sp * sy;  J(1, 2) = cp * sy;
+    J(2, 0) =  0;            J(2, 1) =  d * cp;       J(2, 2) = sp;
+
+    Eigen::Vector3d v_ypd(ypd_v.yaw, ypd_v.pitch, ypd_v.dis);
+    return J * v_ypd;
 }
 
 ArmorState FilterThread::get_armor_state(double timestamp) const {
@@ -77,10 +134,8 @@ void ArmorModel::update(const std::vector<ArmorData>& armors, double timestamp) 
     for (const auto& armor : armors) {
         auto it = filters_.find(armor.id);
         if (it == filters_.end()) {
-            // 新建滤波器
             filters_.emplace(armor.id, FilterThread(armor, timestamp, credit_time_));
         } else {
-            // 更新现有滤波器
             it->second.update(armor, timestamp);
         }
     }
