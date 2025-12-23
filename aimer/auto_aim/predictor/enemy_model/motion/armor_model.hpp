@@ -165,12 +165,6 @@ private:
 
     // EKF 滤波器
     Ekf ekf_;
-
-    // 噪声参数
-    static constexpr double Q_POS = 0.01;   // 位置过程噪声
-    static constexpr double Q_VEL = 0.1;    // 速度过程噪声
-    static constexpr double R_ANGLE = 0.01; // 角度观测噪声
-    static constexpr double R_DIS_1M = 0.01;// 1m处距离噪声
 };
 
 // ============================================================================
