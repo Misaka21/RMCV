@@ -1,0 +1,160 @@
+/**
+ * @file armor_observer.cpp
+ * @brief 装甲板观测器实现
+ */
+
+#include "armor_observer.hpp"
+
+#include <cmath>
+
+#include "aimer/common/math/math.hpp"
+#include "aimer/common/transformer/transformer.hpp"
+
+namespace autoaim::predictor {
+
+ArmorObserver::ArmorObserver() {
+    // 默认相机内参 (需要外部设置)
+    camera_matrix_ = cv::Mat::eye(3, 3, CV_64F);
+    dist_coeffs_ = cv::Mat::zeros(5, 1, CV_64F);
+}
+
+void ArmorObserver::set_camera_params(const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs) {
+    camera_matrix_ = camera_matrix.clone();
+    dist_coeffs_ = dist_coeffs.clone();
+}
+
+const ArmorObservationTable& ArmorObserver::observe(
+    const autoaim::DetectionResult& detection,
+    const Eigen::Quaterniond& q_imu
+) {
+    table_.clear();
+    table_.set_frame(detection.timestamp, ++frame_id_);
+
+    for (const auto& armor : detection.armors) {
+        auto obs = solve_pnp(armor, detection.timestamp, q_imu);
+        if (obs.valid) {
+            table_.add(obs);
+        }
+    }
+
+    return table_;
+}
+
+ArmorObservation ArmorObserver::solve_pnp(
+    const DetectedArmor& armor,
+    double timestamp,
+    const Eigen::Quaterniond& q_imu
+) {
+    ArmorObservation obs;
+    obs.valid = false;
+
+    // 检查四角点数量
+    if (armor.landmarks.size() != 4) {
+        return obs;
+    }
+
+    // 获取 3D 模板点
+    std::vector<cv::Point3f> object_points = get_armor_points(armor.type);
+
+    // 2D 图像点
+    std::vector<cv::Point2f> image_points(armor.landmarks.begin(), armor.landmarks.end());
+
+    // PnP 解算
+    cv::Mat rvec, tvec;
+    bool success = cv::solvePnP(
+        object_points,
+        image_points,
+        camera_matrix_,
+        dist_coeffs_,
+        rvec,
+        tvec,
+        false,
+        cv::SOLVEPNP_IPPE
+    );
+
+    if (!success) {
+        return obs;
+    }
+
+    // 提取位置 (相机坐标系)
+    Eigen::Vector3d pos_cam(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
+
+    // 计算装甲板法向量 (相机坐标系)
+    cv::Mat rotation_matrix;
+    cv::Rodrigues(rvec, rotation_matrix);
+    Eigen::Vector3d normal_cam(
+        rotation_matrix.at<double>(0, 2),
+        rotation_matrix.at<double>(1, 2),
+        rotation_matrix.at<double>(2, 2)
+    );
+
+    // 计算 z_to_v (在相机系计算)
+    double z_to_v = compute_z_to_v(pos_cam, normal_cam);
+
+    // ========== 坐标变换: 相机系 → 世界系 ==========
+    Eigen::Vector3d pos_world = tf::cam_to_world(pos_cam, q_imu);
+    Eigen::Vector3d normal_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(normal_cam, q_imu);
+
+    // 计算观测向量 (世界系)
+    Eigen::Vector4d z = compute_observation(pos_world, normal_world);
+
+    // 构建观测结果 (世界系)
+    obs = ArmorObservation::from_detection(armor, pos_world, z, z_to_v, timestamp);
+
+    return obs;
+}
+
+Eigen::Vector4d ArmorObserver::compute_observation(
+    const Eigen::Vector3d& pos_world,
+    const Eigen::Vector3d& normal_world
+) {
+    Eigen::Vector4d z;
+
+    // 计算球坐标 (世界系)
+    double dist = pos_world.norm();
+    double yaw = std::atan2(pos_world.y(), pos_world.x());
+    double pitch = std::atan2(pos_world.z(), std::sqrt(pos_world.x() * pos_world.x() + pos_world.y() * pos_world.y()));
+
+    // 装甲板朝向角 (法向量在 xy 平面的投影角度)
+    double armor_yaw = std::atan2(normal_world.y(), normal_world.x());
+
+    z << yaw, pitch, dist, armor_yaw;
+
+    return z;
+}
+
+double ArmorObserver::compute_z_to_v(
+    const Eigen::Vector3d& pos_cam,
+    const Eigen::Vector3d& normal_cam
+) {
+    // 视线方向 (从相机指向装甲板)
+    Eigen::Vector3d view_dir = pos_cam.normalized();
+
+    // 装甲板法向量应该大致指向相机
+    double cos_angle = -normal_cam.dot(view_dir);
+
+    // 返回夹角 (弧度)
+    return std::acos(std::clamp(cos_angle, -1.0, 1.0));
+}
+
+std::vector<cv::Point3f> ArmorObserver::get_armor_points(ArmorType type) const {
+    double half_w, half_h;
+
+    if (type == ArmorType::LARGE) {
+        half_w = LARGE_WIDTH / 2.0;
+        half_h = LARGE_HEIGHT / 2.0;
+    } else {
+        half_w = SMALL_WIDTH / 2.0;
+        half_h = SMALL_HEIGHT / 2.0;
+    }
+
+    // 装甲板四角点 (装甲板坐标系，z轴朝外)
+    return {
+        cv::Point3f(-half_w, -half_h, 0),
+        cv::Point3f(-half_w,  half_h, 0),
+        cv::Point3f( half_w,  half_h, 0),
+        cv::Point3f( half_w, -half_h, 0)
+    };
+}
+
+}  // namespace autoaim::predictor
