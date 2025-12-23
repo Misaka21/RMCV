@@ -53,8 +53,8 @@ ArmorObservation ArmorObserver::solve_pnp(
         return obs;
     }
 
-    // 获取 3D 模板点
-    std::vector<cv::Point3f> object_points = get_armor_points(armor.type);
+    // 使用 DetectedArmor 的模板点 (统一定义)
+    std::vector<cv::Point3f> object_points = armor.object_points();
 
     // 2D 图像点
     std::vector<cv::Point2f> image_points(armor.landmarks.begin(), armor.landmarks.end());
@@ -80,12 +80,14 @@ ArmorObservation ArmorObserver::solve_pnp(
     Eigen::Vector3d pos_cam(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
 
     // 计算装甲板法向量 (相机坐标系)
+    // 物体坐标系: x前(指向相机), y左, z上
+    // 法向量在物体坐标系是 [1, 0, 0] (x轴方向)
     cv::Mat rotation_matrix;
     cv::Rodrigues(rvec, rotation_matrix);
     Eigen::Vector3d normal_cam(
-        rotation_matrix.at<double>(0, 2),
-        rotation_matrix.at<double>(1, 2),
-        rotation_matrix.at<double>(2, 2)
+        rotation_matrix.at<double>(0, 0),
+        rotation_matrix.at<double>(1, 0),
+        rotation_matrix.at<double>(2, 0)
     );
 
     // 计算 z_to_v (在相机系计算)
@@ -135,26 +137,6 @@ double ArmorObserver::compute_z_to_v(
 
     // 返回夹角 (弧度)
     return std::acos(std::clamp(cos_angle, -1.0, 1.0));
-}
-
-std::vector<cv::Point3f> ArmorObserver::get_armor_points(ArmorType type) const {
-    double half_w, half_h;
-
-    if (type == ArmorType::LARGE) {
-        half_w = LARGE_WIDTH / 2.0;
-        half_h = LARGE_HEIGHT / 2.0;
-    } else {
-        half_w = SMALL_WIDTH / 2.0;
-        half_h = SMALL_HEIGHT / 2.0;
-    }
-
-    // 装甲板四角点 (装甲板坐标系，z轴朝外)
-    return {
-        cv::Point3f(-half_w, -half_h, 0),
-        cv::Point3f(-half_w,  half_h, 0),
-        cv::Point3f( half_w,  half_h, 0),
-        cv::Point3f( half_w, -half_h, 0)
-    };
 }
 
 }  // namespace autoaim::predictor

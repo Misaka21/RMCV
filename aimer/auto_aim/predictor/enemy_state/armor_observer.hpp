@@ -83,11 +83,6 @@ private:
         const Eigen::Vector3d& normal_cam
     );
 
-    /**
-     * @brief 获取装甲板 3D 模板点
-     */
-    std::vector<cv::Point3f> get_armor_points(ArmorType type) const;
-
     // ==================== 数据 ====================
 
     // 观测表
@@ -99,16 +94,6 @@ private:
 
     // 帧计数
     int frame_id_ = 0;
-
-    // ==================== 装甲板尺寸 ====================
-
-    // 小装甲板: 135mm x 55mm
-    static constexpr double SMALL_WIDTH = 0.135;
-    static constexpr double SMALL_HEIGHT = 0.055;
-
-    // 大装甲板: 225mm x 55mm
-    static constexpr double LARGE_WIDTH = 0.225;
-    static constexpr double LARGE_HEIGHT = 0.055;
 };
 
 }  // namespace autoaim::predictor
