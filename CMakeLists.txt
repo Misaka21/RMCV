@@ -61,6 +61,7 @@ include_directories(umt)
 add_subdirectory(plugin)
 add_subdirectory(hardware)
 add_subdirectory(aimer)
+add_subdirectory(simulator)
 
 add_executable(RMCV2026 main.cpp)
 target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector)
@@ -82,6 +83,13 @@ target_link_libraries(test_transformer ${OpenCV_LIBS} fmt::fmt aimer_common)
 
 add_executable(test_imu test/test_imu.cpp)
 target_link_libraries(test_imu ${OpenCV_LIBS} fmt::fmt plugin hardware)
+
+# Simulator测试 (需要ROS2环境)
+if(SIMULATOR_FOUND)
+    add_executable(test_simulator test/test_simulator.cpp)
+    target_link_libraries(test_simulator ${OpenCV_LIBS} fmt::fmt plugin hardware simulator detector)
+    message(STATUS "test_simulator will be built (ROS2 found)")
+endif()
 
 
 # ... (在你现有的 add_subdirectory 之后)

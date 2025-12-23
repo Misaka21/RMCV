@@ -1,0 +1,15 @@
+# Simulator配置 - at_vision_simulator接入
+# https://github.com/Blackjack200/at_vision_simulator
+
+[Simulator]
+# ROS2 Topic名称 (来自at_vision_simulator)
+image_topic = "/image_raw"
+gimbal_pose_topic = "/gimbal_pose"
+
+# 模拟串口数据 (替代真实电控)
+[Simulator.serial]
+robot_id = 1              # 机器人ID
+enemy_color = 2           # 敌方颜色: 1=红, 2=蓝
+bullet_speed = 15.0       # 弹速 m/s
+aim_mode = 1              # 自瞄模式: 0=关, 1=自瞄
+allow_fire = true         # 允许射击
