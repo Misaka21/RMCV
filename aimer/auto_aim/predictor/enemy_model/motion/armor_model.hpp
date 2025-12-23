@@ -71,6 +71,7 @@ public:
     // Getters
     int id() const { return armor_.id; }
     const ArmorData& armor() const { return armor_; }
+    double last_update() const { return last_update_time_; }
 
 private:
     void predict(double dt);

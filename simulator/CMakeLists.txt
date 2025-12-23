@@ -33,6 +33,7 @@ if(rclcpp_FOUND AND sensor_msgs_FOUND AND geometry_msgs_FOUND AND cv_bridge_FOUN
         Eigen3::Eigen
         plugin
         hardware
+        rt  # for shm_open/shm_unlink (POSIX shared memory)
     )
 
     ament_target_dependencies(simulator

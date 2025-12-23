@@ -155,7 +155,6 @@ void ArmorModel::update(const std::vector<ArmorData>& armors, double timestamp) 
 std::vector<ArmorState> ArmorModel::get_armor_states(double timestamp) const {
     std::vector<ArmorState> result;
     for (const auto& [id, filter] : filters_) {
-        // 只返回有效的（未超时的）滤波器
         if (filter.credit(timestamp)) {
             result.push_back(filter.get_armor_state(timestamp));
         }

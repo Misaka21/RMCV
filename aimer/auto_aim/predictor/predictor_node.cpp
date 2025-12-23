@@ -105,149 +105,72 @@ void draw_prediction(
     const ArmorObservationTable& table,
     const Eigen::Quaterniond& q_imu
 ) {
-    // ========== 1. 绘制原始观测 (蓝色) ==========
+    // ========== 1. 绘制原始观测 (蓝色小圆圈，不显示文字) ==========
     for (int target_id : table.get_target_ids()) {
         const auto& obs_list = table.get(target_id);
         for (const auto& obs : obs_list) {
             if (!obs.valid) continue;
 
-            // 在图像上绘制观测位置
             bool valid = false;
             cv::Point2f obs_px = tf::world_to_pixel(obs.pos, q_imu, valid);
             if (!valid) continue;
 
-            // 绘制观测点 (蓝色圆圈)
-            cv::circle(img, obs_px, 6, cv::Scalar(255, 100, 0), 2, cv::LINE_AA);
-
-            // 计算面积
-            double area = 0;
-            if (obs.pts.size() >= 4) {
-                area = std::abs(
-                    (obs.pts[0].x - obs.pts[2].x) * (obs.pts[1].y - obs.pts[3].y) -
-                    (obs.pts[1].x - obs.pts[3].x) * (obs.pts[0].y - obs.pts[2].y)
-                ) / 2.0;
-            }
-
-            // 球坐标
-            double yaw_deg = obs.z[0] * 180.0 / M_PI;
-            double pitch_deg = obs.z[1] * 180.0 / M_PI;
-            double dist = obs.z[2];
-
-            // 绘制观测信息 (右侧)
-            const char* type_str = (obs.type == ArmorType::LARGE) ? "L" : "S";
-            int y_offset = 0;
-            cv::Point2f text_pos = obs_px + cv::Point2f(15, -30);
-
-            // 编号和类型
-            cv::putText(img, fmt::format("#{} {}", target_id, type_str),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(255, 200, 100), 1, cv::LINE_AA);
-            y_offset += 15;
-
-            // 面积
-            cv::putText(img, fmt::format("A:{:.1f}k", area / 1000.0),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(200, 200, 200), 1, cv::LINE_AA);
-            y_offset += 13;
-
-            // YPD (球坐标)
-            cv::putText(img, fmt::format("Y:{:.1f} P:{:.1f}", yaw_deg, pitch_deg),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(100, 255, 255), 1, cv::LINE_AA);
-            y_offset += 13;
-
-            // 距离
-            cv::putText(img, fmt::format("D:{:.2f}m", dist),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(100, 255, 255), 1, cv::LINE_AA);
-            y_offset += 13;
-
-            // XYZ (世界坐标)
-            cv::putText(img, fmt::format("({:.2f},{:.2f},{:.2f})",
-                obs.pos.x(), obs.pos.y(), obs.pos.z()),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(150, 255, 150), 1, cv::LINE_AA);
+            // 蓝色小圆圈标记观测位置
+            cv::circle(img, obs_px, 5, cv::Scalar(255, 100, 0), 2, cv::LINE_AA);
         }
     }
 
-    // ========== 2. 绘制 EKF 预测结果 (黄色/绿色) ==========
+    // ========== 2. 绘制 EKF 预测结果 + 完整信息 ==========
     for (int i = 1; i < MAX_TARGETS; ++i) {
         if (!snapshot.is_valid(i)) continue;
 
         const auto& vehicle = snapshot.vehicles[i];
 
-        // 绘制车辆中心 (黄色)
-        bool valid = false;
-        cv::Point2f center_px = tf::world_to_pixel(vehicle.center, q_imu, valid);
-        if (valid && center_px.x >= 0 && center_px.x < img.cols &&
-            center_px.y >= 0 && center_px.y < img.rows) {
-
-            // 中心点 (黄色实心圆)
-            cv::circle(img, center_px, 10, cv::Scalar(0, 255, 255), -1, cv::LINE_AA);
-            cv::circle(img, center_px, 10, cv::Scalar(0, 200, 200), 2, cv::LINE_AA);
-
-            // 速度方向箭头 (绿色)
-            double vel_scale = 0.3;  // 0.3秒后位置
-            Eigen::Vector3d vel_end = vehicle.center + vehicle.velocity * vel_scale;
-            cv::Point2f vel_px = tf::world_to_pixel(vel_end, q_imu, valid);
-            if (valid) {
-                cv::arrowedLine(img, center_px, vel_px, cv::Scalar(0, 255, 0), 2, cv::LINE_AA, 0, 0.3);
-            }
-
-            // 标注预测信息 (左侧)
-            cv::Point2f text_pos = center_px + cv::Point2f(-120, -20);
-            int y_offset = 0;
-
-            // 目标编号
-            cv::putText(img, fmt::format("T{} [EKF]", i),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-            y_offset += 16;
-
-            // 距离
-            double dist = vehicle.center.norm();
-            cv::putText(img, fmt::format("dist: {:.2f}m", dist),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-            y_offset += 14;
-
-            // 速度
-            double speed = vehicle.velocity.norm();
-            cv::putText(img, fmt::format("vel: {:.2f}m/s", speed),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
-            y_offset += 14;
-
-            // 位置
-            cv::putText(img, fmt::format("xyz: ({:.2f},{:.2f},{:.2f})",
-                vehicle.center.x(), vehicle.center.y(), vehicle.center.z()),
-                text_pos + cv::Point2f(0, y_offset),
-                cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-        }
-
-        // 绘制各装甲板预测位置 (绿色小圆) + 信息
+        // 绘制各装甲板
         for (int j = 0; j < vehicle.armor_count; ++j) {
             const auto& armor = vehicle.armors[j];
-            cv::Point2f armor_px = tf::world_to_pixel(armor.position, q_imu, valid);
-            if (valid && armor_px.x >= 0 && armor_px.x < img.cols &&
-                armor_px.y >= 0 && armor_px.y < img.rows) {
-                // 推荐击打的用绿色实心，其他用绿色空心
-                bool is_best = (j == vehicle.recommended_armor_idx);
-                cv::Scalar color = is_best ? cv::Scalar(0, 255, 0) : cv::Scalar(100, 255, 100);
-                int thickness = is_best ? -1 : 2;
-                cv::circle(img, armor_px, 10, color, thickness, cv::LINE_AA);
 
-                // 在圆圈下方显示: "T{target_id}.{armor_id} v={vel}"
-                double vel = armor.velocity.norm();
-                std::string info = fmt::format("T{}.{} v:{:.1f}", i, armor.id, vel);
-                cv::Point2f text_pos = armor_px + cv::Point2f(-30, 25);
-                // 黑色描边
-                cv::putText(img, info, text_pos + cv::Point2f(1, 1),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
-                // 黄色文字
-                cv::putText(img, info, text_pos,
-                    cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
-            }
+            bool valid = false;
+            cv::Point2f armor_px = tf::world_to_pixel(armor.position, q_imu, valid);
+            if (!valid) continue;
+            if (armor_px.x < 0 || armor_px.x >= img.cols ||
+                armor_px.y < 0 || armor_px.y >= img.rows) continue;
+
+            // 绿色圆圈 (推荐目标实心，其他空心)
+            bool is_best = (j == vehicle.recommended_armor_idx);
+            cv::Scalar circle_color = is_best ? cv::Scalar(0, 255, 0) : cv::Scalar(100, 255, 100);
+            int thickness = is_best ? -1 : 2;
+            cv::circle(img, armor_px, 8, circle_color, thickness, cv::LINE_AA);
+
+            // 计算信息
+            double dist = armor.position.norm();
+            double vel = armor.velocity.norm();
+            const char* type_str = (armor.type == ArmorType::LARGE) ? "L" : "S";
+
+            // ===== 信息卡片 (右侧) =====
+            cv::Point2f text_pos = armor_px + cv::Point2f(15, -35);
+            int y_offset = 0;
+
+            auto draw_text = [&](const std::string& text, cv::Scalar color) {
+                cv::putText(img, text, text_pos + cv::Point2f(1, y_offset + 1),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 2, cv::LINE_AA);
+                cv::putText(img, text, text_pos + cv::Point2f(0, y_offset),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv::LINE_AA);
+                y_offset += 14;
+            };
+
+            // number: 3 id: 4
+            draw_text(fmt::format("number: {} id: {}", i, armor.id), cv::Scalar(255, 255, 255));
+            // type: S
+            draw_text(fmt::format("type: {}", type_str), cv::Scalar(200, 200, 200));
+            // dist: 1.09m
+            draw_text(fmt::format("dist: {:.2f}m", dist), cv::Scalar(100, 255, 255));
+            // vel: 0.00m/s
+            draw_text(fmt::format("vel: {:.2f}m/s", vel), cv::Scalar(0, 255, 0));
+            // xyz: -0.15|-1.02|-0.14
+            draw_text(fmt::format("xyz: {:.2f}|{:.2f}|{:.2f}",
+                armor.position.x(), armor.position.y(), armor.position.z()),
+                cv::Scalar(150, 255, 150));
         }
     }
 
