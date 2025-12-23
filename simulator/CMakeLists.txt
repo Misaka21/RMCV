@@ -1,6 +1,14 @@
 # Simulator模块 - ROS2模拟器接入
 # 需要ROS2环境: source /opt/ros/humble/setup.bash
 
+# 检查ROS2环境是否已设置 (避免在未source时触发错误)
+if(NOT DEFINED ENV{AMENT_PREFIX_PATH} AND NOT DEFINED ENV{ROS_DISTRO})
+    message(STATUS "ROS2 environment not sourced, skipping simulator module")
+    message(STATUS "  To enable: source /opt/ros/humble/setup.bash before cmake")
+    set(SIMULATOR_FOUND FALSE PARENT_SCOPE)
+    return()
+endif()
+
 find_package(rclcpp QUIET)
 find_package(sensor_msgs QUIET)
 find_package(geometry_msgs QUIET)
