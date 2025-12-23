@@ -73,6 +73,7 @@ private:
 
     static constexpr double EXISTING_ARMOR_AREA_RATIO = 0.30;
     static constexpr double NEW_ARMOR_AREA_RATIO = 0.40;
+    static constexpr double EXISTING_ARMOR_DISTANCE = 0.5;  // 位置匹配阈值 (m)
     static constexpr double JUMP_DISTANCE_LIMIT = 1.2;
     static constexpr double MIN_DIST = 0.5;
     static constexpr double MAX_DIST = 15.0;

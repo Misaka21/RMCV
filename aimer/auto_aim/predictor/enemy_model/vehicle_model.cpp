@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <set>
 
 #include "aimer/common/math/math.hpp"
 
@@ -66,11 +65,6 @@ std::vector<ArmorObservation> VehicleModel::filter(
         if (area > max_area) max_area = area;
     }
 
-    std::set<int> last_ids;
-    for (const auto& a : last) {
-        last_ids.insert(a.armor_id);
-    }
-
     double dt = last_update_time_ - prev_timestamp_;
     bool do_jump_check = !last.empty() && dt > 0 && dt < LOST_TIMEOUT;
 
@@ -79,7 +73,16 @@ std::vector<ArmorObservation> VehicleModel::filter(
 
         double area = math::get_area(a.pts);
 
-        bool is_existing = last_ids.count(a.armor_id) > 0;
+        // 用位置匹配判断是否是已存在的装甲板 (ID 还未分配)
+        bool is_existing = false;
+        double min_dist_to_last = 1e9;
+        for (const auto& o : last) {
+            double d = (a.pos - o.pos).norm();
+            if (d < min_dist_to_last) min_dist_to_last = d;
+        }
+        // 距离小于阈值认为是同一个装甲板
+        is_existing = !last.empty() && min_dist_to_last < EXISTING_ARMOR_DISTANCE;
+
         double area_thresh = is_existing
             ? max_area * EXISTING_ARMOR_AREA_RATIO
             : max_area * NEW_ARMOR_AREA_RATIO;
@@ -91,12 +94,7 @@ std::vector<ArmorObservation> VehicleModel::filter(
         if (std::abs(a.z_to_v) > MAX_Z_TO_V) continue;
 
         if (do_jump_check) {
-            double min_jump = 1e9;
-            for (const auto& o : last) {
-                double d = (a.pos - o.pos).norm();
-                min_jump = std::min(min_jump, d);
-            }
-            if (min_jump > JUMP_DISTANCE_LIMIT) continue;
+            if (min_dist_to_last > JUMP_DISTANCE_LIMIT) continue;
         }
 
         result.push_back(a);

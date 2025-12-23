@@ -15,7 +15,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <set>
 #include <vector>
 
 #include "aimer/auto_aim/predictor/types.hpp"
@@ -82,12 +81,6 @@ public:
             if (area > max_area) max_area = area;
         }
 
-        // 构建上帧装甲板 ID 集合
-        std::set<int> last_ids;
-        for (const auto& a : last) {
-            last_ids.insert(a.armor_id);
-        }
-
         // 检查是否需要跳变检测
         double dt = timestamp_ - prev_timestamp_;
         bool do_jump_check = !last.empty() && dt > 0 && dt < LOST_TIMEOUT;
@@ -97,8 +90,9 @@ public:
 
             double area = math::get_area(a.pts);
 
-            // 1. 面积比例消抖
-            bool is_existing = last_ids.count(a.armor_id) > 0;
+            // 1. 面积比例消抖 (用位置匹配判断是否是已存在装甲板)
+            double min_dist_to_last = min_distance_to(a, last);
+            bool is_existing = !last.empty() && min_dist_to_last < EXISTING_ARMOR_DISTANCE;
             double area_thresh = is_existing
                 ? max_area * EXISTING_ARMOR_AREA_RATIO
                 : max_area * NEW_ARMOR_AREA_RATIO;
@@ -116,8 +110,7 @@ public:
 
             // 5. 跳变检查
             if (do_jump_check) {
-                double min_jump = min_distance_to(a, last);
-                if (min_jump > JUMP_DISTANCE_LIMIT) continue;
+                if (min_dist_to_last > JUMP_DISTANCE_LIMIT) continue;
             }
 
             result.push_back(a);
@@ -196,9 +189,10 @@ public:
     static constexpr double EXISTING_ARMOR_AREA_RATIO = 0.30;  // 已存在装甲板
     static constexpr double NEW_ARMOR_AREA_RATIO = 0.40;       // 新装甲板
 
-    // 跳变消抖
-    static constexpr double JUMP_DISTANCE_LIMIT = 1.2;  // 最大跳变距离 (m)
-    static constexpr double LOST_TIMEOUT = 0.15;        // 丢帧超时 (s)
+    // 位置匹配消抖
+    static constexpr double EXISTING_ARMOR_DISTANCE = 0.5;  // 位置匹配阈值 (m)
+    static constexpr double JUMP_DISTANCE_LIMIT = 1.2;      // 最大跳变距离 (m)
+    static constexpr double LOST_TIMEOUT = 0.15;            // 丢帧超时 (s)
 
     // 距离限制
     static constexpr double MIN_DIST = 0.5;             // 最小距离 (m)
