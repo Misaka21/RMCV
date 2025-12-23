@@ -8,6 +8,8 @@
  *   ArmorObservationTable
  *        ↓ EnemyModel [消抖 + EKF]
  *   BattlefieldSnapshot → 火控
+ *
+ * 职责: 预测所有敌人状态，不做目标选择 (由火控负责)
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_PREDICTOR_HPP__
@@ -20,7 +22,6 @@
 
 #include "aimer/auto_aim/common/types.hpp"
 #include "aimer/auto_aim/predictor/enemy_state/armor_observer.hpp"
-#include "aimer/auto_aim/predictor/target_catcher.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
 namespace autoaim::predictor {
@@ -31,6 +32,8 @@ class EnemyModelFactory;
 
 /**
  * @brief 敌方预测器
+ *
+ * 负责预测所有敌方车辆状态，输出 BattlefieldSnapshot 给火控
  */
 class EnemyPredictor {
 public:
@@ -40,7 +43,7 @@ public:
     /**
      * @brief 主预测函数
      * @param detection 检测结果
-     * @return 战场快照
+     * @return 战场快照 (所有敌人状态)
      */
     BattlefieldSnapshot predict(const autoaim::DetectionResult& detection);
 
@@ -51,7 +54,6 @@ public:
 
     // 调试用
     const ArmorObservationTable& get_observation_table() const { return observer_.table(); }
-    int get_target() const { return target_catcher_.get_target(current_time_); }
 
 private:
     /**
@@ -63,11 +65,6 @@ private:
      * @brief 阶段2: 更新模型 (消抖 + EKF)
      */
     void update_models();
-
-    /**
-     * @brief 选择目标
-     */
-    void select_target();
 
     /**
      * @brief 导出战场快照
@@ -84,9 +81,6 @@ private:
 
     // 模型工厂
     std::unique_ptr<EnemyModelFactory> model_factory_;
-
-    // 目标选择器
-    TargetCatcher target_catcher_;
 
     // 时间
     double current_time_ = 0;

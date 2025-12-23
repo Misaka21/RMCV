@@ -29,9 +29,6 @@ BattlefieldSnapshot EnemyPredictor::predict(const autoaim::DetectionResult& dete
     // 阶段2: 更新模型 (消抖 + EKF)
     update_models();
 
-    // 选择目标
-    select_target();
-
     // 导出快照
     return export_snapshot();
 }
@@ -80,34 +77,6 @@ void EnemyPredictor::update_models() {
     }
 }
 
-void EnemyPredictor::select_target() {
-    const auto& table = observer_.table();
-
-    // 尝试锁定最近的目标
-    double min_dist = 1e9;
-    int best_id = -1;
-    EnemyType best_type = EnemyType::UNKNOWN;
-
-    for (int target_id : table.get_target_ids()) {
-        const auto& obs = table.get(target_id);
-        if (obs.empty()) continue;
-
-        // 找最近的观测
-        for (const auto& a : obs) {
-            double dist = a.distance();
-            if (dist < min_dist) {
-                min_dist = dist;
-                best_id = target_id;
-                best_type = static_cast<EnemyType>(a.target_id);
-            }
-        }
-    }
-
-    if (best_id > 0) {
-        target_catcher_.try_catch(best_id, best_type, current_time_);
-    }
-}
-
 BattlefieldSnapshot EnemyPredictor::export_snapshot() {
     BattlefieldSnapshot snapshot;
     snapshot.timestamp = current_time_;
@@ -128,9 +97,6 @@ BattlefieldSnapshot EnemyPredictor::export_snapshot() {
             snapshot.set_detected(i, true);
         }
     }
-
-    // 设置主目标
-    snapshot.primary_target_id = target_catcher_.get_target(current_time_);
 
     return snapshot;
 }

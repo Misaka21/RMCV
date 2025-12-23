@@ -1,7 +1,6 @@
 # enemy_state 模块
 
 add_library(enemy_state STATIC
-    enemy_state.cpp
     armor_observer.cpp
     armor_identifier.cpp
 )
