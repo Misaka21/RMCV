@@ -10,6 +10,8 @@
  *
  * 数据流:
  *   DetectionResult + q_imu → ArmorObserver → ArmorObservationTable (世界系)
+ *
+ * 注意: 相机内参直接从 tf 模块获取 (tf::get_camera_matrix())
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_STATE_ARMOR_OBSERVER_HPP__
@@ -29,10 +31,11 @@ namespace autoaim::predictor {
  * @brief 装甲板观测器
  *
  * 负责将检测结果转换为世界坐标系的 3D 观测
+ * 相机内参直接从 tf 模块获取，无需手动设置
  */
 class ArmorObserver {
 public:
-    ArmorObserver();
+    ArmorObserver() = default;
 
     /**
      * @brief 处理检测结果，输出观测表 (世界坐标系)
@@ -44,11 +47,6 @@ public:
         const autoaim::DetectionResult& detection,
         const Eigen::Quaterniond& q_imu
     );
-
-    /**
-     * @brief 加载相机内参
-     */
-    void set_camera_params(const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs);
 
     // 访问器
     const ArmorObservationTable& table() const { return table_; }
@@ -87,10 +85,6 @@ private:
 
     // 观测表
     ArmorObservationTable table_;
-
-    // 相机内参
-    cv::Mat camera_matrix_;
-    cv::Mat dist_coeffs_;
 
     // 帧计数
     int frame_id_ = 0;

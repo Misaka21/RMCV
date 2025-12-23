@@ -12,17 +12,6 @@
 
 namespace autoaim::predictor {
 
-ArmorObserver::ArmorObserver() {
-    // 默认相机内参 (需要外部设置)
-    camera_matrix_ = cv::Mat::eye(3, 3, CV_64F);
-    dist_coeffs_ = cv::Mat::zeros(5, 1, CV_64F);
-}
-
-void ArmorObserver::set_camera_params(const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs) {
-    camera_matrix_ = camera_matrix.clone();
-    dist_coeffs_ = dist_coeffs.clone();
-}
-
 const ArmorObservationTable& ArmorObserver::observe(
     const autoaim::DetectionResult& detection,
     const Eigen::Quaterniond& q_imu
@@ -59,13 +48,17 @@ ArmorObservation ArmorObserver::solve_pnp(
     // 2D 图像点
     std::vector<cv::Point2f> image_points(armor.landmarks.begin(), armor.landmarks.end());
 
+    // 从 tf 模块获取相机内参
+    const cv::Mat& camera_matrix = tf::get_camera_matrix();
+    const cv::Mat& dist_coeffs = tf::get_distort_coeffs();
+
     // PnP 解算
     cv::Mat rvec, tvec;
     bool success = cv::solvePnP(
         object_points,
         image_points,
-        camera_matrix_,
-        dist_coeffs_,
+        camera_matrix,
+        dist_coeffs,
         rvec,
         tvec,
         false,
