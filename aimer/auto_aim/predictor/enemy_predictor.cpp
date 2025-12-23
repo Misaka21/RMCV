@@ -15,16 +15,12 @@ EnemyPredictor::EnemyPredictor() {
 
 EnemyPredictor::~EnemyPredictor() = default;
 
-void EnemyPredictor::set_camera_params(const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs) {
-    observer_.set_camera_params(camera_matrix, dist_coeffs);
-}
-
-BattlefieldSnapshot EnemyPredictor::predict(const autoaim::DetectionResult& detection) {
-    current_time_ = detection.timestamp;
+BattlefieldSnapshot EnemyPredictor::predict(const aimer::DetectionResult& detection, double timestamp) {
+    current_time_ = timestamp;
     frame_id_++;
 
     // 阶段1: 观测 (PnP)
-    update_observations(detection);
+    update_observations(detection, timestamp);
 
     // 阶段2: 更新模型 (消抖 + EKF)
     update_models();
@@ -33,8 +29,8 @@ BattlefieldSnapshot EnemyPredictor::predict(const autoaim::DetectionResult& dete
     return export_snapshot();
 }
 
-void EnemyPredictor::update_observations(const autoaim::DetectionResult& detection) {
-    observer_.observe(detection, detection.q_imu);
+void EnemyPredictor::update_observations(const aimer::DetectionResult& detection, double timestamp) {
+    observer_.observe(detection, timestamp);
 }
 
 void EnemyPredictor::update_models() {

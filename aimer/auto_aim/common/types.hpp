@@ -180,21 +180,6 @@ struct DetectedArmor {
     }
 };
 
-// ============================================================================
-// 5. 帧级检测结果
-// ============================================================================
-
-/**
- * @brief 单帧检测结果 (检测器 → 预测器)
- */
-struct DetectionResult {
-    cv::Mat img;                           // 原始图像 (可选，调试用)
-    Eigen::Quaterniond q_imu;              // IMU 四元数
-    double timestamp = 0;                  // 时间戳 (s)
-    std::vector<DetectedArmor> armors;     // 检测到的装甲板
-    int frame_id = 0;                      // 帧编号
-};
-
 }  // namespace autoaim
 
 #endif  // AIMER_AUTOAIM_COMMON_TYPES_HPP

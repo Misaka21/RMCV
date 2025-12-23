@@ -13,14 +13,16 @@
 namespace autoaim::predictor {
 
 const ArmorObservationTable& ArmorObserver::observe(
-    const autoaim::DetectionResult& detection,
-    const Eigen::Quaterniond& q_imu
+    const aimer::DetectionResult& detection,
+    double timestamp
 ) {
     table_.clear();
-    table_.set_frame(detection.timestamp, ++frame_id_);
+    table_.set_frame(timestamp, ++frame_id_);
+
+    const auto& q_imu = detection.state.q_imu;
 
     for (const auto& armor : detection.armors) {
-        auto obs = solve_pnp(armor, detection.timestamp, q_imu);
+        auto obs = solve_pnp(armor, timestamp, q_imu);
         if (obs.valid) {
             table_.add(obs);
         }
@@ -30,7 +32,7 @@ const ArmorObservationTable& ArmorObserver::observe(
 }
 
 ArmorObservation ArmorObserver::solve_pnp(
-    const DetectedArmor& armor,
+    const autoaim::DetectedArmor& armor,
     double timestamp,
     const Eigen::Quaterniond& q_imu
 ) {

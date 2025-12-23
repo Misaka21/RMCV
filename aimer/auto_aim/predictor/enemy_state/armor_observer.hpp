@@ -9,7 +9,7 @@
  * - 输出 ArmorObservationTable
  *
  * 数据流:
- *   DetectionResult + q_imu → ArmorObserver → ArmorObservationTable (世界系)
+ *   DetectionResult → ArmorObserver → ArmorObservationTable (世界系)
  *
  * 注意: 相机内参直接从 tf 模块获取 (tf::get_camera_matrix())
  */
@@ -21,7 +21,7 @@
 #include <opencv2/calib3d.hpp>
 #include <Eigen/Core>
 
-#include "aimer/auto_aim/common/types.hpp"
+#include "aimer/common/types.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "armor_table.hpp"
 
@@ -40,12 +40,12 @@ public:
     /**
      * @brief 处理检测结果，输出观测表 (世界坐标系)
      * @param detection 检测结果
-     * @param q_imu IMU 四元数 (用于坐标变换)
+     * @param timestamp 当前时间戳 (s)
      * @return 观测表
      */
     const ArmorObservationTable& observe(
-        const autoaim::DetectionResult& detection,
-        const Eigen::Quaterniond& q_imu
+        const aimer::DetectionResult& detection,
+        double timestamp
     );
 
     // 访问器
@@ -55,12 +55,9 @@ public:
 private:
     /**
      * @brief 对单个装甲板做 PnP 解算并转换到世界系
-     * @param armor 检测到的装甲板
-     * @param timestamp 时间戳
-     * @param q_imu IMU 四元数
      */
     ArmorObservation solve_pnp(
-        const DetectedArmor& armor,
+        const autoaim::DetectedArmor& armor,
         double timestamp,
         const Eigen::Quaterniond& q_imu
     );

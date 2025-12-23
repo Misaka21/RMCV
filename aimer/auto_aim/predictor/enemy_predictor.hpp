@@ -20,7 +20,7 @@
 
 #include <opencv2/core.hpp>
 
-#include "aimer/auto_aim/common/types.hpp"
+#include "aimer/common/types.hpp"
 #include "aimer/auto_aim/predictor/enemy_state/armor_observer.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
@@ -43,14 +43,10 @@ public:
     /**
      * @brief 主预测函数
      * @param detection 检测结果
+     * @param timestamp 当前时间戳 (s)
      * @return 战场快照 (所有敌人状态)
      */
-    BattlefieldSnapshot predict(const autoaim::DetectionResult& detection);
-
-    /**
-     * @brief 设置相机内参
-     */
-    void set_camera_params(const cv::Mat& camera_matrix, const cv::Mat& dist_coeffs);
+    BattlefieldSnapshot predict(const aimer::DetectionResult& detection, double timestamp);
 
     // 调试用
     const ArmorObservationTable& get_observation_table() const { return observer_.table(); }
@@ -59,7 +55,7 @@ private:
     /**
      * @brief 阶段1: 观测 (PnP 解算)
      */
-    void update_observations(const autoaim::DetectionResult& detection);
+    void update_observations(const aimer::DetectionResult& detection, double timestamp);
 
     /**
      * @brief 阶段2: 更新模型 (消抖 + EKF)

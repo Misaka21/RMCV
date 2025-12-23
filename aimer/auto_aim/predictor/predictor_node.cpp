@@ -25,19 +25,6 @@ namespace autoaim::predictor {
 using SteadyClock = std::chrono::steady_clock;
 
 /**
- * @brief 转换检测结果格式
- */
-autoaim::DetectionResult convert_detection(const aimer::DetectionResult& det) {
-    autoaim::DetectionResult result;
-    result.q_imu = det.state.q_imu;
-    result.timestamp = SteadyClock::now().time_since_epoch().count() / 1e9;  // 用当前时间
-    result.armors = det.armors;
-    result.frame_id = det.frame_id;
-    result.img = det.img;  // 传递图像
-    return result;
-}
-
-/**
  * @brief 打印观测调试信息
  */
 void print_observations(const ArmorObservationTable& table) {
@@ -213,13 +200,8 @@ void draw_prediction(
 void start_predictor_node() {
     debug::print(debug::PrintMode::INFO, "PredictorNode", "Starting predictor node...");
 
-    // 获取相机内参 (从 transformer 模块)
-    const cv::Mat& camera_matrix = tf::get_camera_matrix();
-    const cv::Mat& dist_coeffs = tf::get_distort_coeffs();
-
     // 创建预测器
     EnemyPredictor predictor;
-    predictor.set_camera_params(camera_matrix, dist_coeffs);
 
     // 设置 UMT
     umt::Subscriber<aimer::DetectionResult> sub("detections");
@@ -233,20 +215,19 @@ void start_predictor_node() {
     while (running->get()) {
         try {
             auto detection = sub.pop_for(1000);
-            // 即使没有检测到装甲板也要调用 predict，让 EKF 衰减
 
-            // 转换格式
-            auto det = convert_detection(detection);
+            // 计算当前时间戳
+            double timestamp = SteadyClock::now().time_since_epoch().count() / 1e9;
 
             // DEBUG: 输入装甲板数量
-            if (!det.armors.empty()) {
+            if (!detection.armors.empty()) {
                 fmt::print(fmt::fg(fmt::color::magenta),
-                    "[DEBUG] Input: {} armors\n", det.armors.size());
+                    "[DEBUG] Input: {} armors\n", detection.armors.size());
             }
 
             // 运行预测
             auto predict_start = SteadyClock::now();
-            auto snapshot = predictor.predict(det);
+            auto snapshot = predictor.predict(detection, timestamp);
             auto predict_end = SteadyClock::now();
 
             float latency = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -259,7 +240,7 @@ void start_predictor_node() {
             const auto& table = predictor.get_observation_table();
 
             // DEBUG: 观测表状态
-            if (!det.armors.empty()) {
+            if (!detection.armors.empty()) {
                 int tracking = 0;
                 for (int i = 1; i < MAX_TARGETS; ++i) {
                     if (snapshot.is_valid(i)) tracking++;
@@ -270,7 +251,7 @@ void start_predictor_node() {
             }
 
             if (table.total_count() > 0) {
-                fmt::print("\n========== Frame {} ==========\n", det.frame_id);
+                fmt::print("\n========== Frame {} ==========\n", detection.frame_id);
                 print_observations(table);
                 print_predictions(snapshot);
             }
@@ -283,9 +264,9 @@ void start_predictor_node() {
             stats.tick(latency, tracked > 0);
 
             // 可视化 (如果有图像)
-            if (!det.img.empty()) {
-                cv::Mat vis = det.img.clone();
-                draw_prediction(vis, snapshot, table, det.q_imu);
+            if (!detection.img.empty()) {
+                cv::Mat vis = detection.img.clone();
+                draw_prediction(vis, snapshot, table, detection.state.q_imu);
                 cv::imshow("Predictor", vis);
                 cv::waitKey(1);
             }
