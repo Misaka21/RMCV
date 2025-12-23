@@ -5,8 +5,9 @@ find_package(rclcpp QUIET)
 find_package(sensor_msgs QUIET)
 find_package(geometry_msgs QUIET)
 find_package(cv_bridge QUIET)
+find_package(message_filters QUIET)
 
-if(rclcpp_FOUND AND sensor_msgs_FOUND AND geometry_msgs_FOUND AND cv_bridge_FOUND)
+if(rclcpp_FOUND AND sensor_msgs_FOUND AND geometry_msgs_FOUND AND cv_bridge_FOUND AND message_filters_FOUND)
     message(STATUS "ROS2 found, building simulator module")
 
     add_library(simulator STATIC
@@ -31,6 +32,7 @@ if(rclcpp_FOUND AND sensor_msgs_FOUND AND geometry_msgs_FOUND AND cv_bridge_FOUN
         sensor_msgs
         geometry_msgs
         cv_bridge
+        message_filters
     )
 
     # 导出变量供主CMakeLists使用

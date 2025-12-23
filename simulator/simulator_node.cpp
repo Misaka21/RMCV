@@ -1,5 +1,6 @@
 //
 // Simulator Node - ROS2模拟器接入实现
+// 使用 message_filters 同步图像和云台姿态
 //
 
 #include "simulator_node.hpp"
@@ -7,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <queue>
 #include <thread>
 
 #include <Eigen/Geometry>
@@ -18,6 +20,9 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <cv_bridge/cv_bridge.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/synchronizer.h>
 
 // Project
 #include "hardware/hardware_node.hpp"
@@ -31,87 +36,112 @@ namespace simulator {
 using namespace std::chrono_literals;
 using TimePoint = std::chrono::steady_clock::time_point;
 
+// 同步后的帧数据
+struct SyncedData {
+    cv::Mat image;
+    Eigen::Quaterniond q_gimbal;
+    TimePoint timestamp;
+    double ros_time_sec = 0;  // ROS 时间戳 (秒)
+};
+
 // ============================================================================
-// ROS2 Subscriber Node
+// ROS2 Synchronized Subscriber Node
 // ============================================================================
 
 class SimulatorSubscriber : public rclcpp::Node {
 public:
+    using ImageMsg = sensor_msgs::msg::Image;
+    using PoseMsg = geometry_msgs::msg::PoseStamped;
+    using SyncPolicy = message_filters::sync_policies::ApproximateTime<ImageMsg, PoseMsg>;
+
     explicit SimulatorSubscriber(const SimulatorConfig& config)
         : Node("simulator_subscriber")
         , config_(config)
-        , gimbal_quat_(Eigen::Quaterniond::Identity())
     {
-        // 订阅图像
-        image_sub_ = create_subscription<sensor_msgs::msg::Image>(
-            config.image_topic, 10,
-            [this](sensor_msgs::msg::Image::SharedPtr msg) {
-                on_image(msg);
-            });
+        // QoS 设置
+        rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
+        qos_profile.depth = 10;
 
-        // 订阅云台姿态
-        gimbal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-            config.gimbal_pose_topic, 10,
-            [this](geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-                on_gimbal_pose(msg);
-            });
+        // 创建 message_filters 订阅器
+        image_sub_.subscribe(this, config.image_topic, qos_profile);
+        gimbal_sub_.subscribe(this, config.gimbal_pose_topic, qos_profile);
 
-        RCLCPP_INFO(get_logger(), "Subscribed to %s, %s",
+        // 创建同步器 (允许 50ms 时间差)
+        sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
+            SyncPolicy(10), image_sub_, gimbal_sub_);
+
+        sync_->registerCallback(std::bind(&SimulatorSubscriber::on_sync, this,
+            std::placeholders::_1, std::placeholders::_2));
+
+        RCLCPP_INFO(get_logger(), "Subscribed (synced) to %s and %s",
             config.image_topic.c_str(), config.gimbal_pose_topic.c_str());
     }
 
-    // 获取最新图像
-    bool get_image(cv::Mat& out, TimePoint& ts) {
-        std::lock_guard<std::mutex> lk(image_mutex_);
-        if (!image_valid_) return false;
-        out = latest_image_.clone();
-        ts = image_ts_;
-        image_valid_ = false;  // 标记已读取
+    // 获取同步后的数据
+    bool get_synced(SyncedData& out) {
+        std::lock_guard<std::mutex> lk(queue_mutex_);
+        if (data_queue_.empty()) return false;
+        out = std::move(data_queue_.front());
+        data_queue_.pop();
         return true;
     }
 
-    // 获取云台四元数
-    Eigen::Quaterniond get_gimbal_quat() {
-        std::lock_guard<std::mutex> lk(gimbal_mutex_);
-        return gimbal_quat_;
+    size_t queue_size() const {
+        std::lock_guard<std::mutex> lk(queue_mutex_);
+        return data_queue_.size();
     }
 
-    bool has_gimbal() const { return gimbal_valid_.load(); }
-
 private:
-    void on_image(const sensor_msgs::msg::Image::SharedPtr& msg) {
+    void on_sync(const ImageMsg::ConstSharedPtr& img_msg,
+                 const PoseMsg::ConstSharedPtr& pose_msg)
+    {
         try {
-            // 模拟器发布的是rgb8，需要转换为bgr8供OpenCV使用
-            auto cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
-            std::lock_guard<std::mutex> lk(image_mutex_);
-            latest_image_ = cv_ptr->image;
-            image_ts_ = std::chrono::steady_clock::now();
-            image_valid_ = true;
+            SyncedData data;
+
+            // 图像转换 (使用 toCvShare 避免拷贝)
+            auto cv_ptr = cv_bridge::toCvShare(img_msg, "bgr8");
+            data.image = cv_ptr->image.clone();  // 必须clone，因为msg会被释放
+
+            // 四元数
+            auto& q = pose_msg->pose.orientation;
+            data.q_gimbal = Eigen::Quaterniond(q.w, q.x, q.y, q.z).normalized();
+
+            // 使用 ROS 消息时间戳
+            auto& stamp = img_msg->header.stamp;
+            data.ros_time_sec = stamp.sec + stamp.nanosec * 1e-9;
+            data.timestamp = std::chrono::steady_clock::now();
+
+            // 入队
+            {
+                std::lock_guard<std::mutex> lk(queue_mutex_);
+                // 限制队列大小，丢弃旧帧
+                while (data_queue_.size() >= 5) {
+                    data_queue_.pop();
+                }
+                data_queue_.push(std::move(data));
+            }
+
+            sync_count_++;
+            if (sync_count_ == 1) {
+                RCLCPP_INFO(get_logger(), "First synced frame! ros_time=%.3f, q=(%.3f, %.3f, %.3f, %.3f)",
+                    data.ros_time_sec, q.x, q.y, q.z, q.w);
+            }
+
         } catch (cv_bridge::Exception& e) {
             RCLCPP_ERROR(get_logger(), "cv_bridge: %s", e.what());
         }
     }
 
-    void on_gimbal_pose(const geometry_msgs::msg::PoseStamped::SharedPtr& msg) {
-        auto& q = msg->pose.orientation;
-        std::lock_guard<std::mutex> lk(gimbal_mutex_);
-        gimbal_quat_ = Eigen::Quaterniond(q.w, q.x, q.y, q.z).normalized();
-        gimbal_valid_.store(true);
-    }
-
     SimulatorConfig config_;
 
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr gimbal_sub_;
+    message_filters::Subscriber<ImageMsg> image_sub_;
+    message_filters::Subscriber<PoseMsg> gimbal_sub_;
+    std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
 
-    std::mutex image_mutex_;
-    cv::Mat latest_image_;
-    TimePoint image_ts_;
-    bool image_valid_ = false;
+    mutable std::mutex queue_mutex_;
+    std::queue<SyncedData> data_queue_;
 
-    std::mutex gimbal_mutex_;
-    Eigen::Quaterniond gimbal_quat_;
-    std::atomic<bool> gimbal_valid_{false};
+    std::atomic<int> sync_count_{0};
 };
 
 // ============================================================================
@@ -177,40 +207,38 @@ void start_simulator_node() {
 
     int frame_id = 0;
 
-    // spin线程
-    std::thread spin_thread([node]() {
-        rclcpp::spin(node);
+    // spin线程 (使用 MultiThreadedExecutor 提高性能)
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+    std::thread spin_thread([&executor]() {
+        executor.spin();
     });
 
-    debug::print(debug::PrintMode::LOG, "Simulator", "Waiting for data from simulator...");
+    debug::print(debug::PrintMode::INFO, "Simulator", "Waiting for synced data...");
 
     // 主循环
     while (rclcpp::ok()) {
-        cv::Mat image;
-        TimePoint ts;
+        SyncedData data;
 
-        if (!node->get_image(image, ts)) {
+        if (!node->get_synced(data)) {
             std::this_thread::sleep_for(1ms);
             continue;
         }
 
         // 构建SyncFrame
         hardware::SyncFrame frame;
-        frame.image = image;
+        frame.image = std::move(data.image);
         frame.frame_id = frame_id++;
-        frame.timestamp = ts;
+        frame.timestamp = data.timestamp;
 
-        // 四元数转欧拉角
-        if (node->has_gimbal()) {
-            auto q = node->get_gimbal_quat();
-            Eigen::Vector3d euler = q.toRotationMatrix().eulerAngles(2, 1, 0);  // ZYX
-            constexpr double R2D = 180.0 / M_PI;
+        // 四元数转欧拉角 (ZYX顺序)
+        Eigen::Vector3d euler = data.q_gimbal.toRotationMatrix().eulerAngles(2, 1, 0);
+        constexpr double R2D = 180.0 / M_PI;
 
-            frame.serial_data.yaw = static_cast<float>(euler[0] * R2D);
-            frame.serial_data.pitch = static_cast<float>(euler[1] * R2D);
-            frame.serial_data.roll = static_cast<float>(euler[2] * R2D);
-            frame.serial_valid = true;
-        }
+        frame.serial_data.yaw = static_cast<float>(euler[0] * R2D);
+        frame.serial_data.pitch = static_cast<float>(euler[1] * R2D);
+        frame.serial_data.roll = static_cast<float>(euler[2] * R2D);
+        frame.serial_valid = true;
 
         // 填充模拟串口数据
         frame.serial_data.robot_id = config.robot_id;
@@ -223,9 +251,10 @@ void start_simulator_node() {
         pub.push(frame);
         running->get() = true;
 
-        fps_stats.update(0, frame.serial_valid);
+        fps_stats.update(0, true);
     }
 
+    executor.cancel();
     rclcpp::shutdown();
     if (spin_thread.joinable()) spin_thread.join();
 }

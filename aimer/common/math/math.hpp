@@ -182,6 +182,13 @@ inline float get_area(const cv::Point2f pts[4]) noexcept {
          + std::fabs(get_cross(pts[0], pts[2], pts[3]));
 }
 
+// 四边形面积 (vector 版本)
+inline float get_area(const std::vector<cv::Point2f>& pts) noexcept {
+    if (pts.size() < 4) return 0;
+    return std::fabs(get_cross(pts[0], pts[1], pts[2]))
+         + std::fabs(get_cross(pts[0], pts[2], pts[3]));
+}
+
 // 2D向量旋转
 inline Eigen::Vector2d rotate(const Eigen::Vector2d& v, double angle) noexcept {
     double c = std::cos(angle), s = std::sin(angle);
