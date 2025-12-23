@@ -2,7 +2,7 @@
  * @file predictor_node.cpp
  * @brief 预测器节点
  *
- * 订阅: Message<aimer::DetectionResult> "detections"
+ * 订阅: Message<DetectionResult> "detections"
  * 发布: Message<BattlefieldSnapshot> "battlefield"
  */
 
@@ -204,7 +204,7 @@ void start_predictor_node() {
     EnemyPredictor predictor;
 
     // 设置 UMT
-    umt::Subscriber<aimer::DetectionResult> sub("detections");
+    umt::Subscriber<DetectionResult> sub("detections");
     umt::Publisher<BattlefieldSnapshot> pub("battlefield");
     auto running = umt::BasicObjManager<bool>::find_or_create("predictor_running", true);
 

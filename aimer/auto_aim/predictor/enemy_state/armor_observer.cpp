@@ -13,7 +13,7 @@
 namespace autoaim::predictor {
 
 const ArmorObservationTable& ArmorObserver::observe(
-    const aimer::DetectionResult& detection,
+    const DetectionResult& detection,
     double timestamp
 ) {
     table_.clear();

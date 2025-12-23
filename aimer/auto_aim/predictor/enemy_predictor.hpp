@@ -46,7 +46,7 @@ public:
      * @param timestamp 当前时间戳 (s)
      * @return 战场快照 (所有敌人状态)
      */
-    BattlefieldSnapshot predict(const aimer::DetectionResult& detection, double timestamp);
+    BattlefieldSnapshot predict(const DetectionResult& detection, double timestamp);
 
     // 调试用
     const ArmorObservationTable& get_observation_table() const { return observer_.table(); }
@@ -55,7 +55,7 @@ private:
     /**
      * @brief 阶段1: 观测 (PnP 解算)
      */
-    void update_observations(const aimer::DetectionResult& detection, double timestamp);
+    void update_observations(const DetectionResult& detection, double timestamp);
 
     /**
      * @brief 阶段2: 更新模型 (消抖 + EKF)

@@ -44,7 +44,7 @@ public:
      * @return 观测表
      */
     const ArmorObservationTable& observe(
-        const aimer::DetectionResult& detection,
+        const DetectionResult& detection,
         double timestamp
     );
 

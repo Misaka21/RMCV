@@ -15,7 +15,7 @@ EnemyPredictor::EnemyPredictor() {
 
 EnemyPredictor::~EnemyPredictor() = default;
 
-BattlefieldSnapshot EnemyPredictor::predict(const aimer::DetectionResult& detection, double timestamp) {
+BattlefieldSnapshot EnemyPredictor::predict(const DetectionResult& detection, double timestamp) {
     current_time_ = timestamp;
     frame_id_++;
 
@@ -29,7 +29,7 @@ BattlefieldSnapshot EnemyPredictor::predict(const aimer::DetectionResult& detect
     return export_snapshot();
 }
 
-void EnemyPredictor::update_observations(const aimer::DetectionResult& detection, double timestamp) {
+void EnemyPredictor::update_observations(const DetectionResult& detection, double timestamp) {
     observer_.observe(detection, timestamp);
 }
 

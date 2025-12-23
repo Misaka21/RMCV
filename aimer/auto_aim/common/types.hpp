@@ -17,6 +17,7 @@
 #include <opencv2/core.hpp>
 
 #include "aimer/common/math/math.hpp"
+#include "aimer/common/robot_state.hpp"
 
 namespace autoaim {
 
@@ -178,6 +179,26 @@ struct DetectedArmor {
         result.type = correct_armor_type(armor.type, result.number);
         return result;
     }
+};
+
+// ============================================================================
+// 5. 帧级检测结果
+// ============================================================================
+
+/**
+ * @brief 单帧检测结果 (检测器 → 预测器)
+ */
+struct DetectionResult {
+    std::vector<DetectedArmor> armors;
+    int frame_id = 0;
+    aimer::RobotState state;
+    float latency_ms = 0;  // 检测耗时
+    cv::Mat img;           // 原始图像 (可选，调试用)
+
+    DetectionResult() = default;
+
+    bool empty() const { return armors.empty(); }
+    size_t size() const { return armors.size(); }
 };
 
 }  // namespace autoaim
