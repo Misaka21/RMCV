@@ -10,5 +10,6 @@ target_include_directories(motion PUBLIC
 )
 
 target_link_libraries(motion PUBLIC
+    aimer_common   # 包含YPD滤波器和Ceres
     Eigen3::Eigen
 )

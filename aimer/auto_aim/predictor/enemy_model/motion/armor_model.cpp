@@ -1,11 +1,13 @@
 /**
  * @file armor_model.cpp
- * @brief 装甲板运动模型实现
+ * @brief 装甲板运动模型实现 - YPD坐标系 EKF
  */
 
 #include "armor_model.hpp"
 
 #include <cmath>
+
+#include "aimer/common/math/math.hpp"
 
 namespace autoaim::predictor {
 
@@ -15,75 +17,13 @@ namespace autoaim::predictor {
 
 FilterThread::FilterThread(const ArmorData& armor, double timestamp, double credit_time)
     : armor_(armor), last_update_time_(timestamp), credit_time_(credit_time) {
-    // 初始化状态
-    x_(0) = armor.pos().x();
-    x_(1) = 0;
-    x_(2) = armor.pos().y();
-    x_(3) = 0;
-    x_(4) = armor.pos().z();
-    x_(5) = 0;
-
-    // 初始协方差
-    P_.setIdentity();
-    P_(0, 0) = P_(2, 2) = P_(4, 4) = 0.1;   // 位置
-    P_(1, 1) = P_(3, 3) = P_(5, 5) = 1.0;   // 速度
-}
-
-void FilterThread::predict(double dt) {
-    if (dt <= 0) return;
-
-    // 状态转移矩阵
-    Eigen::Matrix<double, 6, 6> F = Eigen::Matrix<double, 6, 6>::Identity();
-    F(0, 1) = dt;
-    F(2, 3) = dt;
-    F(4, 5) = dt;
-
-    // 预测状态
-    x_ = F * x_;
-
-    // 过程噪声
-    Eigen::Matrix<double, 6, 6> Q = Eigen::Matrix<double, 6, 6>::Zero();
-    Q(0, 0) = Q(2, 2) = Q(4, 4) = q_pos_ * dt;
-    Q(1, 1) = Q(3, 3) = Q(5, 5) = q_vel_ * dt;
-
-    // 预测协方差
-    P_ = F * P_ * F.transpose() + Q;
-}
-
-void FilterThread::correct(const Eigen::Vector3d& z_meas) {
-    // 观测矩阵
-    Eigen::Matrix<double, 3, 6> H = Eigen::Matrix<double, 3, 6>::Zero();
-    H(0, 0) = 1;
-    H(1, 2) = 1;
-    H(2, 4) = 1;
-
-    // 观测噪声 (距离越远噪声越大)
-    double dist = z_meas.norm();
-    Eigen::Matrix3d R = Eigen::Matrix3d::Identity() * r_base_ * dist * dist;
-
-    // 卡尔曼增益
-    Eigen::Matrix3d S = H * P_ * H.transpose() + R;
-    Eigen::Matrix<double, 6, 3> K = P_ * H.transpose() * S.inverse();
-
-    // 残差
-    Eigen::Vector3d y = z_meas - H * x_;
-
-    // 更新状态
-    x_ = x_ + K * y;
-
-    // 更新协方差 (Joseph 形式更稳定)
-    Eigen::Matrix<double, 6, 6> I_KH = Eigen::Matrix<double, 6, 6>::Identity() - K * H;
-    P_ = I_KH * P_ * I_KH.transpose() + K * R * K.transpose();
+    // 使用XYZ位置初始化YPD滤波器
+    ekf_.init(armor.pos(), timestamp);
 }
 
 void FilterThread::update(const ArmorData& armor, double timestamp) {
-    double dt = timestamp - last_update_time_;
-
-    // 预测
-    predict(dt);
-
-    // 更新
-    correct(armor.pos());
+    // 使用XYZ位置更新 (内部自动转换为YPD)
+    ekf_.update(armor.pos(), timestamp);
 
     // 保存
     armor_ = armor;
@@ -95,16 +35,19 @@ bool FilterThread::credit(double current_time) const {
 }
 
 Eigen::Vector3d FilterThread::predict_pos(double timestamp) const {
-    double dt = timestamp - last_update_time_;
-    return Eigen::Vector3d(
-        x_(0) + x_(1) * dt,
-        x_(2) + x_(3) * dt,
-        x_(4) + x_(5) * dt
-    );
+    return ekf_.predict_pos(timestamp);
 }
 
-Eigen::Vector3d FilterThread::predict_vel(double /*timestamp*/) const {
-    return Eigen::Vector3d(x_(1), x_(3), x_(5));
+Eigen::Vector3d FilterThread::predict_vel(double timestamp) const {
+    return ekf_.predict_vel(timestamp);
+}
+
+math::YpdCoord FilterThread::predict_ypd(double timestamp) const {
+    return ekf_.predict_ypd(timestamp);
+}
+
+math::YpdCoord FilterThread::predict_ypd_v(double timestamp) const {
+    return ekf_.predict_ypd_v(timestamp);
 }
 
 ArmorState FilterThread::get_armor_state(double timestamp) const {

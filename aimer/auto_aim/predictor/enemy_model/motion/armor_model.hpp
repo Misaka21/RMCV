@@ -1,8 +1,15 @@
 /**
  * @file armor_model.hpp
- * @brief 装甲板运动模型 - 匀速 EKF 滤波
+ * @brief 装甲板运动模型 - YPD坐标系 EKF 滤波
  *
  * 参考: rm.cv.fans 的 ArmorModel
+ *
+ * 改进:
+ * - 使用YPD坐标系滤波 (更适合旋转目标)
+ * - Ceres自动微分计算雅可比 (无需手动推导)
+ *
+ * 状态向量: [yaw, vyaw, pitch, vpitch, dis, vdis]
+ * 观测向量: [yaw, pitch, dis]
  *
  * 职责 (单一):
  * - 对每个装甲板 ID 独立 EKF 滤波
@@ -23,13 +30,15 @@
 
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
+#include "aimer/common/filter/position_ekf_ypd.hpp"
 
 namespace autoaim::predictor {
 
 /**
  * @brief 单个装甲板滤波线程
  *
- * 匀速模型 (CV): 状态 [x, vx, y, vy, z, vz]
+ * 匀速模型 (CV): 状态 [yaw, vyaw, pitch, vpitch, dis, vdis]
+ * 使用Ceres自动微分EKF
  */
 class FilterThread {
 public:
@@ -54,14 +63,24 @@ public:
     bool credit(double current_time) const;
 
     /**
-     * @brief 预测位置
+     * @brief 预测位置 (XYZ)
      */
     Eigen::Vector3d predict_pos(double timestamp) const;
 
     /**
-     * @brief 预测速度
+     * @brief 预测速度 (XYZ)
      */
     Eigen::Vector3d predict_vel(double timestamp) const;
+
+    /**
+     * @brief 预测YPD坐标
+     */
+    math::YpdCoord predict_ypd(double timestamp) const;
+
+    /**
+     * @brief 预测YPD速度
+     */
+    math::YpdCoord predict_ypd_v(double timestamp) const;
 
     /**
      * @brief 获取装甲板状态
@@ -74,21 +93,12 @@ public:
     double last_update() const { return last_update_time_; }
 
 private:
-    void predict(double dt);
-    void correct(const Eigen::Vector3d& z_meas);
-
     ArmorData armor_;                // 最近的装甲板数据
     double last_update_time_ = 0;    // 最后更新时间
     double credit_time_;             // 超时阈值
 
-    // EKF 状态 (6维: x, vx, y, vy, z, vz)
-    Eigen::Vector<double, 6> x_ = Eigen::Vector<double, 6>::Zero();
-    Eigen::Matrix<double, 6, 6> P_ = Eigen::Matrix<double, 6, 6>::Identity();
-
-    // 噪声参数
-    double q_pos_ = 0.1;   // 过程噪声 (位置)
-    double q_vel_ = 1.0;   // 过程噪声 (速度)
-    double r_base_ = 0.01; // 观测噪声基准
+    // YPD坐标系EKF滤波器 (自动微分)
+    filter::PositionEkfYpd ekf_;
 };
 
 /**
