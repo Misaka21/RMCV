@@ -5,6 +5,7 @@
  * 职责:
  * - PnP 解算 (相机坐标系)
  * - 坐标变换 (相机系 → 世界系)
+ * - 三分法优化 z_to_v (装甲板朝向角)
  * - 观测向量计算
  * - 输出 ArmorObservationTable
  *
@@ -17,6 +18,7 @@
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_STATE_ARMOR_OBSERVER_HPP__
 #define __AIMER_AUTO_AIM_PREDICTOR_ENEMY_STATE_ARMOR_OBSERVER_HPP__
 
+#include <array>
 #include <opencv2/core.hpp>
 #include <opencv2/calib3d.hpp>
 #include <Eigen/Core>
@@ -27,11 +29,14 @@
 
 namespace autoaim::predictor {
 
+// 三分法迭代次数，12次约0.5度精度
+constexpr int FIT_Z_TO_V_ITERATIONS = 12;
+
 /**
  * @brief 装甲板观测器
  *
  * 负责将检测结果转换为世界坐标系的 3D 观测
- * 相机内参直接从 tf 模块获取，无需手动设置
+ * 包含三分法优化 z_to_v，提高装甲板朝向角精度
  */
 class ArmorObserver {
 public:
@@ -78,6 +83,62 @@ private:
         const Eigen::Vector3d& normal_cam
     );
 
+    // ==================== 三分法优化 z_to_v ====================
+
+    /**
+     * @brief 对检测点进行畸变矫正
+     * @param pts 原始四角点
+     * @return 畸变矫正后的四角点
+     */
+    std::array<cv::Point2f, 4> undistort_points(
+        const std::vector<cv::Point2f>& pts
+    );
+
+    /**
+     * @brief 给定 z_to_v 计算装甲板四角点在图像上的投影
+     * @param pos 装甲板中心 (相机系)
+     * @param type 装甲板类型
+     * @param pitch 装甲板俯仰角
+     * @param z_to_v 装甲板法向与相机视线的夹角
+     * @return 投影的四角点
+     */
+    std::array<cv::Point2f, 4> project_armor_corners(
+        const Eigen::Vector3d& pos,
+        ArmorType type,
+        double pitch,
+        double z_to_v
+    );
+
+    /**
+     * @brief 计算重投影代价
+     * @param projected 模型投影的四角点
+     * @param detected 实际检测的四角点 (畸变矫正后)
+     * @param z_to_v 当前的 z_to_v (用于权重调整)
+     * @return 代价值
+     */
+    double compute_reprojection_cost(
+        const std::array<cv::Point2f, 4>& projected,
+        const std::array<cv::Point2f, 4>& detected,
+        double z_to_v
+    );
+
+    /**
+     * @brief 三分搜索找到最优的 z_to_v
+     * @param pos 装甲板中心 (相机系)
+     * @param type 装甲板类型
+     * @param pitch 装甲板俯仰角
+     * @param pus 畸变矫正后的检测四角点
+     * @param z_to_v_init 初始估计 (PnP 结果)
+     * @return 优化后的 z_to_v
+     */
+    double fit_z_to_v(
+        const Eigen::Vector3d& pos,
+        ArmorType type,
+        double pitch,
+        const std::array<cv::Point2f, 4>& pus,
+        double z_to_v_init
+    );
+
     // ==================== 数据 ====================
 
     // 观测表
@@ -85,6 +146,10 @@ private:
 
     // 帧计数
     int frame_id_ = 0;
+
+    // 上一帧的 z_to_v (用于加速搜索)
+    double last_z_to_v_ = M_PI;  // 初始值: 正对
+    bool has_last_z_to_v_ = false;
 };
 
 }  // namespace autoaim::predictor
