@@ -18,52 +18,63 @@ namespace autoaim::predictor {
 
 namespace {
 
+// 辅助函数: 安全读取运行时参数，找不到时返回默认值
+double get_double_param(const std::string& name, double default_val) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_val;
+}
+
 // 过程噪声
 double get_q_pos() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_pos", 0.1);
+    return get_double_param("AutoAim.Predictor.SpinEKF.q_pos", 0.1);
 }
 
 double get_q_vel() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_vel", 1.0);
+    return get_double_param("AutoAim.Predictor.SpinEKF.q_vel", 1.0);
 }
 
 double get_q_theta() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_theta", 0.1);
+    return get_double_param("AutoAim.Predictor.SpinEKF.q_theta", 0.1);
 }
 
 double get_q_omega() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_omega", 10.0);
+    return get_double_param("AutoAim.Predictor.SpinEKF.q_omega", 10.0);
 }
 
 double get_q_r() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_r", 0.01);
+    return get_double_param("AutoAim.Predictor.SpinEKF.q_r", 0.01);
 }
 
 // 观测噪声
 double get_r_angle() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_angle", 0.01);
+    return get_double_param("AutoAim.Predictor.SpinEKF.r_angle", 0.01);
 }
 
 double get_r_dis_k() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_dis_k", 0.05);
+    return get_double_param("AutoAim.Predictor.SpinEKF.r_dis_k", 0.05);
 }
 
 double get_r_armor_yaw() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_armor_yaw", 0.1);
+    return get_double_param("AutoAim.Predictor.SpinEKF.r_armor_yaw", 0.1);
 }
 
 // 初始半径
 double get_init_r() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r", 0.26);
+    return get_double_param("AutoAim.Predictor.SpinEKF.init_r", 0.26);
 }
 
 // 半径限制
 double get_r_min() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min", 0.12);
+    return get_double_param("AutoAim.Predictor.SpinEKF.r_min", 0.12);
 }
 
 double get_r_max() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_max", 0.4);
+    return get_double_param("AutoAim.Predictor.SpinEKF.r_max", 0.4);
 }
 
 }  // namespace

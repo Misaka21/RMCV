@@ -394,9 +394,7 @@ inline Eigen::Vector3d xyz_to_ypd(const Eigen::Vector3d& xyz) {
     return math::xyz_to_ypd(xyz).to_vec();
 }
 
-inline double normalize_angle(double angle) {
-    return math::reduced_angle(angle);
-}
+// normalize_angle 已移到 math/math.hpp
 
 }  // namespace autoaim::predictor
 

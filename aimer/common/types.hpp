@@ -12,11 +12,11 @@
 namespace aimer {
 
 // 导出常用类型到 aimer 命名空间 (方便使用)
-using autoaim::DetectedArmor;
-using autoaim::DetectionResult;
-using autoaim::EnemyColor;
-using autoaim::ArmorType;
-using autoaim::ArmorNumber;
+using ::autoaim::DetectedArmor;
+using ::autoaim::DetectionResult;
+using ::autoaim::EnemyColor;
+using ::autoaim::ArmorType;
+using ::autoaim::ArmorNumber;
 
 }  // namespace aimer
 

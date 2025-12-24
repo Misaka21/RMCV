@@ -13,12 +13,13 @@ add_library(aimer_common STATIC
 
 target_include_directories(aimer_common PUBLIC
     ${PROJECT_SOURCE_DIR}
+    ${CERES_INCLUDE_DIRS}
 )
 
 target_link_libraries(aimer_common PUBLIC
     ${OpenCV_LIBS}
     Eigen3::Eigen
-    Ceres::ceres
+    ${CERES_LIBRARIES}
     fmt::fmt
     plugin
 )

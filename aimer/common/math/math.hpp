@@ -91,9 +91,23 @@ inline double reduced_angle(double x) noexcept {
     return std::atan2(std::sin(x), std::cos(x));
 }
 
+// 别名，与其他模块兼容
+inline double normalize_angle(double x) noexcept {
+    return reduced_angle(x);
+}
+
 // 两角度之差，结果在 (-π, π]
 inline double angle_diff(double a1, double a2) noexcept {
     return reduced_angle(a2 - a1);
+}
+
+// 获取最近的等价角度 (处理±π跨越)
+// 用于EKF更新时保持角度连续性
+inline double get_closest_angle(double target, double current) noexcept {
+    double diff = target - current;
+    while (diff > M_PI)  diff -= 2 * M_PI;
+    while (diff < -M_PI) diff += 2 * M_PI;
+    return current + diff;
 }
 
 // 两向量夹角 [0, π]

@@ -78,8 +78,8 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
 
     // 处理角度±π跨越
     VectorX x = ekf_.get_x();
-    double yaw_close = get_closest_angle(ypd.yaw, x[0]);
-    double pitch_close = get_closest_angle(ypd.pitch, x[2]);
+    double yaw_close = math::get_closest_angle(ypd.yaw, x[0]);
+    double pitch_close = math::get_closest_angle(ypd.pitch, x[2]);
 
     // 观测更新
     VectorY y;
@@ -90,8 +90,8 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
 
     // 归一化角度
     VectorX x_new = ekf_.get_x();
-    x_new[0] = normalize_angle(x_new[0]);
-    x_new[2] = normalize_angle(x_new[2]);
+    x_new[0] = math::normalize_angle(x_new[0]);
+    x_new[2] = math::normalize_angle(x_new[2]);
     ekf_.set_x(x_new);
 
     // 保存

@@ -74,23 +74,11 @@ struct YpdDirectMeasure {
 };
 
 // ============================================================================
-// 角度处理工具
+// 角度处理工具 (已移到 math/math.hpp)
 // ============================================================================
 
-/// 将角度归一化到 (-π, π]
-inline double normalize_angle(double angle) {
-    while (angle > M_PI)  angle -= 2 * M_PI;
-    while (angle <= -M_PI) angle += 2 * M_PI;
-    return angle;
-}
-
-/// 获取最近的等价角度 (处理±π跨越)
-inline double get_closest_angle(double target, double current) {
-    double diff = target - current;
-    while (diff > M_PI)  diff -= 2 * M_PI;
-    while (diff < -M_PI) diff += 2 * M_PI;
-    return current + diff;
-}
+// 使用 math::normalize_angle()
+// 使用 math::get_closest_angle()
 
 // ============================================================================
 // FilterThread - 单个装甲板滤波器
