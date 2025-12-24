@@ -51,14 +51,14 @@
     # 过程噪声 Q (越大越信任观测，越小越信任预测)
     #@double 位置过程噪声 (yaw/pitch/dis)
     q_pos = 0.01
-    #@double 速度过程噪声 (vyaw/vpitch/vdis)
-    q_vel = 0.1
+    #@double 速度过程噪声 (vyaw/vpitch/vdis)，大值允许快速加减速
+    q_vel = 100.0
 
     # 观测噪声 R (越大越不信任观测)
     #@double 角度观测噪声 (yaw/pitch, rad²)
-    r_angle = 0.01
-    #@double 1m处距离观测噪声 (m²)，随距离增大
-    r_dis_1m = 0.01
+    r_angle = 1.0
+    #@double 1m处距离观测噪声 (m²)，随距离²增大
+    r_dis_1m = 50.0
 
     # 调试用
     #@double 绘图时的预测时间 (s)，用于可视化预测效果
@@ -68,22 +68,22 @@
     # 过程噪声 Q (越大越信任观测，越小越信任预测)
     #@double 旋转中心位置过程噪声 (xc, yc, zc)
     q_pos = 0.1
-    #@double 旋转中心速度过程噪声 (vx, vy, vz)
-    q_vel = 1.0
+    #@double 旋转中心速度过程噪声 (vx, vy, vz)，大值允许快速加减速
+    q_vel = 15.0
     #@double 车体朝向角θ过程噪声
     q_theta = 0.1
     #@double 角速度ω过程噪声，较大以适应陀螺加减速
     q_omega = 10.0
     #@double 陀螺半径r过程噪声
-    q_r = 0.01
+    q_r = 1.0
 
     # 观测噪声 R (越大越不信任观测)
     #@double yaw/pitch角度观测噪声 (rad²)
-    r_angle = 0.01
+    r_angle = 8.0
     #@double 距离观测噪声系数, R_dis = r_dis_k × distance²
-    r_dis_k = 0.05
+    r_dis_k = 25.0
     #@double 装甲板朝向角观测噪声 (rad²)
-    r_armor_yaw = 0.1
+    r_armor_yaw = 20.0
 
     # 半径参数
     #@double 初始半径 (m)
@@ -102,19 +102,19 @@
     #@double 旋转中心位置过程噪声
     q_pos = 0.1
     #@double 旋转中心速度过程噪声 (前哨站定点旋转，设很小仅用于修正初始误差)
-    q_vel = 0.01
+    q_vel = 0.1
     #@double 相位θ过程噪声
-    q_theta = 0.05
+    q_theta = 0.1
     #@double 角速度ω过程噪声 (方向确定后自动缩小100倍)
-    q_omega = 0.1
+    q_omega = 1.0
 
     # 观测噪声 R (越大越不信任观测)
     #@double yaw/pitch角度观测噪声 (rad²)
-    r_angle = 0.01
+    r_angle = 8.0
     #@double 距离观测噪声系数, R_dis = r_dis_k × distance²
-    r_dis_k = 0.05
+    r_dis_k = 25.0
     #@double 装甲板朝向角观测噪声 (rad²)
-    r_armor_yaw = 0.1
+    r_armor_yaw = 20.0
 
     # 角速度约束 (规则值: |ω| = 0.8π ≈ 2.51 rad/s)
     #@bool 锁定ω到规则值，false则让EKF自由估计
