@@ -30,7 +30,7 @@
 namespace autoaim::predictor {
 
 // 三分法迭代次数，12次约0.5度精度
-constexpr int FIT_Z_TO_V_ITERATIONS = 12;
+constexpr int FIT_Z_TO_V_ITERATIONS = 15;
 
 /**
  * @brief 装甲板观测器

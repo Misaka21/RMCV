@@ -175,6 +175,11 @@ void SpinModel::update(const ArmorObservation& obs, double timestamp) {
         ekf_.set_x(x);
     }
 
+    // 更新高度差 (当前装甲板相对于中心)
+    if (!jumped) {
+        dz_ = obs.pos.z() - x[spin_model::ZC];
+    }
+
     // 更新陀螺等级
     update_spin_level();
 

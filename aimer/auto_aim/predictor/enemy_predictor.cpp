@@ -44,12 +44,8 @@ void EnemyPredictor::update_models() {
         const auto& observations = table.get(target_id);
         if (observations.empty()) continue;
 
-        // 确定目标类型
-        EnemyType enemy_type = static_cast<EnemyType>(target_id);
-        if (!observations.empty()) {
-            // 从观测中获取类型 (ArmorNumber)
-            enemy_type = static_cast<EnemyType>(observations[0].target_id);
-        }
+        // 从观测中获取目标类型
+        EnemyType enemy_type = static_cast<EnemyType>(observations[0].target_id);
 
         // 如果模型不存在，创建
         if (!enemy_models_[target_id]) {
@@ -76,10 +72,10 @@ void EnemyPredictor::update_models() {
 
 BattlefieldSnapshot EnemyPredictor::export_snapshot() {
     BattlefieldSnapshot snapshot;
+    snapshot.clear();
     snapshot.timestamp = current_time_;
     snapshot.frame_id = frame_id_;
     snapshot.self_state = current_state_;
-    snapshot.clear();
 
     const auto& table = observer_.table();
 
