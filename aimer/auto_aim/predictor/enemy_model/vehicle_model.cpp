@@ -439,13 +439,12 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     // 3. 绘制 SpinMotion 预测 (口字形)
     // 即使未激活也绘制，方便调试
     if (spin_motion_.valid()) {
-        double dt = timestamp - last_update_time_;
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
-        double theta = spin_motion_.get_theta() + spin_motion_.get_omega() * dt;
+        double theta = spin_motion_.get_theta() + spin_motion_.get_omega() * draw_dt;
 
         // 绘制所有装甲板预测位置
         for (int i = 0; i < armor_num; ++i) {
-            Eigen::Vector3d pos = spin_motion_.predict_armor_pos(i, dt);
+            Eigen::Vector3d pos = spin_motion_.predict_armor_pos(i, draw_dt);
             double armor_yaw = theta + i * (2.0 * M_PI / armor_num);
 
             // 当前追踪的装甲板用粗线
@@ -462,7 +461,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
 
         // 绘制旋转中心
-        Eigen::Vector3d center = spin_motion_.predict_center(dt);
+        Eigen::Vector3d center = spin_motion_.predict_center(draw_dt);
         bool valid = false;
         cv::Point2f pt = tf::world_to_pixel(center, q_imu, valid);
         if (valid) {
