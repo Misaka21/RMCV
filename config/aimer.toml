@@ -96,6 +96,8 @@
     # Z轴约束 (PnP在Z方向误差大)
     #@bool 强制Z轴速度为0
     force_zero_vz = true
+    #@double 两对装甲板高度差最大值 (m)
+    dz_abs_max = 0.10
 
 [AutoAim.Predictor.OutpostEKF]
     # 过程噪声 Q (越大越信任观测，越小越信任预测)

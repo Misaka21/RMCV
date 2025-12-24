@@ -88,6 +88,11 @@ bool get_force_zero_vz() {
     return true;  // 默认开启
 }
 
+// 高度差最大值限制
+double get_dz_abs_max() {
+    return get_double_param("AutoAim.Predictor.SpinEKF.dz_abs_max", 0.10);
+}
+
 }  // namespace
 
 // ============================================================================
@@ -194,6 +199,9 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     // 更新高度差 (当前装甲板相对于中心)
     if (!jumped) {
         dz_ = obs.pos.z() - x[spin_model::ZC];
+        // 限制高度差范围
+        double dz_max = get_dz_abs_max();
+        dz_ = std::clamp(dz_, -dz_max, dz_max);
     }
 
     // 更新陀螺等级
