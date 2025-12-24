@@ -34,6 +34,7 @@
 #include <ceres/jet.h>
 
 #include "aimer/auto_aim/predictor/types.hpp"
+#include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "aimer/common/filter/adaptive_ekf.hpp"
 
 namespace autoaim::predictor {
@@ -191,17 +192,17 @@ public:
 
     /**
      * @brief 初始化
-     * @param obs 初始观测
+     * @param armor 初始装甲板数据 (带 ID)
      * @param timestamp 时间戳
      */
-    void init(const ArmorObservation& obs, double timestamp);
+    void init(const ArmorData& armor, double timestamp);
 
     /**
      * @brief 更新
-     * @param obs 观测 (可能有跳变)
+     * @param armor 装甲板数据 (带 ID，用于跳变检测)
      * @param timestamp 时间戳
      */
-    void update(const ArmorObservation& obs, double timestamp);
+    void update(const ArmorData& armor, double timestamp);
 
     /**
      * @brief 预测旋转中心位置
@@ -263,10 +264,11 @@ public:
 
 private:
     /**
-     * @brief 检测并处理装甲板跳变
-     * @return true 如果发生跳变
+     * @brief 检测并处理装甲板跳变 (用 ID 判断)
+     * @param armor 当前装甲板数据
+     * @return true 如果发生跳变 (换了装甲板)
      */
-    bool handle_armor_jump(const ArmorObservation& obs);
+    bool handle_armor_jump(const ArmorData& armor);
 
     /**
      * @brief 更新陀螺等级 (带迟滞)
@@ -298,8 +300,8 @@ private:
     SpinLevel spin_level_ = SpinLevel::NONE;
     double last_yaw_ = 0;       // 上一帧观测的 armor_yaw (用于连续化)
 
-    // ==================== 跳变检测 ====================
-    static constexpr double JUMP_YAW_THRESH = 0.4;  // 跳变角度阈值 (rad)
+    // ==================== 跳变检测 (用 ID) ====================
+    int tracking_armor_id_ = -1;  // 当前追踪的装甲板 ID
 };
 
 }  // namespace autoaim::predictor

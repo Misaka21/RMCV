@@ -87,7 +87,9 @@ SpinModel::SpinModel(int armor_num) : armor_num_(armor_num) {
     another_r_ = get_init_r();
 }
 
-void SpinModel::init(const ArmorObservation& obs, double timestamp) {
+void SpinModel::init(const ArmorData& armor, double timestamp) {
+    const auto& obs = armor.observation;
+
     // 从观测提取
     double xa = obs.pos.x();
     double ya = obs.pos.y();
@@ -121,22 +123,25 @@ void SpinModel::init(const ArmorObservation& obs, double timestamp) {
     another_dz_ = 0;
     last_yaw_ = armor_yaw;
     spin_level_ = SpinLevel::NONE;
+    tracking_armor_id_ = armor.id;  // 记录初始 ID
 
     last_update_time_ = timestamp;
     initialized_ = true;
 }
 
-void SpinModel::update(const ArmorObservation& obs, double timestamp) {
+void SpinModel::update(const ArmorData& armor, double timestamp) {
     if (!initialized_) {
-        init(obs, timestamp);
+        init(armor, timestamp);
         return;
     }
+
+    const auto& obs = armor.observation;
 
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
-    // 检测跳变
-    bool jumped = handle_armor_jump(obs);
+    // 检测跳变 (用 ID 判断)
+    bool jumped = handle_armor_jump(armor);
 
     // 预测
     SpinCVPredict predict_func(dt);
@@ -187,16 +192,17 @@ void SpinModel::update(const ArmorObservation& obs, double timestamp) {
     last_update_time_ = timestamp;
 }
 
-bool SpinModel::handle_armor_jump(const ArmorObservation& obs) {
+bool SpinModel::handle_armor_jump(const ArmorData& armor) {
+    const auto& obs = armor.observation;
     double armor_yaw = obs.z[obs::ARMOR_YAW];
     VectorX x = ekf_.get_x();
     double theta_pred = x[spin_model::THETA];
 
-    // 计算角度差
-    double yaw_diff = std::abs(math::angle_diff(theta_pred, armor_yaw));
+    // 用 ID 判断是否换了装甲板
+    bool id_changed = (armor.id != tracking_armor_id_ && tracking_armor_id_ > 0);
 
-    if (yaw_diff > JUMP_YAW_THRESH) {
-        // 发生跳变
+    if (id_changed) {
+        // 发生跳变: 换了装甲板
 
         // 更新朝向角
         x[spin_model::THETA] = theta_pred + math::angle_diff(theta_pred, armor_yaw);
@@ -234,9 +240,12 @@ bool SpinModel::handle_armor_jump(const ArmorObservation& obs) {
         }
 
         ekf_.set_x(x);
+        tracking_armor_id_ = armor.id;  // 更新追踪 ID
         return true;
     }
 
+    // 同一块装甲板，更新 ID (可能是初始化后第一次)
+    tracking_armor_id_ = armor.id;
     return false;
 }
 
@@ -375,6 +384,7 @@ void SpinModel::reset() {
     dz_ = 0;
     another_dz_ = 0;
     another_r_ = get_init_r();
+    tracking_armor_id_ = -1;
 }
 
 }  // namespace autoaim::predictor
