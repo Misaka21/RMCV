@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    debug::init_session();
+    debug::init_session("test_playback");
 
     // 启动参数热重载
     std::thread param_thread([]() {

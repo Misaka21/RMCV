@@ -35,7 +35,7 @@ int main() {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    debug::init_session();
+    debug::init_session("test_simulator");
 
     fmt::print(fmt::fg(fmt::color::gold),
         "====================================================================\n"

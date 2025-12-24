@@ -15,7 +15,7 @@
 int main() {
     using namespace std::chrono_literals;
 
-    debug::init_session();
+    debug::init_session("test_hardware");
     debug::print(debug::PrintMode::INFO, "TestHardware", "Hardware node test starting...");
 
     // Start hardware node in separate thread

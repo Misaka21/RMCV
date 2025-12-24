@@ -48,7 +48,7 @@ camera::CameraConfig load_camera_config(const toml::table& config) {
 int main() {
     using namespace std::chrono_literals;
 
-    debug::init_session();
+    debug::init_session("test_camera");
     debug::print(debug::PrintMode::INFO, "TestCamera", "Camera test starting...");
 
     try {

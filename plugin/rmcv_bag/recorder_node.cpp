@@ -195,7 +195,7 @@ void start_recorder_node() {
                 if (config.record_imu_csv) {
                     imu_writer = std::make_unique<CsvWriter>(session_path + "/imu.csv");
                     imu_writer->write_header({
-                        "timestamp_ms", "frame_id",
+                        "timestamp_us", "frame_id",
                         "yaw", "pitch", "roll",
                         "robot_id", "enemy_color",
                         "bullet_speed", "aim_mode", "allow_fire",
@@ -267,10 +267,8 @@ void start_recorder_node() {
             bool should_record = (sample_counter % config.sample_interval == 0);
             if (!should_record) continue;
 
-            // 记录时间戳
-            auto now = SteadyClock::now();
-            auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                now.time_since_epoch()).count();
+            // 使用 sync_frame 的原始时间戳
+            int64_t timestamp_us = sync_frame.timestamp_us;
 
             // 开始计时
             auto write_start = SteadyClock::now();
@@ -321,7 +319,7 @@ void start_recorder_node() {
             if (sync_valid && imu_writer) {
                 const auto& s = sync_frame.serial_data;
                 imu_writer->write_row({
-                    std::to_string(timestamp_ms),
+                    std::to_string(timestamp_us),
                     std::to_string(sync_frame.frame_id),
                     fmt::format("{:.4f}", s.yaw),
                     fmt::format("{:.4f}", s.pitch),

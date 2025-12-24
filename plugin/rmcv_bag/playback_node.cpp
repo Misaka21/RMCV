@@ -29,7 +29,7 @@ using hardware::SyncFrame;
 // ============================================================================
 
 struct ImuRecord {
-    int64_t timestamp_ms;
+    int64_t timestamp_us;
     int frame_id;
     float yaw;
     float pitch;
@@ -82,7 +82,7 @@ private:
         if (tokens.size() < 11) return false;
 
         try {
-            record.timestamp_ms = std::stoll(tokens[0]);
+            record.timestamp_us = std::stoll(tokens[0]);
             record.frame_id = std::stoi(tokens[1]);
             record.yaw = std::stof(tokens[2]);
             record.pitch = std::stof(tokens[3]);
@@ -160,40 +160,40 @@ void start_playback_node(const std::string& bag_path, double playback_speed) {
         // 读取视频帧
         cv::Mat image;
         if (!cap.read(image)) {
-            // 视频结束，循环播放
-            cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-            frame_id = 0;
-            csv_index = 0;
-            debug::print(debug::PrintMode::INFO, "PlaybackNode", "Looping playback");
-            continue;
+            // 视频结束，退出
+            debug::print(debug::PrintMode::INFO, "PlaybackNode", "Playback finished");
+            break;
         }
 
         // 构建 SyncFrame
         SyncFrame sync_frame;
         sync_frame.image = image;
         sync_frame.frame_id = frame_id;
-        sync_frame.timestamp = SteadyClock::now();
 
-        // 填充 IMU 数据 (如果有)
-        if (csv_reader && csv_reader->size() > 0) {
-            // 使用当前索引或最后一条记录
-            size_t idx = std::min(csv_index, csv_reader->size() - 1);
-            const auto& imu = csv_reader->get(idx);
-            sync_frame.serial_data.yaw = imu.yaw;
-            sync_frame.serial_data.pitch = imu.pitch;
-            sync_frame.serial_data.roll = imu.roll;
-            sync_frame.serial_data.robot_id = imu.robot_id;
-            sync_frame.serial_data.enemy_color = imu.enemy_color;
-            sync_frame.serial_data.bullet_speed = imu.bullet_speed;
-            sync_frame.serial_data.aim_mode = imu.aim_mode;
-            sync_frame.serial_data.allow_fire = imu.allow_fire;
-            sync_frame.serial_data.recv_time_us = imu.serial_timestamp;
-            sync_frame.serial_valid = true;
-            if (csv_index < csv_reader->size()) {
-                csv_index++;
-            }
-        } else {
-            sync_frame.serial_valid = false;
+        // 填充 IMU 数据 (必须有 CSV)
+        if (!csv_reader || csv_reader->size() == 0) {
+            throw std::runtime_error("CSV data is required for playback");
+        }
+
+        // 使用当前索引或最后一条记录
+        size_t idx = std::min(csv_index, csv_reader->size() - 1);
+        const auto& imu = csv_reader->get(idx);
+
+        // 使用 CSV 中的原始时间戳 (微秒)
+        sync_frame.timestamp_us = imu.timestamp_us;
+
+        sync_frame.serial_data.yaw = imu.yaw;
+        sync_frame.serial_data.pitch = imu.pitch;
+        sync_frame.serial_data.roll = imu.roll;
+        sync_frame.serial_data.robot_id = imu.robot_id;
+        sync_frame.serial_data.enemy_color = imu.enemy_color;
+        sync_frame.serial_data.bullet_speed = imu.bullet_speed;
+        sync_frame.serial_data.aim_mode = imu.aim_mode;
+        sync_frame.serial_data.allow_fire = imu.allow_fire;
+        sync_frame.serial_data.recv_time_us = imu.serial_timestamp;
+        sync_frame.serial_valid = true;
+        if (csv_index < csv_reader->size()) {
+            csv_index++;
         }
 
         // 发布

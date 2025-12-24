@@ -27,11 +27,6 @@
     AcquisitionFrameRate = 200.0
     AcquisitionFrameRateEnable = true
 
-[Camera.record]
-    #@bool 是否开启内录,比赛必开启内录,不受此值影响
-    recording = false
-    fps = 15
-
 [Serial]
     port_name = "/dev/ttyUSB0"
     baudrate = 115200

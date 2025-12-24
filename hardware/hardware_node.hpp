@@ -6,15 +6,13 @@
 #ifndef HARDWARE_NODE_HPP
 #define HARDWARE_NODE_HPP
 
-#include <chrono>
+#include <cstdint>
 
 #include <opencv2/core/mat.hpp>
 
 #include "serial/serial_thread.hpp"
 
 namespace hardware {
-
-using TimePoint = std::chrono::steady_clock::time_point;
 
 /**
  * @brief 同步帧 - Hardware层输出
@@ -25,7 +23,7 @@ using TimePoint = std::chrono::steady_clock::time_point;
 struct SyncFrame {
     cv::Mat image;
     int frame_id = 0;
-    TimePoint timestamp;
+    int64_t timestamp_us = 0;  // 时间戳 (微秒, steady_clock)
 
     serial::SerialReceiveData serial_data;
     bool serial_valid = false;

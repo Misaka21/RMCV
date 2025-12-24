@@ -217,10 +217,8 @@ void start_predictor_node() {
         try {
             auto detection = sub.pop_for(1000);
 
-            // 使用相机帧时间戳（从 SyncFrame 传递过来）
-            double timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                detection.state.timestamp.time_since_epoch()
-            ).count() / 1e9;
+            // 使用相机帧时间戳（从 SyncFrame 传递过来，微秒转秒）
+            double timestamp = detection.state.timestamp_us / 1e6;
 
             // DEBUG: 输入装甲板数量
             if (!detection.armors.empty()) {

@@ -5,8 +5,8 @@
 #ifndef AIMER_COMMON_ROBOT_STATE_HPP
 #define AIMER_COMMON_ROBOT_STATE_HPP
 
-#include <chrono>
 #include <cmath>
+#include <cstdint>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -14,13 +14,6 @@
 #include "hardware/hardware_node.hpp"
 
 namespace aimer {
-
-using TimePoint = std::chrono::steady_clock::time_point;
-
-// 前向声明 (避免循环依赖)
-namespace autoaim {
-enum class EnemyColor;
-}
 
 /**
  * @brief 机器人状态 - 从 hardware::SyncFrame 提取
@@ -44,8 +37,8 @@ struct RobotState {
     // 是否允许射击
     bool allow_fire = false;
 
-    // 本机采集时间戳
-    TimePoint timestamp = {};
+    // 时间戳 (微秒, steady_clock)
+    int64_t timestamp_us = 0;
 
     RobotState() = default;
 
@@ -60,7 +53,7 @@ struct RobotState {
             state.aim_mode = s.aim_mode;
             state.allow_fire = s.allow_fire;
         }
-        state.timestamp = frame.timestamp;
+        state.timestamp_us = frame.timestamp_us;
         return state;
     }
 

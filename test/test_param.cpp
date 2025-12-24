@@ -15,7 +15,7 @@
 #include "plugin/debug/logger.hpp"
 
 int main() {
-    debug::init_session();
+    debug::init_session("test_param");
     const auto param = static_param::parse_file("test.toml");
     const auto param_file_name = "test.toml";
 

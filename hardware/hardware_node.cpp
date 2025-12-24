@@ -291,16 +291,15 @@ void start_hardware_node() {
 
                 consecutive_errors = 0;  // 成功后重置计数
 
-                TimePoint cam_time = SteadyClock::now();
                 int64_t cam_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                    cam_time.time_since_epoch()
+                    SteadyClock::now().time_since_epoch()
                 ).count();
 
                 // Build sync frame
                 SyncFrame frame;
                 frame.image = img.clone();
                 frame.frame_id = cam.frame_id;
-                frame.timestamp = cam_time;
+                frame.timestamp_us = cam_time_us;
 
                 // 根据是否使用fake serial决定数据来源
                 bool synced = false;

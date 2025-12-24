@@ -13,7 +13,7 @@
 int main() {
     using namespace std::chrono_literals;
 
-    debug::init_session();
+    debug::init_session("test_serial");
     debug::print(debug::PrintMode::INFO, "TestSerial", "Serial communication test starting...");
 
     try {
