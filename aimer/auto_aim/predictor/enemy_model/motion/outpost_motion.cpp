@@ -149,7 +149,7 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
 
     // 观测更新
     OutpostMeasure measure_func(current_dz_);
-    MatrixZZ R = build_R(obs.z[obs::DIST]);
+    MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
     ekf_.update_forward(measure_func, z, R);
 
     // 约束角速度
@@ -226,7 +226,8 @@ void OutpostMotion::constrain_omega() {
 
     if (!omega_sign_determined_) {
         // 还没确定方向，等 EKF 估计超过阈值
-        constexpr double OMEGA_THRESHOLD = 0.4 * M_PI;
+        // 阈值设为 0.6π (75% of 0.8π)，更安全
+        constexpr double OMEGA_THRESHOLD = 0.6 * M_PI;
         if (omega > OMEGA_THRESHOLD) {
             x[outpost::OMEGA] = outpost::OMEGA_ABS;  // +0.8π 逆时针
             omega_sign_determined_ = true;
@@ -255,6 +256,11 @@ OutpostMotion::MatrixXX OutpostMotion::build_Q(double dt) const {
     double q_theta = get_q_theta();
     double q_omega = get_q_omega();
 
+    // 前哨站 ω 是规则固定的，方向确定后过程噪声应该很小
+    if (omega_sign_determined_) {
+        q_omega *= 0.01;  // 方向确定后，ω 几乎不变
+    }
+
     Q(outpost::XC, outpost::XC) = q_pos * dt;
     Q(outpost::VX, outpost::VX) = q_vel * dt;
     Q(outpost::YC, outpost::YC) = q_pos * dt;
@@ -266,16 +272,23 @@ OutpostMotion::MatrixXX OutpostMotion::build_Q(double dt) const {
     return Q;
 }
 
-OutpostMotion::MatrixZZ OutpostMotion::build_R(double distance) const {
+OutpostMotion::MatrixZZ OutpostMotion::build_R(double distance, double z_to_v) const {
     MatrixZZ R = MatrixZZ::Zero();
 
     double r_angle = get_r_angle();
     double r_dis_k = get_r_dis_k();
     double r_armor_yaw = get_r_armor_yaw();
 
-    R(outpost::YAW, outpost::YAW) = r_angle;
-    R(outpost::PITCH, outpost::PITCH) = r_angle;
-    R(outpost::DIS, outpost::DIS) = r_dis_k * distance * distance;
+    // 侧面观看时距离噪声更大 (参考 sp_vision_25)
+    // z_to_v 越大越侧面，log(|z_to_v| + 1) + 1 作为缩放因子
+    double side_factor = std::log(std::abs(z_to_v) + 1) + 1;
+
+    // 距离越远角度噪声越大
+    double dist_factor = std::log(distance + 1) / 200 + 1;
+
+    R(outpost::YAW, outpost::YAW) = r_angle * dist_factor;
+    R(outpost::PITCH, outpost::PITCH) = r_angle * dist_factor;
+    R(outpost::DIS, outpost::DIS) = r_dis_k * distance * distance * side_factor;
     R(outpost::ARMOR_YAW, outpost::ARMOR_YAW) = r_armor_yaw;
 
     return R;
