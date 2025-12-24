@@ -91,6 +91,7 @@ public:
     auto capture() -> cv::Mat&;
 
     int frame_id = 0;
+    int64_t host_timestamp = 0;  // 主机时间戳 (nHostTimeStamp)
 
 private:
     CameraConfig _config;

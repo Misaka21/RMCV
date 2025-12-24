@@ -99,6 +99,7 @@ auto HikCam::capture() -> cv::Mat& {
         if (_nRet == MV_OK) {
             unsigned char* pData = static_cast<unsigned char*>(stImageInfo.pBufAddr);
             frame_id = static_cast<int>(stImageInfo.stFrameInfo.nFrameNum);
+            host_timestamp = stImageInfo.stFrameInfo.nHostTimeStamp;
 
             cv::Mat rawData(
                 stImageInfo.stFrameInfo.nHeight,
