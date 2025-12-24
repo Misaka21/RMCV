@@ -84,14 +84,17 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                 // 接收数据包
                 FixedPacket<16> packet;
                 if (transceiver->recv_packet(packet)) {
+                    // 立即记录接收时间戳 (关键: 减少延迟抖动)
+                    auto recv_time = std::chrono::steady_clock::now();
+                    int64_t recv_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                        recv_time.time_since_epoch()
+                    ).count();
+
                     // 转换为数据结构体
                     SerialReceiveData receive_data;
                     if (SerialUtils::packet_to_receive_data(packet, receive_data)) {
-                        // 添加时间戳
-                        receive_data.timestamp =
-                            std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::steady_clock::now().time_since_epoch()
-                            ).count();
+                        // 设置时间戳
+                        receive_data.recv_time_us = recv_time_us;
 
                         // 限制队列大小，最多300条
                         if (receive_queue->get().size() >= 300) {

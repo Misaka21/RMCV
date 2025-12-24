@@ -30,7 +30,7 @@ using SteadyClock = std::chrono::steady_clock;
 
 // 带时间戳的串口数据，用于时间同步匹配
 struct TimestampedSerialData {
-    TimePoint recv_time;  // 接收时间
+    int64_t recv_time_us;  // 接收时间 (微秒)
     serial::SerialReceiveData data;
 };
 
@@ -73,14 +73,15 @@ camera::CameraConfig load_camera_config(const toml::table& config) {
 
 /**
  * @brief 将接收队列中的数据转移到缓冲区
+ * 使用串口线程记录的精确时间戳
  */
 void drain_queue_to_buffer(serial::ReceiveQueue& queue,
                            std::deque<TimestampedSerialData>& buffer,
                            size_t max_buffer_size) {
     while (!queue.empty()) {
         TimestampedSerialData ts_data;
-        ts_data.recv_time = SteadyClock::now();
         ts_data.data = queue.front();
+        ts_data.recv_time_us = ts_data.data.recv_time_us;  // 使用串口线程记录的时间戳
         queue.pop();
 
         buffer.push_back(ts_data);
@@ -95,7 +96,7 @@ void drain_queue_to_buffer(serial::ReceiveQueue& queue,
  */
 std::optional<serial::SerialReceiveData> find_closest_serial_data(
     const std::deque<TimestampedSerialData>& buffer,
-    TimePoint target_time,
+    int64_t target_time_us,
     int64_t max_diff_us = 50000) {
     if (buffer.empty()) return std::nullopt;
 
@@ -103,11 +104,7 @@ std::optional<serial::SerialReceiveData> find_closest_serial_data(
     int64_t min_diff = INT64_MAX;
 
     for (auto it = buffer.begin(); it != buffer.end(); ++it) {
-        int64_t diff = std::abs(
-            std::chrono::duration_cast<std::chrono::microseconds>(
-                it->recv_time - target_time
-            ).count()
-        );
+        int64_t diff = std::abs(it->recv_time_us - target_time_us);
         if (diff < min_diff) {
             min_diff = diff;
             best = it;
@@ -219,6 +216,9 @@ void start_hardware_node() {
                 consecutive_errors = 0;  // 成功后重置计数
 
                 TimePoint cam_time = SteadyClock::now();
+                int64_t cam_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                    cam_time.time_since_epoch()
+                ).count();
 
                 // Build sync frame
                 SyncFrame frame;
@@ -235,8 +235,8 @@ void start_hardware_node() {
                 } else {
                     drain_queue_to_buffer(recv_queue->get(), serial_buffer, max_buffer_size);
 
-                    auto target = cam_time - std::chrono::microseconds(delta_t_us);
-                    if (auto data = find_closest_serial_data(serial_buffer, target)) {
+                    int64_t target_time_us = cam_time_us - delta_t_us;
+                    if (auto data = find_closest_serial_data(serial_buffer, target_time_us)) {
                         frame.serial_data = *data;
                         frame.serial_valid = true;
                         synced = true;

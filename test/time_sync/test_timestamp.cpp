@@ -11,6 +11,8 @@
 #include <thread>
 #include <vector>
 #include <cmath>
+#include <algorithm>
+#include <numeric>
 
 #include <fmt/format.h>
 #include <fmt/color.h>
@@ -63,90 +65,153 @@ int main() {
     };
 
     std::vector<TimestampSample> samples;
-    samples.reserve(100);
+    constexpr int NUM_SAMPLES = 2000;
+    samples.reserve(NUM_SAMPLES);
 
-    fmt::print("采集 100 帧数据...\n\n");
+    fmt::print("采集 {} 帧数据...\n\n", NUM_SAMPLES);
 
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < NUM_SAMPLES; ++i) {
         TimestampSample sample;
 
         // 记录 GetImageBuffer 前的时间
         auto before = SteadyClock::now();
         sample.steady_before_us = duration_cast<microseconds>(before.time_since_epoch()).count();
 
-        // 直接调用底层 SDK (需要修改 HikCam 暴露接口，这里用 capture 代替)
+        // 捕获图像
         cv::Mat& img = cam.capture();
+        (void)img;
 
         // 记录 GetImageBuffer 后的时间
         auto after = SteadyClock::now();
         sample.steady_after_us = duration_cast<microseconds>(after.time_since_epoch()).count();
 
-        // 由于 HikCam::capture() 没有暴露 stFrameInfo，我们需要用另一种方式
-        // 这里先用 frame_id 作为参考
+        // 获取 SDK 时间戳
         sample.frame_num = cam.frame_id;
-        sample.host_timestamp = 0;  // 需要修改 HikCam 才能获取
+        sample.host_timestamp = cam.host_timestamp;
 
         samples.push_back(sample);
 
-        if ((i + 1) % 20 == 0) {
+        if ((i + 1) % 50 == 0) {
             fmt::print("  已采集 {} 帧\n", i + 1);
         }
     }
 
     fmt::print("\n");
 
+    // ========================================
     // 分析结果
+    // ========================================
     fmt::print(fmt::fg(fmt::color::cyan),
         "==================================================\n"
         "    分析结果\n"
         "==================================================\n\n"
     );
 
-    // 计算帧间隔
-    std::vector<int64_t> intervals;
+    // 1. 打印前几个样本的原始数据
+    fmt::print("前5帧原始数据:\n");
+    fmt::print("{:>6} {:>18} {:>18} {:>18}\n",
+        "Frame", "steady_before(us)", "host_timestamp", "steady_after(us)");
+    for (int i = 0; i < 5 && i < static_cast<int>(samples.size()); ++i) {
+        const auto& s = samples[i];
+        fmt::print("{:>6} {:>18} {:>18} {:>18}\n",
+            s.frame_num, s.steady_before_us, s.host_timestamp, s.steady_after_us);
+    }
+    fmt::print("\n");
+
+    // 2. 判断 nHostTimeStamp 的单位
+    // 比较相邻帧的差值
+    std::vector<int64_t> host_diffs;
+    std::vector<int64_t> steady_diffs;
     for (size_t i = 1; i < samples.size(); ++i) {
-        int64_t interval = samples[i].steady_after_us - samples[i-1].steady_after_us;
-        intervals.push_back(interval);
+        host_diffs.push_back(samples[i].host_timestamp - samples[i-1].host_timestamp);
+        steady_diffs.push_back(samples[i].steady_after_us - samples[i-1].steady_after_us);
     }
 
-    // 统计
-    double mean_interval = 0;
-    for (auto v : intervals) mean_interval += v;
-    mean_interval /= intervals.size();
+    double mean_host_diff = std::accumulate(host_diffs.begin(), host_diffs.end(), 0.0) / host_diffs.size();
+    double mean_steady_diff = std::accumulate(steady_diffs.begin(), steady_diffs.end(), 0.0) / steady_diffs.size();
 
-    double std_interval = 0;
-    for (auto v : intervals) std_interval += (v - mean_interval) * (v - mean_interval);
-    std_interval = std::sqrt(std_interval / intervals.size());
+    fmt::print("帧间隔分析:\n");
+    fmt::print("  steady_clock 帧间隔平均: {:.1f} us ({:.1f} Hz)\n",
+        mean_steady_diff, 1e6 / mean_steady_diff);
+    fmt::print("  host_timestamp 帧间隔平均: {:.1f}\n", mean_host_diff);
 
-    fmt::print("帧间隔统计 (基于 steady_clock):\n");
-    fmt::print("  平均: {:.1f} us ({:.1f} Hz)\n", mean_interval, 1e6 / mean_interval);
-    fmt::print("  标准差: {:.1f} us\n", std_interval);
-    fmt::print("  最小: {} us\n", *std::min_element(intervals.begin(), intervals.end()));
-    fmt::print("  最大: {} us\n", *std::max_element(intervals.begin(), intervals.end()));
+    // 推断单位
+    double ratio = mean_host_diff / mean_steady_diff;
+    fmt::print("\n单位推断:\n");
+    fmt::print("  host_diff / steady_diff = {:.3f}\n", ratio);
 
-    // 计算 GetImageBuffer 调用耗时
+    std::string unit_guess;
+    double scale = 1.0;
+    if (ratio > 500 && ratio < 2000) {
+        unit_guess = "纳秒 (ns)";
+        scale = 1000.0;  // ns -> us
+        fmt::print("  推测 nHostTimeStamp 单位: {} (ratio ≈ 1000)\n", unit_guess);
+    } else if (ratio > 0.5 && ratio < 2.0) {
+        unit_guess = "微秒 (us)";
+        scale = 1.0;
+        fmt::print("  推测 nHostTimeStamp 单位: {} (ratio ≈ 1)\n", unit_guess);
+    } else if (ratio > 0.0005 && ratio < 0.002) {
+        unit_guess = "毫秒 (ms)";
+        scale = 0.001;  // ms -> us
+        fmt::print("  推测 nHostTimeStamp 单位: {} (ratio ≈ 0.001)\n", unit_guess);
+    } else {
+        unit_guess = "未知";
+        fmt::print("  推测 nHostTimeStamp 单位: {} (ratio = {:.3f})\n", unit_guess, ratio);
+    }
+
+    // 3. 验证是否同源
+    fmt::print("\n同源性验证:\n");
+
+    // 计算 host_timestamp (转换为us) 和 steady_clock 的差值
+    std::vector<double> offsets;
+    for (const auto& s : samples) {
+        double host_us = s.host_timestamp / scale;  // 转换为 us
+        double steady_mid = (s.steady_before_us + s.steady_after_us) / 2.0;
+        offsets.push_back(host_us - steady_mid);
+    }
+
+    double mean_offset = std::accumulate(offsets.begin(), offsets.end(), 0.0) / offsets.size();
+    double std_offset = 0;
+    for (auto v : offsets) std_offset += (v - mean_offset) * (v - mean_offset);
+    std_offset = std::sqrt(std_offset / offsets.size());
+
+    fmt::print("  host_timestamp - steady_clock 偏移:\n");
+    fmt::print("    平均: {:.1f} us\n", mean_offset);
+    fmt::print("    标准差: {:.1f} us\n", std_offset);
+
+    // 如果标准差很小（<100us），说明同源
+    if (std_offset < 100) {
+        fmt::print(fmt::fg(fmt::color::green),
+            "\n结论: nHostTimeStamp 和 steady_clock 是同源的!\n");
+        fmt::print("  标准差 {:.1f} us < 100 us，可以直接用于时间同步。\n\n", std_offset);
+    } else if (std_offset < 500) {
+        fmt::print(fmt::fg(fmt::color::yellow),
+            "\n结论: nHostTimeStamp 和 steady_clock 可能同源，但抖动较大。\n");
+        fmt::print("  标准差 {:.1f} us，建议使用 steady_clock。\n\n", std_offset);
+    } else {
+        fmt::print(fmt::fg(fmt::color::red),
+            "\n结论: nHostTimeStamp 和 steady_clock 可能不同源!\n");
+        fmt::print("  标准差 {:.1f} us 过大，建议使用 steady_clock。\n\n", std_offset);
+    }
+
+    // 4. 计算 GetImageBuffer 调用耗时
     std::vector<int64_t> call_durations;
     for (const auto& s : samples) {
         call_durations.push_back(s.steady_after_us - s.steady_before_us);
     }
 
-    double mean_duration = 0;
-    for (auto v : call_durations) mean_duration += v;
-    mean_duration /= call_durations.size();
+    double mean_duration = std::accumulate(call_durations.begin(), call_durations.end(), 0.0) / call_durations.size();
+    double std_duration = 0;
+    for (auto v : call_durations) std_duration += (v - mean_duration) * (v - mean_duration);
+    std_duration = std::sqrt(std_duration / call_durations.size());
 
-    fmt::print("\nGetImageBuffer 调用耗时:\n");
-    fmt::print("  平均: {:.1f} us\n", mean_duration);
+    fmt::print("GetImageBuffer 调用耗时:\n");
+    fmt::print("  平均: {:.1f} us ({:.2f} ms)\n", mean_duration, mean_duration / 1000.0);
+    fmt::print("  标准差: {:.1f} us\n", std_duration);
     fmt::print("  最小: {} us\n", *std::min_element(call_durations.begin(), call_durations.end()));
     fmt::print("  最大: {} us\n", *std::max_element(call_durations.begin(), call_durations.end()));
 
-    fmt::print(fmt::fg(fmt::color::yellow),
-        "\n==================================================\n"
-        "    注意\n"
-        "==================================================\n"
-        "当前 HikCam 未暴露 nHostTimeStamp。\n"
-        "需要修改 hik_camera.hpp/cpp 才能获取。\n"
-        "==================================================\n\n"
-    );
+    fmt::print("\n");
 
     return 0;
 }

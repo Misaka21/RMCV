@@ -47,15 +47,15 @@ struct SerialReceiveData {
     uint8_t aim_mode;     // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
     bool allow_fire;      // 是否允许射击
 
-    // 时间戳
-    uint32_t timestamp;   // 下位机时间戳 (ms)
+    // 时间戳 (上位机接收时刻，微秒)
+    int64_t recv_time_us = 0;
 
     SerialReceiveData()
         : yaw(0.0f), pitch(0.0f), roll(0.0f)
         , robot_id(0), enemy_color(0)
         , bullet_speed(15.0f)
         , aim_mode(0), allow_fire(false)
-        , timestamp(0) {}
+        , recv_time_us(0) {}
 };
 
 // 接收数据队列类型别名 - 使用STL queue
