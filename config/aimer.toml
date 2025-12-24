@@ -93,6 +93,10 @@
     #@double 最大半径限制 (m)
     r_max = 0.4
 
+    # Z轴约束 (PnP在Z方向误差大)
+    #@bool 强制Z轴速度为0
+    force_zero_vz = true
+
 [AutoAim.Predictor.OutpostEKF]
     # 过程噪声 Q (越大越信任观测，越小越信任预测)
     #@double 旋转中心位置过程噪声

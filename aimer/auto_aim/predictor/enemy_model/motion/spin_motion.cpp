@@ -77,6 +77,17 @@ double get_r_max() {
     return get_double_param("AutoAim.Predictor.SpinEKF.r_max", 0.4);
 }
 
+// 是否强制 Z 轴速度为 0 (PnP 在 Z 方向误差大)
+bool get_force_zero_vz() {
+    auto ptr = runtime_param::find_param("AutoAim.Predictor.SpinEKF.force_zero_vz");
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<bool>(&*ptr)) {
+            return *val;
+        }
+    }
+    return true;  // 默认开启
+}
+
 }  // namespace
 
 // ============================================================================
@@ -187,6 +198,13 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
 
     // 更新陀螺等级
     update_spin_level();
+
+    // 强制 Z 轴速度为 0 (PnP 在 Z 方向误差大)
+    if (get_force_zero_vz()) {
+        x = ekf_.get_x();
+        x[spin_model::VZ] = 0;
+        ekf_.set_x(x);
+    }
 
     last_yaw_ = armor_yaw;
     last_update_time_ = timestamp;
