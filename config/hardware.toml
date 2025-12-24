@@ -64,5 +64,5 @@
     # 正值: 图像比IMU数据晚到达，匹配过去的IMU
     # 负值: 图像比IMU数据早到达，匹配未来的IMU
     # 例: delta_t_us = 5000 表示图像实际对应5ms前的IMU姿态
-    delta_t_us = 0
+    delta_t_us = -3400
 

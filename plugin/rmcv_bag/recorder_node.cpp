@@ -331,7 +331,7 @@ void start_recorder_node() {
                     fmt::format("{:.2f}", s.bullet_speed),
                     std::to_string(s.aim_mode),
                     std::to_string(s.allow_fire ? 1 : 0),
-                    std::to_string(s.timestamp)
+                    std::to_string(s.recv_time_us)
                 });
                 csv_row_count++;
             }

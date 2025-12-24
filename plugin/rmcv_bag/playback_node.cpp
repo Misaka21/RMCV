@@ -39,7 +39,7 @@ struct ImuRecord {
     float bullet_speed;
     uint8_t aim_mode;
     bool allow_fire;
-    uint32_t serial_timestamp;
+    int64_t serial_timestamp;
 };
 
 class CsvReader {
@@ -92,7 +92,7 @@ private:
             record.bullet_speed = std::stof(tokens[7]);
             record.aim_mode = static_cast<uint8_t>(std::stoi(tokens[8]));
             record.allow_fire = (std::stoi(tokens[9]) != 0);
-            record.serial_timestamp = static_cast<uint32_t>(std::stoul(tokens[10]));
+            record.serial_timestamp = std::stoll(tokens[10]);
             return true;
         } catch (...) {
             return false;
@@ -187,7 +187,7 @@ void start_playback_node(const std::string& bag_path, double playback_speed) {
             sync_frame.serial_data.bullet_speed = imu.bullet_speed;
             sync_frame.serial_data.aim_mode = imu.aim_mode;
             sync_frame.serial_data.allow_fire = imu.allow_fire;
-            sync_frame.serial_data.timestamp = imu.serial_timestamp;
+            sync_frame.serial_data.recv_time_us = imu.serial_timestamp;
             sync_frame.serial_valid = true;
             if (csv_index < csv_reader->size()) {
                 csv_index++;

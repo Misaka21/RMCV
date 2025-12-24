@@ -13,6 +13,7 @@
 // Third-party library headers
 #include <fmt/format.h>
 #include <opencv2/core/mat.hpp>
+#include <Eigen/Geometry>  // for Quaterniond SLERP
 
 // Project headers
 #include "hardware_node.hpp"
@@ -92,29 +93,104 @@ void drain_queue_to_buffer(serial::ReceiveQueue& queue,
 }
 
 /**
- * @brief 查找最接近目标时间的串口数据
+ * @brief 欧拉角转四元数 (ZYX顺序: yaw-pitch-roll)
  */
-std::optional<serial::SerialReceiveData> find_closest_serial_data(
+inline Eigen::Quaterniond euler_to_quat(float yaw_deg, float pitch_deg, float roll_deg) {
+    double yaw = yaw_deg * M_PI / 180.0;
+    double pitch = pitch_deg * M_PI / 180.0;
+    double roll = roll_deg * M_PI / 180.0;
+    return Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ())
+         * Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY())
+         * Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+}
+
+/**
+ * @brief 四元数转欧拉角 (ZYX顺序)
+ */
+inline void quat_to_euler(const Eigen::Quaterniond& q, float& yaw_deg, float& pitch_deg, float& roll_deg) {
+    Eigen::Vector3d euler = q.toRotationMatrix().eulerAngles(2, 1, 0);  // ZYX
+    yaw_deg = static_cast<float>(euler[0] * 180.0 / M_PI);
+    pitch_deg = static_cast<float>(euler[1] * 180.0 / M_PI);
+    roll_deg = static_cast<float>(euler[2] * 180.0 / M_PI);
+}
+
+/**
+ * @brief 插值获取目标时间的串口数据
+ * 对 yaw/pitch/roll 做 SLERP 球面插值，其他字段取最近的
+ * 支持边界外推（当目标时间超出缓冲区范围时）
+ */
+std::optional<serial::SerialReceiveData> interpolate_serial_data(
     const std::deque<TimestampedSerialData>& buffer,
     int64_t target_time_us,
     int64_t max_diff_us = 50000) {
-    if (buffer.empty()) return std::nullopt;
 
-    auto best = buffer.begin();
-    int64_t min_diff = INT64_MAX;
+    if (buffer.size() < 2) return std::nullopt;
 
-    for (auto it = buffer.begin(); it != buffer.end(); ++it) {
-        int64_t diff = std::abs(it->recv_time_us - target_time_us);
-        if (diff < min_diff) {
-            min_diff = diff;
-            best = it;
+    // 找到第一个 >= target_time 的位置
+    auto it_after = std::lower_bound(
+        buffer.begin(), buffer.end(), target_time_us,
+        [](const TimestampedSerialData& d, int64_t t) {
+            return d.recv_time_us < t;
         }
+    );
+
+    const TimestampedSerialData* before_ptr = nullptr;
+    const TimestampedSerialData* after_ptr = nullptr;
+
+    if (it_after == buffer.begin()) {
+        // target 在所有数据之前，用最早的两个外推
+        before_ptr = &buffer[0];
+        after_ptr = &buffer[1];
+    } else if (it_after == buffer.end()) {
+        // target 在所有数据之后，用最新的两个外推
+        before_ptr = &buffer[buffer.size() - 2];
+        after_ptr = &buffer[buffer.size() - 1];
+    } else {
+        // 正常情况：target 在两个数据之间
+        before_ptr = &(*std::prev(it_after));
+        after_ptr = &(*it_after);
     }
 
-    if (min_diff <= max_diff_us) {
-        return best->data;
+    const auto& before = *before_ptr;
+    const auto& after = *after_ptr;
+
+    // 检查时间差是否在允许范围内
+    int64_t min_diff = std::min(
+        std::abs(before.recv_time_us - target_time_us),
+        std::abs(after.recv_time_us - target_time_us)
+    );
+    if (min_diff > max_diff_us) {
+        return std::nullopt;
     }
-    return std::nullopt;
+
+    // 计算插值因子 t（可能 < 0 或 > 1 表示外推）
+    double dt = static_cast<double>(after.recv_time_us - before.recv_time_us);
+    if (dt <= 0) {
+        return before.data;
+    }
+    double t = static_cast<double>(target_time_us - before.recv_time_us) / dt;
+
+    // 插值结果
+    serial::SerialReceiveData result;
+
+    // SLERP 姿态插值
+    Eigen::Quaterniond q_before = euler_to_quat(before.data.yaw, before.data.pitch, before.data.roll);
+    Eigen::Quaterniond q_after = euler_to_quat(after.data.yaw, after.data.pitch, after.data.roll);
+    Eigen::Quaterniond q_interp = q_before.slerp(t, q_after);
+    quat_to_euler(q_interp, result.yaw, result.pitch, result.roll);
+
+    // 其他字段取最近的
+    const auto& nearest = (t < 0.5) ? before.data : after.data;
+    result.robot_id = nearest.robot_id;
+    result.enemy_color = nearest.enemy_color;
+    result.bullet_speed = nearest.bullet_speed;
+    result.aim_mode = nearest.aim_mode;
+    result.allow_fire = nearest.allow_fire;
+
+    // 时间戳设为目标时间
+    result.recv_time_us = target_time_us;
+
+    return result;
 }
 
 // ============================================================================
@@ -195,7 +271,7 @@ void start_hardware_node() {
 
         // 串口数据缓冲区，用于时间同步匹配
         std::deque<TimestampedSerialData> serial_buffer;
-        constexpr size_t max_buffer_size = 500;
+        constexpr size_t max_buffer_size = 200;
 
         // FPS统计
         stats::FpsStats stats("HardwareNode", "synced");
@@ -236,7 +312,7 @@ void start_hardware_node() {
                     drain_queue_to_buffer(recv_queue->get(), serial_buffer, max_buffer_size);
 
                     int64_t target_time_us = cam_time_us - delta_t_us;
-                    if (auto data = find_closest_serial_data(serial_buffer, target_time_us)) {
+                    if (auto data = interpolate_serial_data(serial_buffer, target_time_us)) {
                         frame.serial_data = *data;
                         frame.serial_valid = true;
                         synced = true;
