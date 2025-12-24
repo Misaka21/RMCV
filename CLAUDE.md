@@ -229,23 +229,28 @@ debug::print("info", "module", "message: {}", data);
 
 #### 数据类型定义
 ```cpp
-// 视觉数据结构
-struct VisionData_t {
-    uint8_t cmd_id;      // 命令ID
-    float yaw;           // 偏航角
-    float pitch;         // 俯仰角
-    float distance;      // 距离
-    uint8_t target_id;   // 目标ID
-    uint8_t is_found;    // 是否发现目标
-};
+// hardware/serial/serial_thread.hpp
 
 // 接收数据结构
 struct SerialReceiveData {
-    uint8_t cmd_id;      // 命令ID
-    float yaw;           // 偏航角
-    float pitch;         // 俯仰角
-    float distance;      // 距离
-    uint64_t timestamp;  // 时间戳
+    // IMU 姿态数据
+    float yaw;            // 偏航角 (°)
+    float pitch;          // 俯仰角 (°)
+    float roll;           // 横滚角 (°)
+
+    // 机器人状态
+    uint8_t robot_id;     // 机器人ID (1-7红方, 101-107蓝方)
+    uint8_t enemy_color;  // 敌方颜色 (0=未知, 1=红, 2=蓝)
+
+    // 射击参数
+    float bullet_speed;   // 弹速 (m/s)
+
+    // 模式控制
+    uint8_t aim_mode;     // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
+    bool allow_fire;      // 是否允许射击
+
+    // 时间戳 (上位机接收时刻，微秒)
+    int64_t recv_time_us = 0;
 };
 ```
 
@@ -802,7 +807,7 @@ double predicted_phase = spin.phase + spin.omega * dt;
 
 ### 命名空间结构
 ```
-namespace aimer::predictor {
+namespace autoaim::predictor {
     struct ArmorState;        // 单个装甲板状态
     struct SpinState;         // 陀螺运动状态
     struct VehicleState;      // 单车整体状态
@@ -815,15 +820,20 @@ namespace aimer::predictor {
 #### 1. ArmorState - 单个装甲板滤波状态
 ```cpp
 struct ArmorState {
-    int armor_id = -1;
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    Eigen::Vector3d velocity = Eigen::Vector3d::Zero();  // 用于火控插值
 
-    // 3D位置/速度 (世界坐标系) - 速度用于插值！
-    Eigen::Vector3d position;
-    Eigen::Vector3d velocity;
+    double yaw = 0;            // 装甲板朝向 (rad)
+    double z_to_v = 0;         // 相对相机的夹角，越小越正对
 
-    // 状态
-    double last_seen_time = 0;
-    bool visible = false;
+    int id = 0;                // 装甲板编号 0-3
+    ArmorType type = ArmorType::SMALL;
+
+    double score = 0;          // 打击评分 (0~1)
+    bool visible = false;      // 当前帧是否可见
+    double last_seen = 0;      // 上次看到的时间
+
+    Eigen::Vector3d predict_position(double dt) const;
 };
 ```
 
@@ -831,9 +841,16 @@ struct ArmorState {
 ```cpp
 struct SpinState {
     bool active = false;
-    double omega = 0;       // 角速度 (rad/s) - 用于相位插值
-    double phase = 0;       // 当前相位 (rad)
-    double radius = 0;      // 陀螺半径 (m)
+    SpinLevel level = SpinLevel::NONE;  // NONE/LOW/HIGH
+
+    double omega = 0;          // 角速度 (rad/s)，正值为逆时针
+    double phase = 0;          // 当前相位 (rad)，即车体朝向角 θ
+    double radius = 0;         // 陀螺半径 (m)
+    double radius_2 = 0;       // 第二半径 (四装甲板时)
+
+    double predict_phase(double dt) const;
+    void update_level(double new_omega);  // 带迟滞消抖
+    void reset();
 };
 ```
 
@@ -841,27 +858,40 @@ struct SpinState {
 ```cpp
 struct VehicleState {
     int target_id = -1;
-    EnemyType enemy_type;
-    bool alive = false;
+    EnemyType enemy_type = EnemyType::UNKNOWN;
+    bool valid = false;
 
-    // 整车中心 + 速度 (用于插值)
-    Eigen::Vector3d center_pos;
-    Eigen::Vector3d center_vel;
+    // 旋转中心 + 速度 (用于插值)
+    Eigen::Vector3d center = Eigen::Vector3d::Zero();
+    Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
 
-    // 陀螺状态 (omega用于相位插值)
+    // 陀螺状态
     SpinState spin;
 
-    // 装甲板状态 (位置+速度，用于插值)
-    std::array<ArmorState, 4> armors;
-    int armor_count = 0;
-    int best_armor_idx = -1;
+    // 装甲板 (最多4块)
+    std::array<ArmorState, MAX_ARMORS_PER_TARGET> armors;
+    int armor_count = 4;
 
-    // 时间戳 (关键！火控用于计算dt)
+    // 置信度
+    double confidence = 0;
+    double position_std = 0;
+    double velocity_std = 0;
+
+    // 推荐目标
+    int recommended_armor_idx = -1;
+
+    // 时间戳
     double timestamp = 0;
+    int frame_count = 0;
+
+    // 辅助方法
+    const ArmorState* get_recommended_armor() const;
+    Eigen::Vector3d predict_center(double dt) const;
+    Eigen::Vector3d predict_armor_position(int armor_idx, double dt) const;
 };
 ```
 
-#### 4. BattlefieldSnapshot - 战场快照 (当前实现)
+#### 4. BattlefieldSnapshot - 战场快照
 ```cpp
 // aimer/auto_aim/predictor/types.hpp
 constexpr int MAX_TARGETS = 9;
@@ -874,6 +904,9 @@ struct BattlefieldSnapshot {
 
     int primary_target_id = -1;    // 主目标编号
 
+    // 检测时刻的自身状态 (火控用)
+    aimer::RobotState self_state;
+
     double timestamp = 0;
     int frame_id = 0;
 
@@ -882,6 +915,10 @@ struct BattlefieldSnapshot {
     bool is_detected(int id) const;
     const VehicleState& get(int id) const;
     const VehicleState* get_primary() const;
+    void set_valid(int id, bool valid);
+    void set_detected(int id, bool detected);
+    void for_each_valid(Func&& func) const;
+    void clear();
 };
 ```
 
@@ -920,6 +957,9 @@ Predictor (30Hz)
 ```
 
 ### 使用示例
+
+> **注意**: 当前 predictor_node.cpp 仍使用 `Publisher`，待改为 `BasicObjManager`
+
 ```cpp
 // ========== Predictor (30Hz) ==========
 auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find_or_create("battlefield");
