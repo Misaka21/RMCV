@@ -13,6 +13,7 @@
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/recorder/recorder_node.hpp"
 #include "umt/umt.hpp"
 
 // 全局运行标志
@@ -26,9 +27,11 @@ void signal_handler(int sig) {
     auto hw_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
     auto det_running = umt::BasicObjManager<bool>::find_or_create("detector_running", false);
     auto pred_running = umt::BasicObjManager<bool>::find_or_create("predictor_running", false);
+    auto rec_running = umt::BasicObjManager<bool>::find_or_create("recorder_running", false);
     hw_running->get() = false;
     det_running->get() = false;
     pred_running->get() = false;
+    rec_running->get() = false;
     std::exit(1);
 }
 
@@ -45,6 +48,12 @@ int main() {
         runtime_param::parameter_run("aimer.toml");
     });
     param_thread.detach();  // 分离线程，程序退出时自动结束
+
+    // 启动 recorder 参数热更新线程
+    std::thread recorder_param_thread([]() {
+        runtime_param::parameter_run("recorder.toml");
+    });
+    recorder_param_thread.detach();
 
     // 等待参数加载完成
     runtime_param::wait_for_param("ok");
@@ -90,6 +99,11 @@ int main() {
         autoaim::predictor::start_predictor_node();
     });
 
+    // 启动录制节点线程
+    std::thread recorder_thread([]() {
+        recorder::start_recorder_node();
+    });
+
     debug::print(debug::PrintMode::INFO, "Main", "All threads started");
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 系统启动完成，按 Ctrl+C 退出\n");
 
@@ -108,6 +122,9 @@ int main() {
     }
     if (predictor_thread.joinable()) {
         predictor_thread.join();
+    }
+    if (recorder_thread.joinable()) {
+        recorder_thread.join();
     }
 
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 程序正常退出\n");

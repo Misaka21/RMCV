@@ -64,7 +64,7 @@ add_subdirectory(aimer)
 add_subdirectory(simulator)
 
 add_executable(RMCV2026 main.cpp)
-target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor)
+target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor recorder)
 
 add_executable(test_param test/test_param.cpp)
 target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin)

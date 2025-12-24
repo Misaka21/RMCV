@@ -27,3 +27,6 @@ target_link_libraries(${lib_name} PUBLIC
         tomlplusplus::tomlplusplus
         fmt::fmt
 )
+
+# 添加 recorder 子模块
+add_subdirectory(recorder)

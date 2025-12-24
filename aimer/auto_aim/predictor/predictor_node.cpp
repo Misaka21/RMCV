@@ -206,6 +206,7 @@ void start_predictor_node() {
     // 设置 UMT
     umt::Subscriber<DetectionResult> sub("detections");
     umt::Publisher<BattlefieldSnapshot> pub("battlefield");
+    umt::Publisher<cv::Mat> vis_pub("predictor_vis");  // 可视化帧 (供录制)
     auto running = umt::BasicObjManager<bool>::find_or_create("predictor_running", true);
 
     stats::FpsStats stats("PredictorNode", "tracked");
@@ -269,6 +270,10 @@ void start_predictor_node() {
                 draw_prediction(vis, snapshot, table, detection.state.q_imu);
                 // 调用各模型的 draw 方法 (绘制 X 和 □)
                 predictor.draw(vis, detection.state.q_imu, timestamp);
+
+                // 发布可视化帧供录制
+                vis_pub.push(vis);
+
                 cv::imshow("Predictor", vis);
                 cv::waitKey(1);
             }
