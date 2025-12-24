@@ -1,77 +1,122 @@
 # 该文件支持热更新
-# 本参数表角度均为角度制，物理量为国际单位。
 # 本文件严格区分参数的数据类型，比如 10.0 不能改成 10
 
 [Transformer]
-# Camera → Gimbal 平移 (米, 在Gimbal坐标系下)
-# 坐标系约定: x前, y左, z上 (ROS惯例)
-camera_offset_x = 0.0   # 相机在云台前方距离
-camera_offset_y = 0.0   # 相机在云台左侧距离
-camera_offset_z = 0.0   # 相机在云台上方距离
+    # Camera → Gimbal 平移 (米, 在Gimbal坐标系下)
+    # 坐标系约定: x前, y左, z上 (ROS惯例)
+    #@double 相机在云台前方距离
+    camera_offset_x = 0.0
+    #@double 相机在云台左侧距离
+    camera_offset_y = 0.0
+    #@double 相机在云台上方距离
+    camera_offset_z = 0.0
 
-# Barrel → Gimbal 平移 (米, 在Gimbal坐标系下)
-barrel_offset_x = 0.0   # 枪口在云台前方距离
-barrel_offset_y = 0.0   # 枪口在云台左侧距离
-barrel_offset_z = -0.055  # 枪口在云台下方5.5cm (z负=下)
+    # Barrel → Gimbal 平移 (米, 在Gimbal坐标系下)
+    #@double 枪口在云台前方距离
+    barrel_offset_x = 0.0
+    #@double 枪口在云台左侧距离
+    barrel_offset_y = 0.0
+    #@double 枪口在云台下方距离 (z负=下)
+    barrel_offset_z = -0.055
 
 [AutoAim]
-
-# ============================================================================
-# Predictor 消抖/过滤参数
-# ============================================================================
 [AutoAim.Predictor]
+    # 面积过滤
+    #@double 已存在装甲板的最小面积比例
+    existing_armor_area_ratio = 0.30
+    #@double 新装甲板的最小面积比例
+    new_armor_area_ratio = 0.40
 
-# 面积过滤
-existing_armor_area_ratio = 0.30   # 已存在装甲板的最小面积比例
-new_armor_area_ratio = 0.40        # 新装甲板的最小面积比例
+    # 距离过滤
+    #@double 最小有效距离 (m)，过近可能是误识别
+    min_distance = 0.1
+    #@double 最大有效距离 (m)
+    max_distance = 15.0
+    #@double 新装甲板最大距离 (m)，防止远处误识别
+    new_armor_max_distance = 10.0
 
-# 距离过滤
-min_distance = 0.1                 # 最小有效距离 (m)，过近可能是误识别
-max_distance = 15.0                # 最大有效距离 (m)
-new_armor_max_distance = 10.0      # 新装甲板最大距离 (m)，防止远处误识别
+    # 跳变过滤
+    #@double 相邻帧最大位置跳变 (m)
+    jump_distance_limit = 1.2
+    #@double 判断"已存在装甲板"的距离阈值 (m)
+    existing_armor_distance = 0.5
 
-# 跳变过滤
-jump_distance_limit = 1.2          # 相邻帧最大位置跳变 (m)
-existing_armor_distance = 0.5      # 判断"已存在装甲板"的距离阈值 (m)
+    # 超时
+    #@double 丢失目标超时 (s)
+    lost_timeout = 0.5
+    #@double 装甲板滤波器信用时间 (s)
+    armor_credit_time = 0.1
 
-# 超时
-lost_timeout = 0.5                 # 丢失目标超时 (s)
-armor_credit_time = 0.1            # 装甲板滤波器信用时间 (s)
-
-# ============================================================================
-# EKF 滤波器噪声参数 (单装甲板)
-# ============================================================================
 [AutoAim.Predictor.EKF]
-# 过程噪声 (Q矩阵)
-q_pos = 0.01      # 位置过程噪声 (yaw/pitch/dis)
-q_vel = 0.1       # 速度过程噪声 (vyaw/vpitch/vdis)
+    # 过程噪声 Q (越大越信任观测，越小越信任预测)
+    #@double 位置过程噪声 (yaw/pitch/dis)
+    q_pos = 0.01
+    #@double 速度过程噪声 (vyaw/vpitch/vdis)
+    q_vel = 0.1
 
-# 观测噪声 (R矩阵)
-r_angle = 0.01    # 角度观测噪声 (yaw/pitch, rad)
-r_dis_1m = 0.01   # 1m处距离观测噪声 (m)，随距离增大
+    # 观测噪声 R (越大越不信任观测)
+    #@double 角度观测噪声 (yaw/pitch, rad²)
+    r_angle = 0.01
+    #@double 1m处距离观测噪声 (m²)，随距离增大
+    r_dis_1m = 0.01
 
-# 调试用
-draw_predict_dt = 0.50  # 绘图外推时间 (s)，用于可视化预测效果
+    # 调试用
+    #@double 绘图时的预测时间 (s)，用于可视化预测效果
+    draw_predict_dt = 0.50
 
-# ============================================================================
-# SpinEKF 整车旋转模型参数
-# ============================================================================
 [AutoAim.Predictor.SpinEKF]
-# 过程噪声 (Q矩阵对角元素)
-q_pos = 0.1       # 旋转中心位置噪声 (xc, yc, zc)
-q_vel = 1.0       # 旋转中心速度噪声 (vx, vy, vz)
-q_theta = 0.1     # 车体朝向角噪声
-q_omega = 10.0    # 角速度噪声 (rad/s)²，较大以适应陀螺加减速
-q_r = 0.01        # 半径噪声
+    # 过程噪声 Q (越大越信任观测，越小越信任预测)
+    #@double 旋转中心位置过程噪声 (xc, yc, zc)
+    q_pos = 0.1
+    #@double 旋转中心速度过程噪声 (vx, vy, vz)
+    q_vel = 1.0
+    #@double 车体朝向角θ过程噪声
+    q_theta = 0.1
+    #@double 角速度ω过程噪声，较大以适应陀螺加减速
+    q_omega = 10.0
+    #@double 陀螺半径r过程噪声
+    q_r = 0.01
 
-# 观测噪声 (R矩阵对角元素)
-r_angle = 0.01    # 角度观测噪声 (yaw/pitch)
-r_dis_k = 0.05    # 距离噪声系数，R_dis = r_dis_k * d²
-r_armor_yaw = 0.1 # 装甲板朝向观测噪声
+    # 观测噪声 R (越大越不信任观测)
+    #@double yaw/pitch角度观测噪声 (rad²)
+    r_angle = 0.01
+    #@double 距离观测噪声系数, R_dis = r_dis_k × distance²
+    r_dis_k = 0.05
+    #@double 装甲板朝向角观测噪声 (rad²)
+    r_armor_yaw = 0.1
 
-# 半径参数
-init_r = 0.26     # 初始半径 (m)
-r_min = 0.12      # 最小半径限制 (m)
-r_max = 0.4       # 最大半径限制 (m)
+    # 半径参数
+    #@double 初始半径 (m)
+    init_r = 0.26
+    #@double 最小半径限制 (m)
+    r_min = 0.12
+    #@double 最大半径限制 (m)
+    r_max = 0.4
 
+[AutoAim.Predictor.OutpostEKF]
+    # 过程噪声 Q (越大越信任观测，越小越信任预测)
+    #@double 旋转中心位置过程噪声
+    q_pos = 0.1
+    #@double 旋转中心速度过程噪声 (前哨站定点旋转，设很小仅用于修正初始误差)
+    q_vel = 0.01
+    #@double 相位θ过程噪声
+    q_theta = 0.05
+    #@double 角速度ω过程噪声 (方向确定后自动缩小100倍)
+    q_omega = 0.1
+
+    # 观测噪声 R (越大越不信任观测)
+    #@double yaw/pitch角度观测噪声 (rad²)
+    r_angle = 0.01
+    #@double 距离观测噪声系数, R_dis = r_dis_k × distance²
+    r_dis_k = 0.05
+    #@double 装甲板朝向角观测噪声 (rad²)
+    r_armor_yaw = 0.1
+
+    # 角速度约束 (规则值: |ω| = 0.8π ≈ 2.51 rad/s)
+    #@bool 锁定ω到规则值，false则让EKF自由估计
+    lock_omega = true
+    #@double 判断旋转方向的阈值，|ω|超过此值则确定顺/逆时针 (rad/s)
+    omega_direction_threshold = 1.88
+    #@double 方向确定后，允许|ω|偏离0.8π的范围，超出则强制修正 (rad/s)
+    omega_tolerance = 0.3
 

@@ -63,6 +63,22 @@ double get_omega_tolerance() {
     return get_double_param("AutoAim.Predictor.OutpostEKF.omega_tolerance", 0.3);
 }
 
+// 是否锁定角速度到规则值 (关闭则让 EKF 自己估计)
+bool get_lock_omega() {
+    auto ptr = runtime_param::find_param("AutoAim.Predictor.OutpostEKF.lock_omega");
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<bool>(&*ptr)) {
+            return *val;
+        }
+    }
+    return true;  // 默认开启
+}
+
+// 判断旋转方向的阈值
+double get_omega_direction_threshold() {
+    return get_double_param("AutoAim.Predictor.OutpostEKF.omega_direction_threshold", 0.6 * M_PI);
+}
+
 }  // namespace
 
 // ============================================================================
@@ -224,22 +240,16 @@ void OutpostMotion::constrain_omega() {
     VectorX x = ekf_.get_x();
     double omega = x[outpost::OMEGA];
 
+    // 阶段1: 判断方向 (只需一次)
     if (!omega_sign_determined_) {
-        // 还没确定方向，等 EKF 估计超过阈值
-        // 阈值设为 0.6π (75% of 0.8π)，更安全
-        constexpr double OMEGA_THRESHOLD = 0.6 * M_PI;
-        if (omega > OMEGA_THRESHOLD) {
-            x[outpost::OMEGA] = outpost::OMEGA_ABS;  // +0.8π 逆时针
+        double threshold = get_omega_direction_threshold();
+        if (std::abs(omega) > threshold) {
             omega_sign_determined_ = true;
-            ekf_.set_x(x);
-        } else if (omega < -OMEGA_THRESHOLD) {
-            x[outpost::OMEGA] = -outpost::OMEGA_ABS;  // -0.8π 顺时针
-            omega_sign_determined_ = true;
-            ekf_.set_x(x);
         }
-        // 未达阈值则不修改，让 EKF 继续估计
-    } else {
-        // 已确定方向，只约束绝对值
+    }
+
+    // 阶段2: 约束角速度 (如果开启锁定)
+    if (omega_sign_determined_ && get_lock_omega()) {
         double tolerance = get_omega_tolerance();
         if (std::abs(std::abs(omega) - outpost::OMEGA_ABS) > tolerance) {
             x[outpost::OMEGA] = std::copysign(outpost::OMEGA_ABS, omega);

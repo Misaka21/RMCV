@@ -1,57 +1,57 @@
+# 本文件严格区分参数的数据类型，比如 10.0 不能改成 10
+
 [Detector]
-    # 检测器类型: "detector_rv" 或 "yolo"
+    #@string 检测器类型: "traditional" 或 "yolo"
     type = "traditional"
 
-# ============================================================================
-# 传统装甲板检测器配置
-# ============================================================================
 [Detector.traditional]
-    # 是否开启调试模式
+    #@bool 是否开启调试模式
     debug = false
-    # 二值化阈值
+    #@int 二值化阈值
     binary_thres = 100
-    # 是否开启灯条角点最小二乘校正
+    #@bool 是否开启灯条角点最小二乘校正
     use_pca = true
 
 [Detector.traditional.classify]
-    # 数字分类阈值
+    #@double 数字分类阈值
     threshold = 0.8
-    # 分类模型类型: "lenet" (28x28) 或 "mlp" (20x28)
+    #@string 分类模型类型: "lenet" (28x28) 或 "mlp" (20x28)
     model_type = "lenet"
-    # 分类模型路径 (相对于asset目录)
+    #@string 分类模型路径 (相对于asset目录)
     model_path = "lenet.onnx"
+    #@string 标签文件路径
     label_path = "label.txt"
-    # 跳过的类别
+    #@array<string> 跳过的类别
     ignore_classes = ["negative"]
 
 [Detector.traditional.light]
-    # 灯条最小长宽比
+    #@double 灯条最小长宽比
     min_ratio = 0.01
-    # 灯条最大长宽比
+    #@double 灯条最大长宽比
     max_ratio = 0.4
-    # 灯条最大倾斜角度
+    #@double 灯条最大倾斜角度 (度)
     max_angle = 40.0
-    # 灯条颜色差异阈值
+    #@int 灯条颜色差异阈值
     color_diff_thresh = 25
 
 [Detector.traditional.armor]
-    # 装甲板灯条最小长宽比
+    #@double 装甲板灯条最小长宽比
     min_light_ratio = 0.6
-    # 小装甲板最小中心距离长宽比
+    #@double 小装甲板最小中心距离长宽比
     min_small_center_distance = 0.8
-    # 小装甲板最大中心距离长宽比
+    #@double 小装甲板最大中心距离长宽比
     max_small_center_distance = 3.2
-    # 大装甲板最小中心距离长宽比
+    #@double 大装甲板最小中心距离长宽比
     min_large_center_distance = 3.2
-    # 大装甲板最大中心距离长宽比
+    #@double 大装甲板最大中心距离长宽比
     max_large_center_distance = 5.0
-    # 装甲板最大倾斜角度
+    #@double 装甲板最大倾斜角度 (度)
     max_angle = 35.0
 
-# ============================================================================
-# YOLO检测器配置 (预留)
-# ============================================================================
 [Detector.yolo]
+    #@string YOLO检测模型路径
     detect_model = ""
+    #@string YOLO分类模型路径
     classify_model = ""
+    #@double 最小置信度
     min_confidence = 0.5

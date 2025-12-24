@@ -1,17 +1,21 @@
-# ============================================================================
-# Recorder 录制模块配置
-# ============================================================================
+# 本文件严格区分参数的数据类型，比如 10.0 不能改成 10
 
 [Recorder]
-# 主开关
-enable_recording = false
+    #@bool 主开关
+    enable_recording = false
 
-# 录制内容选择
-record_raw_video = true       # 录制原始视频
-record_debug_video = false     # 录制调试视频
-record_imu_csv = true         # 录制IMU数据
+    # 录制内容选择
+    #@bool 录制原始视频
+    record_raw_video = true
+    #@bool 录制调试视频
+    record_debug_video = false
+    #@bool 录制IMU数据
+    record_imu_csv = true
 
-# 视频参数
-video_codec = "MJPG"          # 编码格式
-camera_fps = 200.0            # 相机帧率
-sample_interval = 4           # 采样间隔，录制帧率 = camera_fps / sample_interval
+    # 视频参数
+    #@string 编码格式
+    video_codec = "MJPG"
+    #@double 相机帧率
+    camera_fps = 200.0
+    #@int 采样间隔，录制帧率 = camera_fps / sample_interval
+    sample_interval = 4

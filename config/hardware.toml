@@ -1,4 +1,5 @@
 # 本文件严格区分参数的数据类型，比如 10.0 不能改成 10
+
 [Camera]
     #@bool 是否通过sn码查找相机,false则查找第0个
     use_camera_sn = true
@@ -11,53 +12,65 @@
     #@bool 是否从camera.config中设置参数,会覆盖上文中file中的参数
     use_camera_config = true
 
-#键可以填写MVS中的键,请严格遵守类型要求
-#枚举类型请使用字符串,参考MV_CC_SetEnumValueByString,
-#但无法检查是否设置成功,只能看有无对应的HIKCAM_WARN
+# 键可以填写MVS中的键,请严格遵守类型要求
+# 枚举类型请使用字符串,参考MV_CC_SetEnumValueByString
 [Camera.config]
-    #@float
+    #@float 曝光时间 (us)
     ExposureTime = 2500.0
-    #@float
+    #@float 增益
     Gain = 16.9
+    #@bool 水平翻转
     ReverseX = false
+    #@bool 垂直翻转
     ReverseY = false
+    #@int 图像宽度
     Width = 1440
+    #@string ADC位深
     ADCBitDepth = "Bits_8"
+    #@bool 启用Gamma校正
     GammaEnable = false
+    #@float 采集帧率
     AcquisitionFrameRate = 200.0
+    #@bool 启用帧率限制
     AcquisitionFrameRateEnable = true
 
 [Serial]
+    #@string 串口设备路径
     port_name = "/dev/ttyUSB0"
+    #@int 波特率
     baudrate = 115200
+    #@bool 打印调试信息
     data_print_debug = false
+    #@bool 忽略CRC校验
     ignore_crc = false
-    # 不接串口时使用虚拟数据
+    #@bool 不接串口时使用虚拟数据
     use_fake_serial_data = false
-    # IMU符号修正: 如果云台抬头时pitch变小，需要设为true
+    #@bool IMU符号修正: 如果云台抬头时pitch变小，需要设为true
     imu_pitch_negate = false
-    # IMU符号修正: 如果云台右倾时roll变小，需要设为true
+    #@bool IMU符号修正: 如果云台右倾时roll变小，需要设为true
     imu_roll_negate = true
 
-# fake serial 虚拟数据配置
 [Serial.fake_data]
-    # IMU姿态
+    # 虚拟串口数据配置
+    #@double IMU yaw角度 (度)
     yaw_deg = 0.0
+    #@double IMU pitch角度 (度)
     pitch_deg = 0.0
+    #@double IMU roll角度 (度)
     roll_deg = 0.0
-    # 机器人状态
-    robot_id = 3           # 1-7红方, 101-107蓝方
-    enemy_color = 1        # 0=未知, 1=红, 2=蓝
-    # 射击参数
-    bullet_speed = 15.0    # m/s
-    # 模式控制
-    aim_mode = 1           # 0=关闭, 1=自瞄, 2=小符, 3=大符
+    #@int 机器人ID: 1-7红方, 101-107蓝方
+    robot_id = 3
+    #@int 敌方颜色: 0=未知, 1=红, 2=蓝
+    enemy_color = 1
+    #@double 弹速 (m/s)
+    bullet_speed = 15.0
+    #@int 自瞄模式: 0=关闭, 1=自瞄, 2=小符, 3=大符
+    aim_mode = 1
+    #@bool 是否允许射击
     allow_fire = true
 
 [TimeSync]
-    # 相机-IMU时间偏移 (微秒)
+    #@int 相机-IMU时间偏移 (微秒)
     # 正值: 图像比IMU数据晚到达，匹配过去的IMU
     # 负值: 图像比IMU数据早到达，匹配未来的IMU
-    # 例: delta_t_us = 5000 表示图像实际对应5ms前的IMU姿态
     delta_t_us = -3400
-
