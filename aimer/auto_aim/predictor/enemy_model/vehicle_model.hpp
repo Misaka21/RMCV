@@ -38,6 +38,17 @@ public:
     int target_id() const override { return target_id_; }
     const char* type_name() const override { return "Vehicle"; }
 
+    /**
+     * @brief 绘制调试信息
+     *
+     * 绘制内容:
+     * - 检测到的装甲板四角点 (绿色)
+     * - ArmorModel 滤波位置 (蓝色圆圈)
+     * - SpinModel 预测的所有装甲板 (黄色, 陀螺模式)
+     * - 旋转中心 (红色十字, 陀螺模式)
+     */
+    void draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const override;
+
 private:
     // ==================== 消抖过滤 ====================
 
@@ -72,6 +83,9 @@ private:
 
     // 陀螺状态
     SpinState spin_;
+
+    // 敌方颜色 (用于绘图)
+    EnemyColor enemy_color_ = EnemyColor::WHITE;
 };
 
 }  // namespace autoaim::predictor

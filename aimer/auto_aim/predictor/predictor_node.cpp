@@ -267,6 +267,8 @@ void start_predictor_node() {
             if (!detection.img.empty()) {
                 cv::Mat vis = detection.img.clone();
                 draw_prediction(vis, snapshot, table, detection.state.q_imu);
+                // 调用各模型的 draw 方法 (绘制 X 和 □)
+                predictor.draw(vis, detection.state.q_imu, timestamp);
                 cv::imshow("Predictor", vis);
                 cv::waitKey(1);
             }

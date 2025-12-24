@@ -11,8 +11,10 @@
 #include <cmath>
 
 #include <fmt/color.h>
+#include <opencv2/imgproc.hpp>
 
 #include "aimer/common/math/math.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
@@ -64,6 +66,10 @@ double get_lost_timeout() {
 
 double get_armor_credit_time() {
     return get_double_param("AutoAim.Predictor.armor_credit_time", DEFAULT_ARMOR_CREDIT_TIME);
+}
+
+double get_draw_predict_dt() {
+    return get_double_param("AutoAim.Predictor.EKF.draw_predict_dt", 0.020);
 }
 
 }  // namespace
@@ -126,6 +132,11 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     spin_.phase = spin_model_.get_theta();
     spin_.radius = spin_model_.get_radius();
     spin_.update_level(spin_.omega);
+
+    // 6. 更新敌方颜色 (用于绘图)
+    if (!filtered.empty()) {
+        enemy_color_ = filtered[0].color;
+    }
 
     prev_armors_ = filtered;
     prev_timestamp_ = timestamp;
@@ -312,6 +323,153 @@ void VehicleModel::reset() {
     prev_armors_.clear();
     spin_.reset();
     frame_count_ = 0;
+}
+
+// ============================================================================
+// 绘图
+// ============================================================================
+
+namespace {
+
+// 绘制装甲板矩形框 (口字形)
+void draw_armor_rect(cv::Mat& img, const Eigen::Vector3d& center, double yaw,
+                     ArmorType type, const Eigen::Quaterniond& q_imu,
+                     const cv::Scalar& color, int thickness = 2) {
+    // 装甲板尺寸
+    double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
+    double h = 0.050;
+
+    // 计算四个角点 (装甲板坐标系: 中心在 center, 法向朝 yaw 方向)
+    // 角点相对于中心的偏移 (在装甲板平面内)
+    double cos_yaw = std::cos(yaw);
+    double sin_yaw = std::sin(yaw);
+
+    // 左右方向 (垂直于法向)
+    Eigen::Vector3d right(-sin_yaw * w / 2, cos_yaw * w / 2, 0);
+    Eigen::Vector3d up(0, 0, h / 2);
+
+    // 四个角点: 左下、左上、右上、右下
+    std::array<Eigen::Vector3d, 4> corners = {
+        center - right - up,  // 左下
+        center - right + up,  // 左上
+        center + right + up,  // 右上
+        center + right - up   // 右下
+    };
+
+    // 投影到图像
+    std::array<cv::Point2f, 4> pts;
+    bool all_valid = true;
+    for (int i = 0; i < 4; ++i) {
+        bool valid = false;
+        pts[i] = tf::world_to_pixel(corners[i], q_imu, valid);
+        if (!valid) all_valid = false;
+    }
+
+    if (!all_valid) return;
+
+    // 画矩形 (口字形)
+    for (int i = 0; i < 4; ++i) {
+        cv::line(img, pts[i], pts[(i + 1) % 4], color, thickness);
+    }
+}
+
+}  // namespace
+
+void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
+    if (!initialized_) return;
+
+    // 颜色定义
+    const cv::Scalar COLOR_DETECTED(0, 255, 0);    // 绿色: 检测到的
+    const cv::Scalar COLOR_FILTERED(255, 200, 0);  // 蓝色: 滤波后的
+    const cv::Scalar COLOR_CENTER(0, 0, 255);      // 红色: 旋转中心
+
+    // SpinModel 预测颜色: 未使用灰色，使用时用我方颜色
+    cv::Scalar COLOR_SPIN;
+    bool spin_active = spin_model_.get_spin_level() >= SpinLevel::LOW && spin_model_.valid();
+    if (!spin_active) {
+        COLOR_SPIN = cv::Scalar(128, 128, 128);  // 灰色: SpinModel 未使用
+    } else {
+        // 我方颜色 (与敌方相反)
+        if (enemy_color_ == EnemyColor::RED) {
+            COLOR_SPIN = cv::Scalar(255, 0, 0);  // 蓝色 (BGR)
+        } else if (enemy_color_ == EnemyColor::BLUE) {
+            COLOR_SPIN = cv::Scalar(0, 0, 255);  // 红色 (BGR)
+        } else {
+            COLOR_SPIN = cv::Scalar(0, 255, 255);  // 黄色: 未知颜色
+        }
+    }
+
+    // 1. 绘制检测到的装甲板 (X 形状: 对角线连接)
+    for (const auto& obs : prev_armors_) {
+        if (obs.pts.size() >= 4) {
+            // X 形状: 连接对角线
+            cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左下-右上
+            cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左上-右下
+            // 标注 target_id
+            cv::putText(img, std::to_string(target_id_),
+                        obs.center_2d + cv::Point2f(10, -10),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_DETECTED, 2);
+        }
+    }
+
+    // 2. 绘制 ArmorModel 滤波后的位置 (口字形)
+    double draw_dt = get_draw_predict_dt();
+    auto armor_states = armor_model_.get_armor_states(timestamp);  // 用原始时间获取
+    for (auto& as : armor_states) {
+        // 手动外推位置
+        Eigen::Vector3d predicted_pos = as.position + as.velocity * draw_dt;
+        draw_armor_rect(img, predicted_pos, as.yaw, as.type, q_imu, COLOR_FILTERED, 2);
+        // 标注 armor_id
+        bool valid = false;
+        cv::Point2f pt = tf::world_to_pixel(predicted_pos, q_imu, valid);
+        if (valid) {
+            cv::putText(img, "A" + std::to_string(as.id),
+                        pt + cv::Point2f(15, 5),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_FILTERED, 1);
+        }
+    }
+
+    // 3. 绘制 SpinModel 预测 (口字形)
+    // 即使未激活也绘制，方便调试
+    if (spin_model_.valid()) {
+        double dt = timestamp - last_update_time_;
+        int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
+        double theta = spin_model_.get_theta() + spin_model_.get_omega() * dt;
+
+        // 绘制所有装甲板预测位置
+        for (int i = 0; i < armor_num; ++i) {
+            Eigen::Vector3d pos = spin_model_.predict_armor_pos(i, dt);
+            double armor_yaw = theta + i * (2.0 * M_PI / armor_num);
+
+            // 当前追踪的装甲板用粗线
+            int thickness = (i == 0) ? 3 : 1;
+            draw_armor_rect(img, pos, armor_yaw, ArmorType::SMALL, q_imu, COLOR_SPIN, thickness);
+
+            // 标注序号
+            bool valid = false;
+            cv::Point2f pt = tf::world_to_pixel(pos, q_imu, valid);
+            if (valid) {
+                cv::putText(img, std::to_string(i), pt + cv::Point2f(-5, 5),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_SPIN, 1);
+            }
+        }
+
+        // 绘制旋转中心
+        Eigen::Vector3d center = spin_model_.predict_center(dt);
+        bool valid = false;
+        cv::Point2f pt = tf::world_to_pixel(center, q_imu, valid);
+        if (valid) {
+            // 十字标记
+            int s = 15;
+            cv::line(img, pt - cv::Point2f(s, 0), pt + cv::Point2f(s, 0), COLOR_CENTER, 2);
+            cv::line(img, pt - cv::Point2f(0, s), pt + cv::Point2f(0, s), COLOR_CENTER, 2);
+            // 标注角速度和状态
+            std::string state_str = spin_active ? "ON" : "OFF";
+            cv::putText(img, fmt::format("w={:.1f} {}", spin_model_.get_omega(), state_str),
+                        pt + cv::Point2f(20, 0),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_CENTER, 1);
+        }
+    }
 }
 
 }  // namespace autoaim::predictor

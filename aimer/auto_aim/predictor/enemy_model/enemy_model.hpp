@@ -21,6 +21,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <Eigen/Geometry>
+#include <opencv2/core.hpp>
+
 #include "aimer/auto_aim/predictor/types.hpp"
 
 namespace autoaim::predictor {
@@ -65,6 +68,22 @@ public:
      * @brief 获取模型类型名
      */
     virtual const char* type_name() const = 0;
+
+    /**
+     * @brief 绘制调试信息
+     * @param img 输出图像
+     * @param q_imu IMU四元数 (用于世界坐标投影到图像)
+     * @param timestamp 当前时间戳
+     *
+     * 绘制内容:
+     * - 检测到的装甲板 (绿色)
+     * - 滤波/预测的装甲板 (蓝色)
+     * - 旋转中心 (陀螺模式, 红色)
+     */
+    virtual void draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
+        // 默认空实现
+        (void)img; (void)q_imu; (void)timestamp;
+    }
 };
 
 // ============================================================================

@@ -97,4 +97,12 @@ BattlefieldSnapshot EnemyPredictor::export_snapshot() {
     return snapshot;
 }
 
+void EnemyPredictor::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
+    for (int i = 1; i < MAX_TARGETS; ++i) {
+        if (enemy_models_[i] && enemy_models_[i]->alive()) {
+            enemy_models_[i]->draw(img, q_imu, timestamp);
+        }
+    }
+}
+
 }  // namespace autoaim::predictor

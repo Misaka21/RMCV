@@ -96,6 +96,7 @@ struct ArmorObservation {
     int armor_num = 4;      // 该目标装甲板总数 (3 或 4)
     // 注意: 装甲板 ID (0-3) 由 ArmorIdentifier 分配，不在此处
     ArmorType type = ArmorType::SMALL;
+    EnemyColor color = EnemyColor::WHITE;  // 敌方颜色
 
     // 时间和角度
     double timestamp = 0;   // 时间戳 (s)
@@ -128,6 +129,7 @@ struct ArmorObservation {
         obs.pos = position;
         obs.target_id = static_cast<int>(det.number);
         obs.type = det.type;
+        obs.color = det.color;
         obs.z_to_v = z_to_v_value;
         obs.timestamp = timestamp;
         obs.pts = det.landmarks;

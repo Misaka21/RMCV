@@ -18,6 +18,7 @@
 #include <array>
 #include <memory>
 
+#include <Eigen/Geometry>
 #include <opencv2/core.hpp>
 
 #include "aimer/common/types.hpp"
@@ -50,6 +51,14 @@ public:
 
     // 调试用
     const ArmorObservationTable& get_observation_table() const { return observer_.table(); }
+
+    /**
+     * @brief 绘制所有模型的调试信息
+     * @param img 输出图像
+     * @param q_imu IMU 四元数
+     * @param timestamp 当前时间戳
+     */
+    void draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const;
 
 private:
     /**

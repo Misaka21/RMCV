@@ -149,6 +149,10 @@ ArmorState FilterThread::get_armor_state(double timestamp) const {
     as.visible = true;
     as.last_seen = last_update_time_;
 
+    // 装甲板朝向: 用预测的方位角 + π (面向相机时法向与视线相反)
+    math::YpdCoord ypd = predict_ypd(timestamp);
+    as.yaw = ypd.yaw + M_PI;
+
     // 评分: z_to_v 越小越好
     as.score = std::max(0.0, 1.0 - std::abs(armor_.z_to_v()));
 
