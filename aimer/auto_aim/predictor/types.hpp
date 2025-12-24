@@ -331,9 +331,6 @@ struct BattlefieldSnapshot {
         return id >= 0 && id < MAX_TARGETS && (detected_mask & (1 << id)) != 0;
     }
 
-    const VehicleState& get(int id) const { return vehicles[id]; }
-    VehicleState& get(int id) { return vehicles[id]; }
-
     const VehicleState* get_primary() const {
         if (primary_target_id >= 0 && is_valid(primary_target_id)) {
             return &vehicles[primary_target_id];
