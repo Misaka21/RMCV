@@ -5,7 +5,7 @@
  * 前哨站特点 (2025规则):
  * - 3块装甲板，相隔120度
  * - 匀速旋转，|ω| = 0.8π rad/s (方向随机)
- * - 固定半径 r = 0.553m
+ * - 固定半径 r = 0.2765m (直径 0.553m)
  * - 三块装甲板高度不同 (低/中/高，相隔10cm)
  *
  * 状态向量 (7维):
@@ -42,8 +42,11 @@ namespace outpost {
 
 // 规则参数
 constexpr double OMEGA_ABS = 0.8 * M_PI;  // 角速度绝对值 (rad/s)
-constexpr double RADIUS = 0.553;           // 旋转半径 (m)
+constexpr double RADIUS = 0.2765;          // 旋转半径 (m), 直径 0.553m
 constexpr double DZ_STEP = 0.10;           // 高度差间隔 (m)
+
+// 顶部装甲板过滤 (pitch 阈值)
+constexpr double TOP_ARMOR_PITCH_THRESHOLD = 45.0 * M_PI / 180.0;  // 45°
 
 // 状态维度
 constexpr int N_X = 7;

@@ -120,3 +120,7 @@
     #@double 方向确定后，允许|ω|偏离0.8π的范围，超出则强制修正 (rad/s)
     omega_tolerance = 0.3
 
+    # 速度约束 (前哨站定点旋转)
+    #@bool 强制速度清零，每次更新后将vx,vy设为0
+    force_zero_velocity = true
+

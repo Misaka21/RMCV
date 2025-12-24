@@ -79,6 +79,17 @@ double get_omega_direction_threshold() {
     return get_double_param("AutoAim.Predictor.OutpostEKF.omega_direction_threshold", 0.6 * M_PI);
 }
 
+// 是否强制速度清零 (前哨站定点旋转)
+bool get_force_zero_velocity() {
+    auto ptr = runtime_param::find_param("AutoAim.Predictor.OutpostEKF.force_zero_velocity");
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<bool>(&*ptr)) {
+            return *val;
+        }
+    }
+    return true;  // 默认开启
+}
+
 }  // namespace
 
 // ============================================================================
@@ -177,6 +188,13 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
     slot_dz_[current_slot_] = new_dz;
     slot_known_[current_slot_] = true;
     current_dz_ = new_dz;
+
+    // 强制速度清零 (前哨站定点旋转)
+    if (get_force_zero_velocity()) {
+        x[outpost::VX] = 0;
+        x[outpost::VY] = 0;
+        ekf_.set_x(x);
+    }
 
     last_update_time_ = timestamp;
 }
