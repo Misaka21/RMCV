@@ -218,6 +218,69 @@ T reduce_max(T x, Ts... xs) {
     return reduce([](auto a, auto b) { return std::max(a, b); }, x, xs...);
 }
 
+// ============================================================================
+// 7. 三分搜索 (黄金分割法)
+// ============================================================================
+
+/**
+ * @brief 三分搜索器 (黄金分割法)
+ *
+ * 用于在单峰函数上寻找最小值点
+ * 适用于: 三分求 yaw, 重投影代价最小化等
+ */
+class Trisection {
+public:
+    /**
+     * @brief 在 [left, right] 区间内寻找使 cost_function 最小的点
+     * @tparam ValueT 数值类型 (通常是 double)
+     * @tparam Func 代价函数类型，签名: ValueT(ValueT)
+     * @param left 搜索区间左端点
+     * @param right 搜索区间右端点
+     * @param cost_function 代价函数
+     * @param iterations 迭代次数 (12次约0.5度精度)
+     * @return {最优值, 区间宽度}
+     */
+    template<typename ValueT, class Func>
+    std::pair<ValueT, ValueT> find(
+        ValueT left,
+        ValueT right,
+        Func&& cost_function,
+        int iterations = 12
+    ) {
+        // 黄金分割比
+        constexpr ValueT phi = 0.6180339887498949;  // (sqrt(5) - 1) / 2
+
+        ValueT ml_cost = 0, mr_cost = 0;
+        int reserved = -1;  // 缓存哪个点的代价 (0=ml, 1=mr)
+
+        for (int i = 0; i < iterations; ++i) {
+            ValueT ml = left + (right - left) * (1.0 - phi);
+            ValueT mr = left + (right - left) * phi;
+
+            // 只计算未缓存的点
+            if (reserved != 0) {
+                ml_cost = cost_function(ml);
+            }
+            if (reserved != 1) {
+                mr_cost = cost_function(mr);
+            }
+
+            // 保留代价更小的一侧
+            if (ml_cost < mr_cost) {
+                right = mr;
+                mr_cost = ml_cost;
+                reserved = 1;
+            } else {
+                left = ml;
+                ml_cost = mr_cost;
+                reserved = 0;
+            }
+        }
+
+        return {(left + right) / ValueT(2), right - left};
+    }
+};
+
 } // namespace math
 
 #endif //RMCV_MATH_HPP
