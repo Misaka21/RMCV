@@ -175,8 +175,10 @@ void start_playback_node(const std::string& bag_path, double playback_speed) {
         sync_frame.timestamp = SteadyClock::now();
 
         // 填充 IMU 数据 (如果有)
-        if (csv_reader && csv_index < csv_reader->size()) {
-            const auto& imu = csv_reader->get(csv_index);
+        if (csv_reader && csv_reader->size() > 0) {
+            // 使用当前索引或最后一条记录
+            size_t idx = std::min(csv_index, csv_reader->size() - 1);
+            const auto& imu = csv_reader->get(idx);
             sync_frame.serial_data.yaw = imu.yaw;
             sync_frame.serial_data.pitch = imu.pitch;
             sync_frame.serial_data.roll = imu.roll;
@@ -187,7 +189,9 @@ void start_playback_node(const std::string& bag_path, double playback_speed) {
             sync_frame.serial_data.allow_fire = imu.allow_fire;
             sync_frame.serial_data.timestamp = imu.serial_timestamp;
             sync_frame.serial_valid = true;
-            csv_index++;
+            if (csv_index < csv_reader->size()) {
+                csv_index++;
+            }
         } else {
             sync_frame.serial_valid = false;
         }

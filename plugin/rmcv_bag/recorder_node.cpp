@@ -275,10 +275,13 @@ void start_recorder_node() {
             // 开始计时
             auto write_start = SteadyClock::now();
 
+            // 判断 sync_frame 是否完整 (image + serial 都有效)
+            bool sync_valid = has_sync && !sync_frame.image.empty() && sync_frame.serial_valid;
+
             // ========== 写入原始视频 ==========
-            if (has_sync && raw_writer) {
+            if (sync_valid && raw_writer) {
                 // 延迟初始化 (首帧时获取尺寸)
-                if (!raw_writer->is_opened() && !sync_frame.image.empty()) {
+                if (!raw_writer->is_opened()) {
                     cv::Size frame_size = sync_frame.image.size();
                     std::string filepath = session_path + "/raw.mkv";
                     raw_writer->open(filepath,
@@ -289,7 +292,7 @@ void start_recorder_node() {
                         config.get_record_fps(), config.video_codec);
                 }
 
-                if (raw_writer->is_opened() && !sync_frame.image.empty()) {
+                if (raw_writer->is_opened()) {
                     raw_writer->write(sync_frame.image);
                     frame_count++;
                 }
@@ -314,8 +317,8 @@ void start_recorder_node() {
                 }
             }
 
-            // ========== 写入 IMU CSV (与视频同步) ==========
-            if (has_sync && imu_writer && sync_frame.serial_valid) {
+            // ========== 写入 IMU CSV ==========
+            if (sync_valid && imu_writer) {
                 const auto& s = sync_frame.serial_data;
                 imu_writer->write_row({
                     std::to_string(timestamp_ms),
