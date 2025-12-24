@@ -261,7 +261,7 @@ void start_predictor_node() {
             for (int i = 1; i < MAX_TARGETS; ++i) {
                 if (snapshot.is_valid(i)) tracked++;
             }
-            stats.tick(latency, tracked > 0);
+            stats.update(latency, tracked > 0);  // tick + print_if_needed
 
             // 可视化 (如果有图像)
             if (!detection.img.empty()) {
