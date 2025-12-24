@@ -16,7 +16,6 @@
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/static_config.hpp"
-#include "plugin/param/runtime_parameter.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "umt/umt.hpp"
 

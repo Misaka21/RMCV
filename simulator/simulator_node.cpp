@@ -290,7 +290,8 @@ void start_simulator_node() {
         hardware::SyncFrame frame;
         frame.image = std::move(image);
         frame.frame_id = frame_id++;
-        frame.timestamp = std::chrono::steady_clock::now();
+        frame.timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
 
         // 四元数转欧拉角 (ZYX顺序)
         Eigen::Vector3d euler = q_gimbal.toRotationMatrix().eulerAngles(2, 1, 0);
