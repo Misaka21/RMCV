@@ -1,9 +1,9 @@
 /**
- * @file armor_model.cpp
+ * @file armor_motion.cpp
  * @brief 装甲板运动模型实现 - YPD坐标系 EKF
  */
 
-#include "armor_model.hpp"
+#include "armor_motion.hpp"
 
 #include <cmath>
 
@@ -160,12 +160,12 @@ ArmorState FilterThread::get_armor_state(double timestamp) const {
 }
 
 // ============================================================================
-// ArmorModel
+// ArmorMotion
 // ============================================================================
 
-ArmorModel::ArmorModel(double credit_time) : credit_time_(credit_time) {}
+ArmorMotion::ArmorMotion(double credit_time) : credit_time_(credit_time) {}
 
-void ArmorModel::update(const std::vector<ArmorData>& armors, double timestamp) {
+void ArmorMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     // 更新或创建滤波器
     for (const auto& armor : armors) {
         auto it = filters_.find(armor.id);
@@ -186,7 +186,7 @@ void ArmorModel::update(const std::vector<ArmorData>& armors, double timestamp) 
     }
 }
 
-std::vector<ArmorState> ArmorModel::get_armor_states(double timestamp) const {
+std::vector<ArmorState> ArmorMotion::get_armor_states(double timestamp) const {
     std::vector<ArmorState> result;
     for (const auto& [id, filter] : filters_) {
         if (filter.credit(timestamp)) {
@@ -196,7 +196,7 @@ std::vector<ArmorState> ArmorModel::get_armor_states(double timestamp) const {
     return result;
 }
 
-const FilterThread* ArmorModel::get_best(double timestamp) const {
+const FilterThread* ArmorMotion::get_best(double timestamp) const {
     const FilterThread* best = nullptr;
     double best_z_to_v = 1e9;
 
@@ -213,7 +213,7 @@ const FilterThread* ArmorModel::get_best(double timestamp) const {
     return best;
 }
 
-void ArmorModel::reset() {
+void ArmorMotion::reset() {
     filters_.clear();
 }
 

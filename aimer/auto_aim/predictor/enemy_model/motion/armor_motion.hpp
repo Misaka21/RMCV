@@ -1,8 +1,8 @@
 /**
- * @file armor_model.hpp
+ * @file armor_motion.hpp
  * @brief 装甲板运动模型 - YPD坐标系 EKF 滤波
  *
- * 参考: rm.cv.fans 的 ArmorModel
+ * 参考: rm.cv.fans 的 ArmorMotion
  *
  * 改进:
  * - 使用YPD坐标系滤波 (更适合旋转目标)
@@ -20,8 +20,8 @@
  * - 整车建模 (由 VehicleEkf 完成)
  */
 
-#ifndef __AIMER_AUTO_AIM_PREDICTOR_MOTION_ARMOR_MODEL_HPP__
-#define __AIMER_AUTO_AIM_PREDICTOR_MOTION_ARMOR_MODEL_HPP__
+#ifndef __AIMER_AUTO_AIM_PREDICTOR_MOTION_ARMOR_MOTION_HPP__
+#define __AIMER_AUTO_AIM_PREDICTOR_MOTION_ARMOR_MOTION_HPP__
 
 #include <map>
 #include <vector>
@@ -156,7 +156,7 @@ private:
 };
 
 // ============================================================================
-// ArmorModel - 装甲板运动模型
+// ArmorMotion - 装甲板运动模型
 // ============================================================================
 
 /**
@@ -167,13 +167,13 @@ private:
  * - 超时清理
  * - 输出滤波后的装甲板状态
  */
-class ArmorModel {
+class ArmorMotion {
 public:
     /**
      * @brief 构造
      * @param credit_time 滤波器超时时间 (s)
      */
-    explicit ArmorModel(double credit_time = 0.1);
+    explicit ArmorMotion(double credit_time = 0.1);
 
     /**
      * @brief 更新所有滤波器
@@ -210,4 +210,4 @@ private:
 
 }  // namespace autoaim::predictor
 
-#endif  // __AIMER_AUTO_AIM_PREDICTOR_MOTION_ARMOR_MODEL_HPP__
+#endif  // __AIMER_AUTO_AIM_PREDICTOR_MOTION_ARMOR_MOTION_HPP__

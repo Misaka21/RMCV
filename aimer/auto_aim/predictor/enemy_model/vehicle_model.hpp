@@ -7,7 +7,7 @@
  * 职责:
  * - 观测消抖
  * - 装甲板 ID 分配 (ArmorIdentifier)
- * - 匀速 EKF 滤波 (ArmorModel)
+ * - 匀速 EKF 滤波 (ArmorMotion)
  * - (TODO) 整车 EKF 滤波 (VehicleEkf)
  */
 
@@ -16,8 +16,8 @@
 
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "enemy_model.hpp"
-#include "motion/armor_model.hpp"
-#include "motion/spin_model.hpp"
+#include "motion/armor_motion.hpp"
+#include "motion/spin_motion.hpp"
 
 namespace autoaim::predictor {
 
@@ -25,7 +25,7 @@ namespace autoaim::predictor {
  * @brief 车辆运动模型
  *
  * 数据流:
- *   observations → filter() → ArmorIdentifier → ArmorModel → VehicleState
+ *   observations → filter() → ArmorIdentifier → ArmorMotion → VehicleState
  */
 class VehicleModel : public EnemyModelInterface {
 public:
@@ -43,8 +43,8 @@ public:
      *
      * 绘制内容:
      * - 检测到的装甲板四角点 (绿色)
-     * - ArmorModel 滤波位置 (蓝色圆圈)
-     * - SpinModel 预测的所有装甲板 (黄色, 陀螺模式)
+     * - ArmorMotion 滤波位置 (蓝色圆圈)
+     * - SpinMotion 预测的所有装甲板 (黄色, 陀螺模式)
      * - 旋转中心 (红色十字, 陀螺模式)
      */
     void draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const override;
@@ -72,10 +72,10 @@ private:
     ArmorIdentifier identifier_;
 
     // 装甲板运动模型 (职责: 匀速 EKF 滤波)
-    ArmorModel armor_model_;
+    ArmorMotion armor_motion_;
 
     // 整车旋转模型 (职责: 陀螺 EKF 滤波)
-    SpinModel spin_model_;
+    SpinMotion spin_motion_;
 
     // 上一帧观测 (用于消抖)
     std::vector<ArmorObservation> prev_armors_;

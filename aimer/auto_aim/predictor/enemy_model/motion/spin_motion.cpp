@@ -1,9 +1,9 @@
 /**
- * @file spin_model.cpp
+ * @file spin_motion.cpp
  * @brief 整车旋转模型实现
  */
 
-#include "spin_model.hpp"
+#include "spin_motion.hpp"
 
 #include <cmath>
 
@@ -80,14 +80,14 @@ double get_r_max() {
 }  // namespace
 
 // ============================================================================
-// SpinModel 实现
+// SpinMotion 实现
 // ============================================================================
 
-SpinModel::SpinModel(int armor_num) : armor_num_(armor_num) {
+SpinMotion::SpinMotion(int armor_num) : armor_num_(armor_num) {
     another_r_ = get_init_r();
 }
 
-void SpinModel::init(const ArmorData& armor, double timestamp) {
+void SpinMotion::init(const ArmorData& armor, double timestamp) {
     const auto& obs = armor.observation;
 
     // 从观测提取
@@ -129,7 +129,7 @@ void SpinModel::init(const ArmorData& armor, double timestamp) {
     initialized_ = true;
 }
 
-void SpinModel::update(const ArmorData& armor, double timestamp) {
+void SpinMotion::update(const ArmorData& armor, double timestamp) {
     if (!initialized_) {
         init(armor, timestamp);
         return;
@@ -192,7 +192,7 @@ void SpinModel::update(const ArmorData& armor, double timestamp) {
     last_update_time_ = timestamp;
 }
 
-bool SpinModel::handle_armor_jump(const ArmorData& armor) {
+bool SpinMotion::handle_armor_jump(const ArmorData& armor) {
     const auto& obs = armor.observation;
     double armor_yaw = obs.z[obs::ARMOR_YAW];
     VectorX x = ekf_.get_x();
@@ -249,7 +249,7 @@ bool SpinModel::handle_armor_jump(const ArmorData& armor) {
     return false;
 }
 
-void SpinModel::update_spin_level() {
+void SpinMotion::update_spin_level() {
     double omega = std::abs(get_omega());
 
     // 迟滞阈值
@@ -280,7 +280,7 @@ void SpinModel::update_spin_level() {
     }
 }
 
-SpinModel::MatrixXX SpinModel::build_Q(double dt) const {
+SpinMotion::MatrixXX SpinMotion::build_Q(double dt) const {
     MatrixXX Q = MatrixXX::Zero();
 
     double q_pos = get_q_pos();
@@ -307,7 +307,7 @@ SpinModel::MatrixXX SpinModel::build_Q(double dt) const {
     return Q;
 }
 
-SpinModel::MatrixZZ SpinModel::build_R(double distance) const {
+SpinMotion::MatrixZZ SpinMotion::build_R(double distance) const {
     MatrixZZ R = MatrixZZ::Zero();
 
     double r_angle = get_r_angle();
@@ -327,7 +327,7 @@ SpinModel::MatrixZZ SpinModel::build_R(double distance) const {
     return R;
 }
 
-Eigen::Vector3d SpinModel::predict_center(double dt) const {
+Eigen::Vector3d SpinMotion::predict_center(double dt) const {
     VectorX x = ekf_.get_x();
     return Eigen::Vector3d(
         x[spin_model::XC] + x[spin_model::VX] * dt,
@@ -336,7 +336,7 @@ Eigen::Vector3d SpinModel::predict_center(double dt) const {
     );
 }
 
-Eigen::Vector3d SpinModel::predict_armor_pos(int armor_idx, double dt) const {
+Eigen::Vector3d SpinMotion::predict_armor_pos(int armor_idx, double dt) const {
     VectorX x = ekf_.get_x();
 
     // 预测中心
@@ -369,16 +369,16 @@ Eigen::Vector3d SpinModel::predict_armor_pos(int armor_idx, double dt) const {
     return Eigen::Vector3d(xa, ya, za);
 }
 
-Eigen::Vector3d SpinModel::get_armor_pos() const {
+Eigen::Vector3d SpinMotion::get_armor_pos() const {
     return predict_armor_pos(0, 0);
 }
 
-Eigen::Vector3d SpinModel::get_velocity() const {
+Eigen::Vector3d SpinMotion::get_velocity() const {
     VectorX x = ekf_.get_x();
     return Eigen::Vector3d(x[spin_model::VX], x[spin_model::VY], x[spin_model::VZ]);
 }
 
-void SpinModel::reset() {
+void SpinMotion::reset() {
     initialized_ = false;
     spin_level_ = SpinLevel::NONE;
     dz_ = 0;

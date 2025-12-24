@@ -1,8 +1,9 @@
 # motion 模块 (运动模型)
 
 add_library(motion STATIC
-    armor_model.cpp
-    spin_model.cpp
+    armor_motion.cpp
+    spin_motion.cpp
+    outpost_motion.cpp
 )
 
 target_include_directories(motion PUBLIC

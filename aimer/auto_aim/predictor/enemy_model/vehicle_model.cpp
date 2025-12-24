@@ -81,8 +81,8 @@ double get_draw_predict_dt() {
 VehicleModel::VehicleModel(int target_id, EnemyType enemy_type)
     : target_id_(target_id),
       enemy_type_(enemy_type),
-      armor_model_(get_armor_credit_time()),
-      spin_model_(enemy_type == EnemyType::OUTPOST ? 3 : 4) {}
+      armor_motion_(get_armor_credit_time()),
+      spin_motion_(enemy_type == EnemyType::OUTPOST ? 3 : 4) {}
 
 void VehicleModel::update(const std::vector<ArmorObservation>& observations, double timestamp) {
     ++frame_count_;
@@ -102,21 +102,21 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     // 2. ArmorIdentifier: ID 分配
     identifier_.update(filtered, timestamp, frame_count_);
 
-    // 3. ArmorModel: EKF 滤波
+    // 3. ArmorMotion: EKF 滤波
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
-    armor_model_.update(armors_with_id, timestamp);
+    armor_motion_.update(armors_with_id, timestamp);
 
-    // 4. SpinModel: 整车 EKF 滤波 (用最正对的装甲板，带 ID)
+    // 4. SpinMotion: 整车 EKF 滤波 (用最正对的装甲板，带 ID)
     if (!armors_with_id.empty()) {
-        spin_model_.update(armors_with_id[0], timestamp);
+        spin_motion_.update(armors_with_id[0], timestamp);
     }
 
     // DEBUG: 输出装甲板数量和 ID
-    if (armors_with_id.size() > 1 || armor_model_.size() > 1) {
+    if (armors_with_id.size() > 1 || armor_motion_.size() > 1) {
         fmt::print(fmt::fg(fmt::color::orange),
             "[T{}] obs:{} filtered:{} active:{} filters:{}\n",
             target_id_, observations.size(), filtered.size(),
-            armors_with_id.size(), armor_model_.size());
+            armors_with_id.size(), armor_motion_.size());
         for (const auto& a : armors_with_id) {
             fmt::print("  armor id={} pos=({:.2f},{:.2f},{:.2f})\n",
                 a.id, a.pos().x(), a.pos().y(), a.pos().z());
@@ -128,9 +128,9 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     }
 
     // 5. 更新陀螺状态
-    spin_.omega = spin_model_.get_omega();
-    spin_.phase = spin_model_.get_theta();
-    spin_.radius = spin_model_.get_radius();
+    spin_.omega = spin_motion_.get_omega();
+    spin_.phase = spin_motion_.get_theta();
+    spin_.radius = spin_motion_.get_radius();
     spin_.update_level(spin_.omega);
 
     // 6. 更新敌方颜色 (用于绘图)
@@ -240,14 +240,14 @@ VehicleState VehicleModel::predict(double timestamp) const {
     double dt = timestamp - last_update_time_;
 
     // 根据陀螺等级选择模型
-    if (spin_model_.get_spin_level() >= SpinLevel::LOW && spin_model_.valid()) {
-        // ========== 陀螺模式: 用 SpinModel ==========
-        vs.center = spin_model_.predict_center(dt);
-        vs.velocity = spin_model_.get_velocity();
+    if (spin_motion_.get_spin_level() >= SpinLevel::LOW && spin_motion_.valid()) {
+        // ========== 陀螺模式: 用 SpinMotion ==========
+        vs.center = spin_motion_.predict_center(dt);
+        vs.velocity = spin_motion_.get_velocity();
 
-        // 获取当前追踪装甲板的 ID (从 ArmorModel)
+        // 获取当前追踪装甲板的 ID (从 ArmorMotion)
         int tracking_id = 0;
-        const auto* best_filter = armor_model_.get_best(timestamp);
+        const auto* best_filter = armor_motion_.get_best(timestamp);
         if (best_filter) {
             tracking_id = best_filter->id();
         }
@@ -262,9 +262,9 @@ VehicleState VehicleModel::predict(double timestamp) const {
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
             as.id = (i == 0) ? tracking_id : -1;  // 只有当前追踪的有 ID
-            as.position = spin_model_.predict_armor_pos(i, dt);
+            as.position = spin_motion_.predict_armor_pos(i, dt);
             as.velocity = vs.velocity;  // 近似用中心速度
-            as.yaw = spin_model_.get_theta() + i * (2.0 * M_PI / armor_num);
+            as.yaw = spin_motion_.get_theta() + i * (2.0 * M_PI / armor_num);
             as.visible = (i == 0);  // 只有当前追踪的可见
             as.last_seen = last_update_time_;
 
@@ -283,8 +283,8 @@ VehicleState VehicleModel::predict(double timestamp) const {
         vs.recommended_armor_idx = best_idx;
 
     } else {
-        // ========== 普通模式: 用 ArmorModel ==========
-        auto armor_states = armor_model_.get_armor_states(timestamp);
+        // ========== 普通模式: 用 ArmorMotion ==========
+        auto armor_states = armor_motion_.get_armor_states(timestamp);
 
         vs.armor_count = static_cast<int>(std::min(armor_states.size(), size_t(MAX_ARMORS_PER_TARGET)));
 
@@ -325,8 +325,8 @@ bool VehicleModel::alive() const {
 void VehicleModel::reset() {
     initialized_ = false;
     identifier_.reset();
-    armor_model_.reset();
-    spin_model_.reset();
+    armor_motion_.reset();
+    spin_motion_.reset();
     prev_armors_.clear();
     spin_.reset();
     frame_count_ = 0;
@@ -390,11 +390,11 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     const cv::Scalar COLOR_FILTERED(255, 200, 0);  // 蓝色: 滤波后的
     const cv::Scalar COLOR_CENTER(0, 0, 255);      // 红色: 旋转中心
 
-    // SpinModel 预测颜色: 未使用灰色，使用时用我方颜色
+    // SpinMotion 预测颜色: 未使用灰色，使用时用我方颜色
     cv::Scalar COLOR_SPIN;
-    bool spin_active = spin_model_.get_spin_level() >= SpinLevel::LOW && spin_model_.valid();
+    bool spin_active = spin_motion_.get_spin_level() >= SpinLevel::LOW && spin_motion_.valid();
     if (!spin_active) {
-        COLOR_SPIN = cv::Scalar(128, 128, 128);  // 灰色: SpinModel 未使用
+        COLOR_SPIN = cv::Scalar(128, 128, 128);  // 灰色: SpinMotion 未使用
     } else {
         // 我方颜色 (与敌方相反)
         if (enemy_color_ == EnemyColor::RED) {
@@ -419,9 +419,9 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 2. 绘制 ArmorModel 滤波后的位置 (口字形)
+    // 2. 绘制 ArmorMotion 滤波后的位置 (口字形)
     double draw_dt = get_draw_predict_dt();
-    auto armor_states = armor_model_.get_armor_states(timestamp);  // 用原始时间获取
+    auto armor_states = armor_motion_.get_armor_states(timestamp);  // 用原始时间获取
     for (auto& as : armor_states) {
         // 手动外推位置
         Eigen::Vector3d predicted_pos = as.position + as.velocity * draw_dt;
@@ -436,16 +436,16 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 3. 绘制 SpinModel 预测 (口字形)
+    // 3. 绘制 SpinMotion 预测 (口字形)
     // 即使未激活也绘制，方便调试
-    if (spin_model_.valid()) {
+    if (spin_motion_.valid()) {
         double dt = timestamp - last_update_time_;
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
-        double theta = spin_model_.get_theta() + spin_model_.get_omega() * dt;
+        double theta = spin_motion_.get_theta() + spin_motion_.get_omega() * dt;
 
         // 绘制所有装甲板预测位置
         for (int i = 0; i < armor_num; ++i) {
-            Eigen::Vector3d pos = spin_model_.predict_armor_pos(i, dt);
+            Eigen::Vector3d pos = spin_motion_.predict_armor_pos(i, dt);
             double armor_yaw = theta + i * (2.0 * M_PI / armor_num);
 
             // 当前追踪的装甲板用粗线
@@ -462,7 +462,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
 
         // 绘制旋转中心
-        Eigen::Vector3d center = spin_model_.predict_center(dt);
+        Eigen::Vector3d center = spin_motion_.predict_center(dt);
         bool valid = false;
         cv::Point2f pt = tf::world_to_pixel(center, q_imu, valid);
         if (valid) {
@@ -472,7 +472,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             cv::line(img, pt - cv::Point2f(0, s), pt + cv::Point2f(0, s), COLOR_CENTER, 2);
             // 标注角速度和状态
             std::string state_str = spin_active ? "ON" : "OFF";
-            cv::putText(img, fmt::format("w={:.1f} {}", spin_model_.get_omega(), state_str),
+            cv::putText(img, fmt::format("w={:.1f} {}", spin_motion_.get_omega(), state_str),
                         pt + cv::Point2f(20, 0),
                         cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_CENTER, 1);
         }

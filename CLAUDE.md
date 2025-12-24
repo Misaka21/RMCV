@@ -781,6 +781,137 @@ Closes: #234, #235
   - 禁止添加任何其他AI工具生成的标记
   - 只包含人为编写的提交内容
 
+## Predictor Motion 模型架构
+
+### 模块层次
+
+```
+aimer/auto_aim/predictor/
+├── enemy_model/           # EnemyModelInterface 实现
+│   ├── vehicle_model.*    # 车辆模型 (英雄/步兵/哨兵)
+│   └── outpost_model.*    # 前哨站模型包装器
+│
+├── enemy_model/motion/    # 底层 EKF 运动模型
+│   ├── armor_motion.*     # 单装甲板滤波 (多 EKF)
+│   ├── spin_motion.*      # 整车旋转模型 (9维 EKF)
+│   └── outpost_motion.*   # 前哨站模型 (7维 EKF)
+│
+└── enemy_state/
+    └── armor_identifier.* # 跨帧装甲板 ID 分配
+```
+
+### Motion 模型对比
+
+| 模型 | EKF 数量 | 状态维度 | 观测类型 | 适用目标 |
+|------|---------|---------|---------|---------|
+| `ArmorMotion` | 多个 (per ID) | 6维 YPD | YPD 直接观测 | 非陀螺目标 |
+| `SpinMotion` | 1个 | 9维 XYZ | YPD 观测 | 陀螺车辆 (4装甲板) |
+| `OutpostMotion` | 1个 | 7维 XYZ | YPD 观测 | 前哨站 (3装甲板) |
+
+### EKF 状态与观测设计
+
+**为什么 XYZ 状态 + YPD 观测？**
+
+- **状态用 XYZ (笛卡尔)**：旋转中心预测是线性的 `x' = x + vx*dt`
+- **观测用 YPD (球坐标)**：相机噪声在角度域更均匀，距离噪声与距离成正比
+
+```cpp
+// 状态向量 (SpinMotion 9维)
+[xc, vx, yc, vy, zc, θ, ω, r, r2]
+//  ↑ 旋转中心    ↑ 相位/角速度  ↑ 两个半径
+
+// 观测向量 (4维)
+[yaw, pitch, distance, armor_yaw]
+```
+
+### 前哨站模型 (OutpostMotion)
+
+#### 规则参数 (2025)
+```cpp
+constexpr double OMEGA_ABS = 0.8 * M_PI;  // |ω| = 0.8π rad/s (固定)
+constexpr double RADIUS = 0.553;           // 半径 0.553m (固定)
+constexpr double DZ_STEP = 0.10;           // 高度差 10cm (固定)
+```
+
+#### 状态向量 (7维)
+```cpp
+[xc, vx, yc, vy, zc, θ, ω]
+// xc,yc,zc: 旋转中心
+// vx,vy: 中心速度 (前哨站可能在移动平台上)
+// θ: 相位
+// ω: 角速度 (约束 |ω| ≈ 0.8π，只需确定符号)
+```
+
+#### 快速收敛策略
+
+**角速度方向快速判断**
+
+|ω| = 0.8π 是已知的，只需判断符号（顺时针/逆时针）。
+
+**策略：初始 ω=0，EKF 估计超过阈值后锁定**
+
+```cpp
+// init(): 初始为0
+x0[outpost::OMEGA] = 0;
+
+// constrain_omega(): 达到阈值后锁定方向
+void OutpostMotion::constrain_omega() {
+    double omega = x[outpost::OMEGA];
+
+    if (!omega_sign_determined_) {
+        constexpr double OMEGA_THRESHOLD = 0.4 * M_PI;
+        if (omega > OMEGA_THRESHOLD) {
+            x[outpost::OMEGA] = +0.8π;  // 逆时针
+            omega_sign_determined_ = true;
+        } else if (omega < -OMEGA_THRESHOLD) {
+            x[outpost::OMEGA] = -0.8π;  // 顺时针
+            omega_sign_determined_ = true;
+        }
+    } else {
+        // 已确定，只约束绝对值
+        x[outpost::OMEGA] = copysign(0.8π, omega);
+    }
+}
+```
+
+**优点：**
+- 简单，利用 EKF 自身估计能力
+- 不需要额外状态变量跟踪
+- 装甲板切换也不影响
+
+**2. 高度差学习**
+
+三个槽位高度：{低, 中, 高} 间隔 10cm，但**排列顺序未知**。
+
+```
+可能排列 (6种):
+槽位0=低, 槽位1=中, 槽位2=高  → [0, +10, +20] cm
+槽位0=中, 槽位1=高, 槽位2=低  → [0, +10, -10] cm
+...
+```
+
+**无法从2个观测推断第3个**，必须实际观测3个槽位才能完全学习。
+
+```cpp
+std::array<double, 3> slot_dz_;      // 各槽位高度差
+std::array<bool, 3> slot_known_;     // 是否已观测到
+
+// 只有 slot_known_[i] = true 的槽位才有准确高度
+```
+
+#### 盲区预测
+
+前哨站可能短暂进入盲区（装甲板不可见），但 EKF 状态持续存在：
+
+```cpp
+// 即使没有新观测，也能预测位置
+// 因为 θ, ω 状态持续更新 (predict without update)
+Eigen::Vector3d predict_armor_pos(int slot, double dt) const {
+    double theta = state.θ + state.ω * dt;  // 相位外推
+    // ... 计算装甲板位置
+}
+```
+
 ## 设计规划: Predictor 与火控数据结构
 
 ### 为什么要分线程？

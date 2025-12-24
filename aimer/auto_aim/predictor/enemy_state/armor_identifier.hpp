@@ -10,7 +10,7 @@
  * - 超时清理
  *
  * 不做:
- * - EKF 滤波 (交给 ArmorModel)
+ * - EKF 滤波 (交给 ArmorMotion)
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_ARMOR_IDENTIFIER_HPP__
@@ -26,7 +26,7 @@ namespace autoaim::predictor {
 /**
  * @brief 带稳定 ID 的装甲板数据
  *
- * ArmorIdentifier 的输出，ArmorModel 的输入
+ * ArmorIdentifier 的输出，ArmorMotion 的输入
  */
 struct ArmorData {
     int id = -1;                    // 分配的稳定 ID (跨帧一致)

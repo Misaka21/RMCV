@@ -1,5 +1,5 @@
 /**
- * @file spin_model.hpp
+ * @file spin_motion.hpp
  * @brief 整车旋转模型 - XYZ状态 + YPD观测 EKF
  *
  * 设计思路:
@@ -25,8 +25,8 @@
  *   - dz: 高度差
  */
 
-#ifndef __AIMER_AUTO_AIM_PREDICTOR_MOTION_SPIN_MODEL_HPP__
-#define __AIMER_AUTO_AIM_PREDICTOR_MOTION_SPIN_MODEL_HPP__
+#ifndef __AIMER_AUTO_AIM_PREDICTOR_MOTION_SPIN_MOTION_HPP__
+#define __AIMER_AUTO_AIM_PREDICTOR_MOTION_SPIN_MOTION_HPP__
 
 #include <cmath>
 
@@ -164,7 +164,7 @@ struct SpinMeasure {
 };
 
 // ============================================================================
-// SpinModel - 整车旋转模型
+// SpinMotion - 整车旋转模型
 // ============================================================================
 
 /**
@@ -176,7 +176,7 @@ struct SpinMeasure {
  * - 陀螺等级判断
  * - 多装甲板位置预测
  */
-class SpinModel {
+class SpinMotion {
 public:
     using Ekf = filter::AdaptiveEkf<spin_model::N_X, spin_model::N_Z>;
     using VectorX = Eigen::Matrix<double, spin_model::N_X, 1>;
@@ -188,7 +188,7 @@ public:
      * @brief 构造
      * @param armor_num 装甲板数量 (3 或 4)
      */
-    explicit SpinModel(int armor_num = 4);
+    explicit SpinMotion(int armor_num = 4);
 
     /**
      * @brief 初始化
@@ -306,4 +306,4 @@ private:
 
 }  // namespace autoaim::predictor
 
-#endif  // __AIMER_AUTO_AIM_PREDICTOR_MOTION_SPIN_MODEL_HPP__
+#endif  // __AIMER_AUTO_AIM_PREDICTOR_MOTION_SPIN_MOTION_HPP__
