@@ -45,27 +45,7 @@ enum class SpinLevel {
     HIGH = 2    // 高速陀螺: |ω| > 3 rad/s
 };
 
-// ==================== 状态索引 (10维) ====================
-
-namespace state10 {
-    constexpr int N_X = 10;
-    constexpr int N_Z = 4;
-
-    enum Idx {
-        XC = 0,     // 旋转中心 X (m)
-        VX = 1,     // X 速度 (m/s)
-        YC = 2,     // 旋转中心 Y (m)
-        VY = 3,     // Y 速度 (m/s)
-        ZA = 4,     // 当前追踪装甲板高度 (m)
-        VZ = 5,     // Z 速度 (m/s)
-        THETA = 6,  // 车体朝向角 (rad)
-        OMEGA = 7,  // 角速度 (rad/s)
-        R = 8,      // 短轴半径 (m)
-        DR = 9      // 半径差 r_long - r_short (m)
-    };
-}
-
-// ==================== 观测量索引 ====================
+// ==================== 观测量索引 (ArmorObservation.z) ====================
 
 namespace obs {
     enum Idx {
