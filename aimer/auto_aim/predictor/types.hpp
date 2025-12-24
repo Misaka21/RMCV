@@ -102,7 +102,8 @@ struct ArmorObservation {
     double z_to_v = 0;      // 装甲板法向与视线夹角余弦，越小越正对
 
     // 图像信息 (可选，调试用)
-    std::vector<cv::Point2f> pts;  // 四角点
+    std::vector<cv::Point2f> pts;  // 四角点 (原始像素坐标)
+    std::array<cv::Point2f, 4> pus;  // 畸变矫正后的四角点，用于三分法重投影比较
     cv::Point2f center_2d;         // 图像中心
 
     bool valid = false;
@@ -119,7 +120,8 @@ struct ArmorObservation {
         const Eigen::Vector3d& position,
         const Eigen::Vector4d& obs_z,
         double z_to_v_value,
-        double timestamp
+        double timestamp,
+        const std::array<cv::Point2f, 4>& pus_in = {}
     ) {
         ArmorObservation obs;
         obs.z = obs_z;
@@ -129,6 +131,7 @@ struct ArmorObservation {
         obs.z_to_v = z_to_v_value;
         obs.timestamp = timestamp;
         obs.pts = det.landmarks;
+        obs.pus = pus_in;
         obs.center_2d = det.center;
         obs.valid = true;
 
