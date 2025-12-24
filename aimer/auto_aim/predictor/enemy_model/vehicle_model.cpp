@@ -75,7 +75,8 @@ double get_armor_credit_time() {
 VehicleModel::VehicleModel(int target_id, EnemyType enemy_type)
     : target_id_(target_id),
       enemy_type_(enemy_type),
-      armor_model_(get_armor_credit_time()) {}
+      armor_model_(get_armor_credit_time()),
+      spin_model_(enemy_type == EnemyType::OUTPOST ? 3 : 4) {}
 
 void VehicleModel::update(const std::vector<ArmorObservation>& observations, double timestamp) {
     ++frame_count_;
@@ -99,6 +100,11 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
     armor_model_.update(armors_with_id, timestamp);
 
+    // 4. SpinModel: 整车 EKF 滤波 (用最正对的装甲板)
+    if (!filtered.empty()) {
+        spin_model_.update(filtered[0], timestamp);
+    }
+
     // DEBUG: 输出装甲板数量和 ID
     if (armors_with_id.size() > 1 || armor_model_.size() > 1) {
         fmt::print(fmt::fg(fmt::color::orange),
@@ -115,8 +121,11 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
         initialized_ = true;
     }
 
-    // 4. 更新陀螺状态 (TODO)
-    // spin_.update_level(ekf_.x()[OMEGA]);
+    // 5. 更新陀螺状态
+    spin_.omega = spin_model_.get_omega();
+    spin_.phase = spin_model_.get_theta();
+    spin_.radius = spin_model_.get_radius();
+    spin_.update_level(spin_.omega);
 
     prev_armors_ = filtered;
     prev_timestamp_ = timestamp;
@@ -213,40 +222,80 @@ VehicleState VehicleModel::predict(double timestamp) const {
     vs.valid = initialized_;
     vs.timestamp = timestamp;
     vs.frame_count = frame_count_;
+    vs.spin = spin_;
 
     if (!initialized_) return vs;
 
-    // 从 ArmorModel 获取滤波后的装甲板状态
-    auto armor_states = armor_model_.get_armor_states(timestamp);
+    double dt = timestamp - last_update_time_;
 
-    vs.armor_count = static_cast<int>(std::min(armor_states.size(), size_t(MAX_ARMORS_PER_TARGET)));
-    vs.spin = spin_;
+    // 根据陀螺等级选择模型
+    if (spin_model_.get_spin_level() >= SpinLevel::LOW && spin_model_.valid()) {
+        // ========== 陀螺模式: 用 SpinModel ==========
+        vs.center = spin_model_.predict_center(dt);
+        vs.velocity = spin_model_.get_velocity();
 
-    double best_score = -1;
-    int best_idx = -1;
-    Eigen::Vector3d center_sum = Eigen::Vector3d::Zero();
-    Eigen::Vector3d vel_sum = Eigen::Vector3d::Zero();
-    int valid_count = 0;
+        // 预测所有装甲板位置
+        int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
+        vs.armor_count = armor_num;
 
-    for (int i = 0; i < vs.armor_count; ++i) {
-        vs.armors[i] = armor_states[i];
+        double best_score = -1;
+        int best_idx = -1;
 
-        center_sum += armor_states[i].position;
-        vel_sum += armor_states[i].velocity;
-        ++valid_count;
+        for (int i = 0; i < armor_num; ++i) {
+            auto& as = vs.armors[i];
+            as.id = i;
+            as.position = spin_model_.predict_armor_pos(i, dt);
+            as.velocity = vs.velocity;  // 近似用中心速度
+            as.yaw = spin_model_.get_theta() + i * (2.0 * M_PI / armor_num);
+            as.visible = (i == 0);  // 只有当前追踪的可见
+            as.last_seen = last_update_time_;
 
-        if (armor_states[i].score > best_score) {
-            best_score = armor_states[i].score;
-            best_idx = i;
+            // 评分: 越正对越好 (用 cos(装甲板朝向 - 视线方向))
+            double armor_yaw = as.yaw;
+            double view_yaw = std::atan2(as.position.y(), as.position.x());
+            double angle_diff = std::abs(math::reduced_angle(armor_yaw - view_yaw - M_PI));
+            as.score = std::cos(angle_diff);
+
+            if (as.score > best_score) {
+                best_score = as.score;
+                best_idx = i;
+            }
         }
-    }
 
-    if (valid_count > 0) {
-        vs.center = center_sum / valid_count;
-        vs.velocity = vel_sum / valid_count;
-    }
+        vs.recommended_armor_idx = best_idx;
 
-    vs.recommended_armor_idx = best_idx;
+    } else {
+        // ========== 普通模式: 用 ArmorModel ==========
+        auto armor_states = armor_model_.get_armor_states(timestamp);
+
+        vs.armor_count = static_cast<int>(std::min(armor_states.size(), size_t(MAX_ARMORS_PER_TARGET)));
+
+        double best_score = -1;
+        int best_idx = -1;
+        Eigen::Vector3d center_sum = Eigen::Vector3d::Zero();
+        Eigen::Vector3d vel_sum = Eigen::Vector3d::Zero();
+        int valid_count = 0;
+
+        for (int i = 0; i < vs.armor_count; ++i) {
+            vs.armors[i] = armor_states[i];
+
+            center_sum += armor_states[i].position;
+            vel_sum += armor_states[i].velocity;
+            ++valid_count;
+
+            if (armor_states[i].score > best_score) {
+                best_score = armor_states[i].score;
+                best_idx = i;
+            }
+        }
+
+        if (valid_count > 0) {
+            vs.center = center_sum / valid_count;
+            vs.velocity = vel_sum / valid_count;
+        }
+
+        vs.recommended_armor_idx = best_idx;
+    }
 
     return vs;
 }
@@ -259,6 +308,7 @@ void VehicleModel::reset() {
     initialized_ = false;
     identifier_.reset();
     armor_model_.reset();
+    spin_model_.reset();
     prev_armors_.clear();
     spin_.reset();
     frame_count_ = 0;

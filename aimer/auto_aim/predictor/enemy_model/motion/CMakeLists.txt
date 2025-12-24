@@ -2,6 +2,7 @@
 
 add_library(motion STATIC
     armor_model.cpp
+    spin_model.cpp
 )
 
 target_include_directories(motion PUBLIC

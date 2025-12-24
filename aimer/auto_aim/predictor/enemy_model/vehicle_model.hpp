@@ -17,6 +17,7 @@
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "enemy_model.hpp"
 #include "motion/armor_model.hpp"
+#include "motion/spin_model.hpp"
 
 namespace autoaim::predictor {
 
@@ -61,6 +62,9 @@ private:
 
     // 装甲板运动模型 (职责: 匀速 EKF 滤波)
     ArmorModel armor_model_;
+
+    // 整车旋转模型 (职责: 陀螺 EKF 滤波)
+    SpinModel spin_model_;
 
     // 上一帧观测 (用于消抖)
     std::vector<ArmorObservation> prev_armors_;
