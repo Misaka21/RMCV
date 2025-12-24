@@ -861,104 +861,127 @@ struct VehicleState {
 };
 ```
 
-#### 4. BattlefieldSnapshot - 战场快照
+#### 4. BattlefieldSnapshot - 战场快照 (当前实现)
 ```cpp
-constexpr int MAX_ENEMY_NUMBER = 8;
+// aimer/auto_aim/predictor/types.hpp
+constexpr int MAX_TARGETS = 9;
 
 struct BattlefieldSnapshot {
-    // 所有车辆状态 (索引 = 目标编号)
-    std::array<VehicleState, MAX_ENEMY_NUMBER + 1> vehicles;
+    std::array<VehicleState, MAX_TARGETS> vehicles;
 
-    // 位掩码
-    uint16_t detection_mask = 0;  // 当前帧检测到的车
-    uint16_t alive_mask = 0;      // 模型存活的车
+    uint16_t valid_mask = 0;       // 哪些目标有效
+    uint16_t detected_mask = 0;    // 当前帧检测到哪些
 
-    // 自身状态
-    RobotState self_state;
+    int primary_target_id = -1;    // 主目标编号
 
-    // 时间戳 (关键！)
     double timestamp = 0;
     int frame_id = 0;
 
     // 辅助方法
-    bool is_alive(int id) const;
+    bool is_valid(int id) const;
+    bool is_detected(int id) const;
     const VehicleState& get(int id) const;
-
-    template<typename Func>
-    void for_each_alive(Func&& func) const;
+    const VehicleState* get_primary() const;
 };
 ```
 
+#### 5. 自身状态共享 (TODO)
+
+**问题**: 火控需要自身状态（底盘速度、IMU姿态），但当前 `BattlefieldSnapshot` 没有 `self_state`。
+
+**现状**:
+- `RobotState` 有 `velocity` 字段但未赋值（永远是 Zero）
+- `SerialReceiveData` 没有底盘速度 vx, vy
+- 火控无法获取自身运动信息
+
+**解决方案**: 通过 BasicObjManager 共享
+```cpp
+// hardware 更新 (与 SyncFrame 同步)
+auto self = umt::BasicObjManager<aimer::RobotState>::find_or_create("robot_state");
+self->get() = RobotState::from_sync_frame(sync_frame);
+
+// 火控读取
+auto self = umt::BasicObjManager<aimer::RobotState>::find("robot_state");
+const auto& state = self->get();
+// state.q_imu, state.velocity, state.bullet_speed ...
+```
+
+**待实现**:
+1. 串口协议添加底盘速度 vx, vy
+2. `RobotState::from_sync_frame()` 读取并赋值 velocity
+3. hardware_node 发布 robot_state 到 BasicObjManager
+
 ### 数据流
 ```
-Predictor (30Hz)                         火控 (100Hz)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-检测 + EKF更新
+Hardware (200Hz)
     ↓
-导出 Snapshot (带时间戳+速度)
+SyncFrame (image + serial_data)
     ↓
-UMT::push ─────────────────→ UMT::pop (非阻塞)
-                                    ↓
-                             dt = now - snapshot.timestamp
-                                    ↓
-                             pos' = pos + vel * dt (插值)
-                             phase' = phase + omega * dt
-                                    ↓
-                             弹道解算 / MPC
-                                    ↓
-                             RobotCmd → 串口
+┌───────────────────────────────────────────────────────────────┐
+│ BasicObjManager<RobotState>("robot_state")  ←── 火控直接读取  │
+└───────────────────────────────────────────────────────────────┘
+    ↓
+Detector → DetectionResult
+    ↓
+Predictor (30Hz)
+    ↓
+┌───────────────────────────────────────────────────────────────┐
+│ BasicObjManager<BattlefieldSnapshot>("battlefield")           │
+│                                                               │
+│   火控 (100Hz) 多次读取同一帧数据做插值:                        │
+│   dt = now - snapshot.timestamp                               │
+│   pos' = pos + vel * dt                                       │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ### 使用示例
 ```cpp
 // ========== Predictor (30Hz) ==========
-umt::Publisher<BattlefieldSnapshot> pub("battlefield");
+auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find_or_create("battlefield");
 
-void predictor_loop() {
+void predictor_update(const DetectionResult& detection) {
     // ... EKF更新 ...
 
     BattlefieldSnapshot snapshot;
-    snapshot.timestamp = get_current_time();  // 关键！
+    snapshot.timestamp = detection.timestamp;
+    snapshot.frame_id = detection.frame_id;
 
     for (int i = 1; i <= 8; ++i) {
-        auto& v = snapshot.vehicles[i];
-        v.timestamp = snapshot.timestamp;
-
-        // 从滤波器导出位置和速度
-        v.center_pos = filter.predict_pos(0);
-        v.center_vel = filter.predict_vel(0);  // 必须有速度！
-
-        // 陀螺状态
-        v.spin.omega = top_model.get_omega();
-        v.spin.phase = top_model.get_phase();
+        if (models_[i].is_valid()) {
+            auto& v = snapshot.vehicles[i];
+            v = models_[i].get_state();  // 导出位置+速度
+            snapshot.set_valid(i, true);
+        }
     }
 
-    pub.push(snapshot);
+    battlefield->get() = snapshot;  // 整体赋值
 }
 
 // ========== 火控 (100Hz) ==========
-umt::Subscriber<BattlefieldSnapshot> sub("battlefield");
+auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find("battlefield");
+auto robot_state = umt::BasicObjManager<aimer::RobotState>::find("robot_state");
 
 void fire_control_loop() {
-    // 非阻塞获取最新快照
-    auto snapshot = sub.pop_for(5);  // 5ms超时
+    const auto& snapshot = battlefield->get();
+    const auto& self = robot_state->get();
 
     double now = get_current_time();
-    double dt = now - snapshot.timestamp;  // 计算时间差
+    double dt = now - snapshot.timestamp;
 
-    // 选择目标
-    int target_id = select_target(snapshot);
-    const auto& target = snapshot.get(target_id);
+    // 选择目标并插值
+    const auto* target = snapshot.get_primary();
+    if (!target) return;
 
-    // 插值预测当前位置
-    Eigen::Vector3d current_pos =
-        target.center_pos + target.center_vel * dt;
+    Eigen::Vector3d predicted_pos = target->predict_center(dt);
+    double predicted_phase = target->spin.predict_phase(dt);
 
-    double current_phase =
-        target.spin.phase + target.spin.omega * dt;
-
-    // 弹道解算 / MPC
-    auto cmd = solve_trajectory(current_pos, current_phase, ...);
+    // 弹道解算需要自身状态
+    auto cmd = solve_trajectory(
+        predicted_pos,
+        self.q_imu,          // 当前云台姿态
+        self.bullet_speed,   // 弹速
+        self.velocity        // 底盘速度 (动打动)
+    );
 
     serial_send(cmd);
 }
