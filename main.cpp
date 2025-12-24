@@ -13,7 +13,7 @@
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
-#include "plugin/recorder/recorder_node.hpp"
+#include "plugin/rmcv_bag/recorder_node.hpp"
 #include "umt/umt.hpp"
 
 // 全局运行标志
@@ -101,7 +101,7 @@ int main() {
 
     // 启动录制节点线程
     std::thread recorder_thread([]() {
-        recorder::start_recorder_node();
+        rmcv_bag::start_recorder_node();
     });
 
     debug::print(debug::PrintMode::INFO, "Main", "All threads started");

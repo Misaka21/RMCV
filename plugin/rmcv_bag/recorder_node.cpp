@@ -20,7 +20,7 @@
 #include "plugin/stats/fps_stats.hpp"
 #include "umt/umt.hpp"
 
-namespace recorder {
+namespace rmcv_bag {
 
 using SteadyClock = std::chrono::steady_clock;
 
@@ -358,4 +358,4 @@ void start_recorder_node() {
     debug::print(debug::PrintMode::INFO, "RecorderNode", "Recorder node stopped");
 }
 
-}  // namespace recorder
+}  // namespace rmcv_bag

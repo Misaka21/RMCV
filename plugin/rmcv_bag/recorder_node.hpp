@@ -7,26 +7,24 @@
  *   - Message<cv::Mat> "predictor_vis" (predictor可视化输出)
  *
  * 输出文件 (保存到会话目录):
- *   - raw.avi: 原始相机帧
- *   - debug.avi: predictor 可视化帧
+ *   - raw.mkv: 原始相机帧
+ *   - debug.mkv: predictor 可视化帧
  *   - imu.csv: 串口 IMU 数据
  */
 
-#ifndef PLUGIN_RECORDER_RECORDER_NODE_HPP
-#define PLUGIN_RECORDER_RECORDER_NODE_HPP
+#ifndef RMCV_BAG_RECORDER_NODE_HPP
+#define RMCV_BAG_RECORDER_NODE_HPP
 
-#include <string>
-
-namespace recorder {
+namespace rmcv_bag {
 
 /**
  * @brief 启动录制节点
  *
  * 录制节点独立运行，通过运行时参数控制录制开关。
- * 配置项位于 config/aimer.toml 的 [Recorder] 节。
+ * 配置项位于 config/recorder.toml 的 [Recorder] 节。
  */
 void start_recorder_node();
 
-}  // namespace recorder
+}  // namespace rmcv_bag
 
-#endif  // PLUGIN_RECORDER_RECORDER_NODE_HPP
+#endif  // RMCV_BAG_RECORDER_NODE_HPP

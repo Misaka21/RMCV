@@ -64,7 +64,7 @@ add_subdirectory(aimer)
 add_subdirectory(simulator)
 
 add_executable(RMCV2026 main.cpp)
-target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor recorder)
+target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor rmcv_bag)
 
 add_executable(test_param test/test_param.cpp)
 target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin)
@@ -83,6 +83,9 @@ target_link_libraries(test_transformer ${OpenCV_LIBS} fmt::fmt aimer_common)
 
 add_executable(test_imu test/test_imu.cpp)
 target_link_libraries(test_imu ${OpenCV_LIBS} fmt::fmt plugin hardware)
+
+add_executable(test_playback test/test_playback.cpp)
+target_link_libraries(test_playback ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor rmcv_bag)
 
 # Simulator测试 (需要ROS2环境)
 if(SIMULATOR_FOUND)
