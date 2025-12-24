@@ -24,6 +24,7 @@
 
 #include "aimer/auto_aim/common/types.hpp"  // ArmorType, ArmorNumber, DetectedArmor
 #include "aimer/common/math/math.hpp"
+#include "aimer/common/robot_state.hpp"
 
 namespace autoaim::predictor {
 
@@ -333,6 +334,9 @@ struct BattlefieldSnapshot {
     uint16_t detected_mask = 0;   // 当前帧检测到哪些
 
     int primary_target_id = -1;   // 主目标编号
+
+    // 检测时刻的自身状态 (火控用)
+    aimer::RobotState self_state;
 
     double timestamp = 0;
     int frame_id = 0;

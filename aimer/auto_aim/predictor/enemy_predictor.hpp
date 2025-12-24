@@ -90,6 +90,9 @@ private:
     // 时间
     double current_time_ = 0;
     int frame_id_ = 0;
+
+    // 当前帧自身状态
+    aimer::RobotState current_state_;
 };
 
 }  // namespace autoaim::predictor

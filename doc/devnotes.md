@@ -1,3 +1,6 @@
+# 12.24
+对于predictor和fire_controller,是一对多的关系，因此我不准备用发布订阅，我准备用BasicObjManager或者objmanager，那么我的tf是不是也可以用这个？这样子就不需要传两边参，像rmcvfans，或者有什么更好的解决方案？
+
 # 12.20
 数据结构：
 对于架构：用 aimer 作为顶层
