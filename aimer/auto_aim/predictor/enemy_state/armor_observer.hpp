@@ -146,10 +146,6 @@ private:
 
     // 帧计数
     int frame_id_ = 0;
-
-    // 上一帧的 z_to_v (用于加速搜索)
-    double last_z_to_v_ = M_PI;  // 初始值: 正对
-    bool has_last_z_to_v_ = false;
 };
 
 }  // namespace autoaim::predictor

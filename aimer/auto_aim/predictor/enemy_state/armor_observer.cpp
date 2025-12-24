@@ -298,14 +298,9 @@ double ArmorObserver::fit_z_to_v(
     const std::array<cv::Point2f, 4>& pus,
     double z_to_v_init
 ) {
-    // 方案1: 缩小搜索范围 (以初始值或上一帧结果为中心)
+    // 以 PnP 初始值为中心，搜索范围 ±45度
     double center = z_to_v_init + M_PI;  // 转换到 [0, 2π] 范围
-    if (has_last_z_to_v_) {
-        // 方案3: 用上一帧结果作为中心，搜索范围更小
-        center = last_z_to_v_;
-    }
 
-    // 搜索范围: ±45度
     constexpr double SEARCH_MARGIN = M_PI / 4;
     double z_min = std::max(M_PI / 2, center - SEARCH_MARGIN);
     double z_max = std::min(M_PI * 3 / 2, center + SEARCH_MARGIN);
@@ -316,7 +311,7 @@ double ArmorObserver::fit_z_to_v(
         return compute_reprojection_cost(projected, pus, z_to_v_init);
     };
 
-    // 方案5: 带提前终止的三分搜索
+    // 带提前终止的三分搜索
     constexpr double PHI = 0.6180339887498949;
     constexpr double MIN_INTERVAL = 0.01;  // 约 0.5度，提前终止阈值
 
@@ -346,10 +341,6 @@ double ArmorObserver::fit_z_to_v(
     }
 
     double best_z_to_v = (left + right) / 2.0;
-
-    // 更新上一帧记录 (方案3)
-    last_z_to_v_ = best_z_to_v;
-    has_last_z_to_v_ = true;
 
     // 规范化到 (-π, π]
     return math::reduced_angle(best_z_to_v - M_PI);
