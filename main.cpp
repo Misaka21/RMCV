@@ -49,12 +49,6 @@ int main() {
     });
     param_thread.detach();  // 分离线程，程序退出时自动结束
 
-    // 启动 recorder 参数热更新线程
-    std::thread recorder_param_thread([]() {
-        runtime_param::parameter_run("recorder.toml");
-    });
-    recorder_param_thread.detach();
-
     // 等待参数加载完成
     runtime_param::wait_for_param("ok");
 

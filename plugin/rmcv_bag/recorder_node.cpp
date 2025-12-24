@@ -29,6 +29,7 @@ using SteadyClock = std::chrono::steady_clock;
 // ============================================================================
 
 struct RecorderConfig {
+    bool enable_recording = false;  // 是否启用录制
     bool record_raw_video = true;
     bool record_debug_video = true;
     bool record_imu_csv = true;
@@ -43,6 +44,7 @@ struct RecorderConfig {
     static RecorderConfig load() {
         RecorderConfig cfg;
         auto table = static_param::parse_file("recorder.toml");
+        cfg.enable_recording = static_param::get_param<bool>(table, "Recorder", "enable_recording");
         cfg.record_raw_video = static_param::get_param<bool>(table, "Recorder", "record_raw_video");
         cfg.record_debug_video = static_param::get_param<bool>(table, "Recorder", "record_debug_video");
         cfg.record_imu_csv = static_param::get_param<bool>(table, "Recorder", "record_imu_csv");
@@ -53,11 +55,6 @@ struct RecorderConfig {
         return cfg;
     }
 };
-
-// enable_recording 开关使用运行时参数 (动态控制)
-bool get_enable_recording() {
-    return runtime_param::get_param<bool>("Recorder.enable_recording");
-}
 
 // ============================================================================
 // CSV Writer
@@ -184,8 +181,8 @@ void start_recorder_node() {
 
     while (running->get()) {
         try {
-            // 检查录制开关 (运行时参数)
-            bool enable_recording = get_enable_recording();
+            // 检查录制开关 (静态参数，启动时确定)
+            bool enable_recording = config.enable_recording;
 
             // ========== 状态转换: 开始录制 ==========
             if (enable_recording && !was_recording) {
