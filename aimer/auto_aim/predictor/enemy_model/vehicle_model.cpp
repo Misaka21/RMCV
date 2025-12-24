@@ -245,6 +245,13 @@ VehicleState VehicleModel::predict(double timestamp) const {
         vs.center = spin_model_.predict_center(dt);
         vs.velocity = spin_model_.get_velocity();
 
+        // 获取当前追踪装甲板的 ID (从 ArmorModel)
+        int tracking_id = 0;
+        const auto* best_filter = armor_model_.get_best(timestamp);
+        if (best_filter) {
+            tracking_id = best_filter->id();
+        }
+
         // 预测所有装甲板位置
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
         vs.armor_count = armor_num;
@@ -254,7 +261,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
 
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
-            as.id = i;
+            as.id = (i == 0) ? tracking_id : -1;  // 只有当前追踪的有 ID
             as.position = spin_model_.predict_armor_pos(i, dt);
             as.velocity = vs.velocity;  // 近似用中心速度
             as.yaw = spin_model_.get_theta() + i * (2.0 * M_PI / armor_num);
