@@ -1,34 +1,36 @@
 /**
  * @file fire_controller.hpp
- * @brief 火控主类
+ * @brief 火控调度器
  *
  * 职责:
- *   1. 目标选择
- *   2. 弹道解算
- *   3. MPC 轨迹规划
- *   4. 射击决策
+ *   1. 根据配置选择控制模式 (MPC 或 PID)
+ *   2. 分发处理请求到对应策略
+ *   3. 统一对外接口
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_FIRE_CONTROLLER_HPP__
 #define __AIMER_AUTO_AIM_FIRE_CONTROL_FIRE_CONTROLLER_HPP__
 
 #include <memory>
-#include <Eigen/Geometry>
 
 #include "aimer/auto_aim/fire_control/types.hpp"
-#include "aimer/auto_aim/fire_control/target_selector/target_selector.hpp"
+#include "aimer/auto_aim/fire_control/fire_strategy.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
 namespace autoaim::fire_control {
 
-// 前向声明
-class TrajectorySolver;
-class GimbalPlanner;
+/**
+ * @brief 控制模式
+ */
+enum class ControlMode {
+    MPC,    // MPC 轨迹规划模式 (输出 pos+vel+acc)
+    PID     // PID 跟踪模式 (仅输出 pos，含反陀螺逻辑)
+};
 
 /**
- * @brief 火控控制器
+ * @brief 火控调度器
  *
- * 从 BattlefieldSnapshot 中选择目标，规划云台轨迹，输出控制指令
+ * 根据配置选择 MPC 或 PID 模式，分发处理请求
  * 参数通过 runtime_param::get_param 实时获取
  */
 class FireController {
@@ -53,103 +55,41 @@ public:
     );
 
     /**
-     * @brief 重置状态 (丢失目标时调用)
+     * @brief 重置状态
      */
     void reset();
 
-    // 调试接口
-    const TargetSelection& last_selection() const { return last_selection_; }
-    const GimbalPlan& last_plan() const { return last_plan_; }
-    const AimResult& last_aim() const { return last_aim_; }
+    /**
+     * @brief 获取当前控制模式
+     */
+    ControlMode current_mode() const { return current_mode_; }
+
+    /**
+     * @brief 获取当前策略名称
+     */
+    const char* strategy_name() const;
+
+    // ==================== 调试接口 ====================
+
+    const TargetSelection& last_selection() const;
+    const AimResult& last_aim() const;
+
+    /**
+     * @brief 获取当前策略 (用于高级调试)
+     */
+    FireStrategy* current_strategy() const { return current_strategy_; }
 
 private:
     /**
-     * @brief 阶段1: 目标选择
+     * @brief 确保策略已初始化并更新模式
      */
-    TargetSelection select_target(
-        const predictor::BattlefieldSnapshot& snapshot,
-        double dt
-    );
+    void ensure_strategy_initialized();
 
-    /**
-     * @brief 阶段2: 弹道解算
-     */
-    AimResult solve_trajectory(
-        const Eigen::Vector3d& target_pos,
-        double bullet_speed
-    );
+    std::unique_ptr<FireStrategy> mpc_strategy_;
+    std::unique_ptr<FireStrategy> pid_strategy_;
 
-    /**
-     * @brief 阶段3: MPC 规划
-     */
-    GimbalPlan plan_gimbal(
-        const predictor::VehicleState& target,
-        const aimer::RobotState& self_state
-    );
-
-    /**
-     * @brief 开火条件判断 (统一判断逻辑，基于物理落点)
-     *
-     * 将角度误差转换为落点偏移距离，与装甲板有效区域比较
-     */
-    bool check_fire_condition(
-        const AimResult& aim,
-        const TargetSelection& selection
-    ) const;
-
-    /**
-     * @brief 生成火控指令 (MPC 模式)
-     */
-    FireCommand generate_command(
-        const TargetSelection& selection,
-        const GimbalPlan& plan,
-        bool fire
-    );
-
-    /**
-     * @brief 生成简化指令 (仅位置，无 MPC 前馈)
-     */
-    FireCommand generate_simple_command(
-        const TargetSelection& selection,
-        const AimResult& aim,
-        bool fire
-    );
-
-    /**
-     * @brief 无目标时的指令
-     */
-    FireCommand no_target_command();
-
-    /**
-     * @brief 从 IMU 四元数提取 yaw/pitch
-     */
-    static void extract_euler(
-        const Eigen::Quaterniond& q,
-        double& yaw,
-        double& pitch
-    );
-
-    // ==================== 数据 ====================
-
-    std::unique_ptr<TargetSelector> target_selector_;
-    std::unique_ptr<TrajectorySolver> trajectory_solver_;
-    std::unique_ptr<GimbalPlanner> gimbal_planner_;
-
-    // 状态缓存
-    TargetSelection last_selection_;
-    GimbalPlan last_plan_;
-    AimResult last_aim_;
-    double last_time_ = 0;
-
-    // 当前云台状态 (用于 MPC 初始条件)
-    double current_yaw_ = 0;
-    double current_pitch_ = 0;
-    double current_yaw_vel_ = 0;
-    double current_pitch_vel_ = 0;
-
-    // 连续丢失计数
-    int lost_count_ = 0;
-    static constexpr int MAX_LOST_COUNT = 30;  // 300ms 后重置
+    FireStrategy* current_strategy_ = nullptr;
+    ControlMode current_mode_ = ControlMode::PID;  // 默认 PID 模式
 };
 
 }  // namespace autoaim::fire_control
