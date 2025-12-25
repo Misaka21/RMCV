@@ -3,6 +3,7 @@
  * @brief 弹道解算器实现 - 精确空气阻力模型 + 动打动支持
  *
  * 物理模型参考: rm.cv.fans (SJTU) ResistanceFuncLinear
+ * 参数通过 runtime_param::get_param 实时获取
  */
 
 #include "trajectory_solver.hpp"
@@ -11,6 +12,8 @@
 #include <cmath>
 
 #include <ceres/ceres.h>
+
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
 
@@ -122,8 +125,6 @@ private:
 // TrajectorySolver 实现
 // ============================================================================
 
-TrajectorySolver::TrajectorySolver(const TrajectoryConfig& config) : config_(config) {}
-
 AimResult TrajectorySolver::solve(
     const Eigen::Vector3d& target_pos,
     double bullet_speed,
@@ -145,6 +146,11 @@ AimResult TrajectorySolver::solve(const TrajectoryInput& input) const {
 }
 
 AimResult TrajectorySolver::solve_2d(const TrajectoryInput& input) const {
+    // 读取参数
+    double g = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.gravity");
+    double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
+    int max_iter = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.Trajectory.max_iter"));
+
     AimResult result;
     const auto& target = input.target_pos;
     double v0 = input.bullet_speed;
@@ -160,16 +166,16 @@ AimResult TrajectorySolver::solve_2d(const TrajectoryInput& input) const {
     ceres::Problem problem;
     problem.AddResidualBlock(
         new ceres::AutoDiffCostFunction<ResistanceFuncLinear2D, 1, 1>(
-            new ResistanceFuncLinear2D(horiz_dist, target.z(), v0, config_.g, config_.resistance_k)),
+            new ResistanceFuncLinear2D(horiz_dist, target.z(), v0, g, k)),
         nullptr, &pitch);
 
     problem.SetParameterLowerBound(&pitch, 0, -M_PI / 3);
     problem.SetParameterUpperBound(&pitch, 0, M_PI / 3);
 
     ceres::Solver::Options options;
-    options.max_num_iterations = config_.max_iterations;
+    options.max_num_iterations = max_iter;
     options.linear_solver_type = ceres::DENSE_QR;
-    options.minimizer_progress_to_stdout = config_.verbose;
+    options.minimizer_progress_to_stdout = false;
 
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
@@ -182,6 +188,11 @@ AimResult TrajectorySolver::solve_2d(const TrajectoryInput& input) const {
 }
 
 AimResult TrajectorySolver::solve_3d(const TrajectoryInput& input) const {
+    // 读取参数
+    double g = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.gravity");
+    double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
+    int max_iter = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.Trajectory.max_iter"));
+
     AimResult result;
     const auto& target = input.target_pos;
     double v0 = input.bullet_speed;
@@ -196,7 +207,7 @@ AimResult TrajectorySolver::solve_3d(const TrajectoryInput& input) const {
     ceres::Problem problem;
     problem.AddResidualBlock(
         new ceres::AutoDiffCostFunction<ResistanceFuncLinear3D, 3, 2>(
-            new ResistanceFuncLinear3D(target, v0, input.vehicle_velocity, config_.g, config_.resistance_k)),
+            new ResistanceFuncLinear3D(target, v0, input.vehicle_velocity, g, k)),
         nullptr, angles);
 
     problem.SetParameterLowerBound(angles, 0, -M_PI);
@@ -205,7 +216,7 @@ AimResult TrajectorySolver::solve_3d(const TrajectoryInput& input) const {
     problem.SetParameterUpperBound(angles, 1, M_PI / 3);
 
     ceres::Solver::Options options;
-    options.max_num_iterations = config_.max_iterations;
+    options.max_num_iterations = max_iter;
     options.linear_solver_type = ceres::DENSE_QR;
 
     ceres::Solver::Summary summary;
@@ -221,16 +232,20 @@ AimResult TrajectorySolver::solve_3d(const TrajectoryInput& input) const {
 }
 
 double TrajectorySolver::estimate_fly_time(double distance, double bullet_speed) const {
+    double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
+
     if (bullet_speed < 1.0) return 0;
     double t = distance / bullet_speed;
-    return t * (1.0 + config_.resistance_k * distance / (2.0 * bullet_speed));
+    return t * (1.0 + k * distance / (2.0 * bullet_speed));
 }
 
 Eigen::Vector3d TrajectorySolver::compute_hit_point(
     double yaw, double pitch, double bullet_speed,
     const Eigen::Vector3d& vehicle_velocity, double fly_time) const
 {
-    double k = config_.resistance_k, g = config_.g;
+    double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
+    double g = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.gravity");
+
     double vx0 = bullet_speed * std::cos(pitch) * std::cos(yaw) + vehicle_velocity.x();
     double vy0 = bullet_speed * std::cos(pitch) * std::sin(yaw) + vehicle_velocity.y();
     double vz0 = bullet_speed * std::sin(pitch) + vehicle_velocity.z();

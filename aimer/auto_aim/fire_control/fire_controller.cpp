@@ -10,73 +10,19 @@
 #include "planner/gimbal_planner.hpp"
 #include "target_selector/target_selector.hpp"
 #include "trajectory/trajectory_solver.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
 
-FireController::FireController(const FireControlConfig& config)
-    : config_(config)
+FireController::FireController()
 {
-    // 创建目标选择器
-    TargetSelector::Config selector_config;
-    target_selector_ = std::make_unique<TargetSelector>(selector_config);
-
-    // 创建弹道解算器
-    TrajectorySolver::Config traj_config;
-    traj_config.g = config.gravity;
-    traj_config.k = config.air_resistance_k;
-    traj_config.max_iter = config.trajectory_max_iter;
-    trajectory_solver_ = std::make_unique<TrajectorySolver>(traj_config);
-
-    // 创建云台规划器
-    GimbalPlanner::Config planner_config;
-    planner_config.q_yaw_pos = config.q_yaw_pos;
-    planner_config.q_yaw_vel = config.q_yaw_vel;
-    planner_config.r_yaw_acc = config.r_yaw_acc;
-    planner_config.q_pitch_pos = config.q_pitch_pos;
-    planner_config.q_pitch_vel = config.q_pitch_vel;
-    planner_config.r_pitch_acc = config.r_pitch_acc;
-    planner_config.max_yaw_acc = config.max_yaw_acc;
-    planner_config.max_pitch_acc = config.max_pitch_acc;
-    planner_config.max_iter = config.mpc_max_iter;
-    planner_config.img_to_control = config.latency.img_to_control();
-    planner_config.steady_state_t0 = config.latency.steady_state_time_constant;
-    planner_config.fire_threshold = config.fire_threshold;
-    gimbal_planner_ = std::make_unique<GimbalPlanner>(planner_config);
+    // 创建子组件 (参数在内部直接调用 get_param)
+    target_selector_ = std::make_unique<TargetSelector>();
+    trajectory_solver_ = std::make_unique<TrajectorySolver>();
+    gimbal_planner_ = std::make_unique<GimbalPlanner>();
 }
 
 FireController::~FireController() = default;
-
-void FireController::set_config(const FireControlConfig& config)
-{
-    config_ = config;
-
-    // 更新子组件配置
-    TrajectorySolver::Config traj_config;
-    traj_config.g = config.gravity;
-    traj_config.k = config.air_resistance_k;
-    traj_config.max_iter = config.trajectory_max_iter;
-    trajectory_solver_->set_config(traj_config);
-
-    GimbalPlanner::Config planner_config;
-    planner_config.q_yaw_pos = config.q_yaw_pos;
-    planner_config.q_yaw_vel = config.q_yaw_vel;
-    planner_config.r_yaw_acc = config.r_yaw_acc;
-    planner_config.q_pitch_pos = config.q_pitch_pos;
-    planner_config.q_pitch_vel = config.q_pitch_vel;
-    planner_config.r_pitch_acc = config.r_pitch_acc;
-    planner_config.max_yaw_acc = config.max_yaw_acc;
-    planner_config.max_pitch_acc = config.max_pitch_acc;
-    planner_config.max_iter = config.mpc_max_iter;
-    planner_config.img_to_control = config.latency.img_to_control();
-    planner_config.steady_state_t0 = config.latency.steady_state_time_constant;
-    planner_config.fire_threshold = config.fire_threshold;
-    gimbal_planner_->set_config(planner_config);
-}
-
-void FireController::set_selector_config(const TargetSelector::Config& config)
-{
-    target_selector_->set_config(config);
-}
 
 void FireController::reset()
 {
@@ -190,7 +136,8 @@ bool FireController::decide_fire(
 )
 {
     // 检查置信度
-    if (confidence < config_.min_confidence) {
+    double min_confidence = runtime_param::get_param<double>("AutoAim.FireControl.min_confidence");
+    if (confidence < min_confidence) {
         return false;
     }
 

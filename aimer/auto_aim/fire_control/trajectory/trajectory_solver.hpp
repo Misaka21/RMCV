@@ -11,6 +11,8 @@
  *   - 动打静: 自身移动，需考虑车辆速度
  *   - 动打动: 双方都移动
  *
+ * 参数通过 runtime_param::get_param 实时获取
+ *
  * 参考: rm.cv.fans (SJTU) ResistanceFuncLinear
  */
 
@@ -24,17 +26,6 @@
 #include "aimer/auto_aim/fire_control/types.hpp"
 
 namespace autoaim::fire_control {
-
-/**
- * @brief 弹道解算器配置
- */
-struct TrajectoryConfig {
-    double g = 9.8;                  // 重力加速度 (m/s²)
-    double resistance_k = 0.01;      // 空气阻力系数
-    int max_iterations = 20;         // Ceres 最大迭代次数
-    double angle_tolerance = 1e-4;   // 角度收敛容差 (rad)
-    bool verbose = false;            // 是否输出调试信息
-};
 
 /**
  * @brief 弹道求解输入参数
@@ -68,7 +59,7 @@ struct TrajectoryInput {
  */
 class TrajectorySolver {
 public:
-    explicit TrajectorySolver(const TrajectoryConfig& config = {});
+    TrajectorySolver() = default;
 
     /**
      * @brief 解算瞄准角度 (统一接口)
@@ -104,15 +95,9 @@ public:
         double fly_time
     ) const;
 
-    // 配置访问
-    void set_config(const TrajectoryConfig& config) { config_ = config; }
-    const TrajectoryConfig& config() const { return config_; }
-
 private:
     AimResult solve_2d(const TrajectoryInput& input) const;
     AimResult solve_3d(const TrajectoryInput& input) const;
-
-    TrajectoryConfig config_;
 };
 
 // ============================================================================

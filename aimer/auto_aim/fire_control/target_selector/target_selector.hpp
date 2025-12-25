@@ -11,6 +11,8 @@
  *
  * 切换策略:
  *   - 迟滞比较，新目标必须明显更好才切换，防止震荡
+ *
+ * 参数通过 runtime_param::get_param 实时获取
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_TARGET_SELECTOR_HPP__
@@ -26,33 +28,7 @@ namespace autoaim::fire_control {
  */
 class TargetSelector {
 public:
-    struct Config {
-        // 权重系数
-        double w_area = 2.0;               // 面积权重 (最重要)
-        double w_still = 1.5;              // 静止权重
-        double w_distance = 1.0;           // 距离权重
-        double w_priority = 1.0;           // 类型优先级权重
-        double w_confidence = 0.5;         // 置信度权重
-
-        // 面积过滤: 小于最大面积 * area_filter_ratio 的排除
-        double area_filter_ratio = 0.4;
-
-        // 迟滞切换: 新目标必须比当前目标好 hysteresis 比例才切换
-        // 例如 0.15 表示新目标评分必须 > 当前 * 1.15
-        double switch_hysteresis = 0.15;
-        double switch_armor_hysteresis = 0.10;  // 同一目标内切换装甲板
-
-        // 静止判定
-        double still_speed_scale = 2.0;    // 速度影响系数
-
-        // 距离参数
-        double max_distance = 10.0;        // 最大有效距离 (m)
-
-        // 角度参数
-        double max_angle = 1.2;            // 最大有效角度 (rad, 约 70°)
-    };
-
-    explicit TargetSelector(const Config& config = {});
+    TargetSelector() = default;
 
     /**
      * @brief 选择目标
@@ -71,10 +47,6 @@ public:
      * @brief 清除目标锁定
      */
     void clear_target();
-
-    // 配置
-    void set_config(const Config& config) { config_ = config; }
-    const Config& config() const { return config_; }
 
 private:
     /**
@@ -113,8 +85,6 @@ private:
      * @brief 迟滞判断: 是否应该切换装甲板
      */
     bool should_switch_armor(double new_score, double current_score) const;
-
-    Config config_;
 
     // 状态
     int current_target_id_ = -1;

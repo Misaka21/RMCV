@@ -1,6 +1,8 @@
 /**
  * @file gimbal_planner.cpp
  * @brief 云台 MPC 轨迹规划器实现
+ *
+ * 参数通过 runtime_param::get_param 实时获取
  */
 
 #include "gimbal_planner.hpp"
@@ -9,17 +11,13 @@
 #include <algorithm>
 
 #include "tinympc/tiny_api.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
 
-GimbalPlanner::GimbalPlanner(const Config& config)
-    : config_(config)
+GimbalPlanner::GimbalPlanner()
 {
-    // 创建弹道解算器
-    TrajectorySolver::Config traj_config;
-    trajectory_solver_ = std::make_unique<TrajectorySolver>(traj_config);
-
-    init_solvers();
+    trajectory_solver_ = std::make_unique<TrajectorySolver>();
 }
 
 GimbalPlanner::~GimbalPlanner()
@@ -32,11 +30,22 @@ GimbalPlanner::~GimbalPlanner()
     }
 }
 
-void GimbalPlanner::set_config(const Config& config)
+void GimbalPlanner::ensure_solvers_initialized()
 {
-    config_ = config;
+    // 读取参数
+    int horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.horizon"));
+    double q_yaw_pos = runtime_param::get_param<double>("AutoAim.FireControl.MPC.q_yaw_pos");
+    double q_pitch_pos = runtime_param::get_param<double>("AutoAim.FireControl.MPC.q_pitch_pos");
 
-    // 重新初始化求解器
+    // 检查参数是否变化，如果变化则重新初始化
+    bool need_reinit = !initialized_ ||
+                       horizon != cached_horizon_ ||
+                       q_yaw_pos != cached_q_yaw_pos_ ||
+                       q_pitch_pos != cached_q_pitch_pos_;
+
+    if (!need_reinit) return;
+
+    // 清理旧的 solver
     if (yaw_solver_) {
         tinympc::tiny_cleanup(yaw_solver_);
         yaw_solver_ = nullptr;
@@ -45,23 +54,23 @@ void GimbalPlanner::set_config(const Config& config)
         tinympc::tiny_cleanup(pitch_solver_);
         pitch_solver_ = nullptr;
     }
-    initialized_ = false;
-    init_solvers();
-}
 
-void GimbalPlanner::init_solvers()
-{
-    if (initialized_) return;
+    // 读取所有 MPC 参数
+    double dt = runtime_param::get_param<double>("AutoAim.FireControl.MPC.dt");
+    double q_yaw_vel = runtime_param::get_param<double>("AutoAim.FireControl.MPC.q_yaw_vel");
+    double r_yaw_acc = runtime_param::get_param<double>("AutoAim.FireControl.MPC.r_yaw_acc");
+    double max_yaw_acc = runtime_param::get_param<double>("AutoAim.FireControl.MPC.max_yaw_acc");
+    double q_pitch_vel = runtime_param::get_param<double>("AutoAim.FireControl.MPC.q_pitch_vel");
+    double r_pitch_acc = runtime_param::get_param<double>("AutoAim.FireControl.MPC.r_pitch_acc");
+    double max_pitch_acc = runtime_param::get_param<double>("AutoAim.FireControl.MPC.max_pitch_acc");
+    int max_iter = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.max_iter"));
+    double rho = runtime_param::get_param<double>("AutoAim.FireControl.MPC.rho");
 
     const int nx = 2;  // [position, velocity]
     const int nu = 1;  // [acceleration]
-    const int N = config_.horizon;
-    const double dt = config_.dt;
+    const int N = horizon;
 
     // 双积分器模型
-    // x[k+1] = A * x[k] + B * u[k]
-    // A = [1, dt]    B = [0 ]
-    //     [0,  1]        [dt]
     Eigen::MatrixXd A(nx, nx);
     A << 1, dt,
          0, 1;
@@ -75,55 +84,57 @@ void GimbalPlanner::init_solvers()
     // ==================== Yaw 求解器 ====================
     {
         Eigen::Matrix<double, 2, 1> Q_diag;
-        Q_diag << config_.q_yaw_pos, config_.q_yaw_vel;
+        Q_diag << q_yaw_pos, q_yaw_vel;
 
         Eigen::Matrix<double, 1, 1> R_diag;
-        R_diag << config_.r_yaw_acc;
+        R_diag << r_yaw_acc;
 
         tinympc::tiny_setup(
             &yaw_solver_,
             A, B, f,
             Q_diag.asDiagonal(),
             R_diag.asDiagonal(),
-            config_.rho, nx, nu, N, 0
+            rho, nx, nu, N, 0
         );
 
-        // 设置约束
         Eigen::MatrixXd x_min = Eigen::MatrixXd::Constant(nx, N, -1e17);
         Eigen::MatrixXd x_max = Eigen::MatrixXd::Constant(nx, N, 1e17);
-        Eigen::MatrixXd u_min = Eigen::MatrixXd::Constant(nu, N - 1, -config_.max_yaw_acc);
-        Eigen::MatrixXd u_max = Eigen::MatrixXd::Constant(nu, N - 1, config_.max_yaw_acc);
+        Eigen::MatrixXd u_min = Eigen::MatrixXd::Constant(nu, N - 1, -max_yaw_acc);
+        Eigen::MatrixXd u_max = Eigen::MatrixXd::Constant(nu, N - 1, max_yaw_acc);
 
         tinympc::tiny_set_bound_constraints(yaw_solver_, x_min, x_max, u_min, u_max);
-        yaw_solver_->settings->max_iter = config_.max_iter;
+        yaw_solver_->settings->max_iter = max_iter;
     }
 
     // ==================== Pitch 求解器 ====================
     {
         Eigen::Matrix<double, 2, 1> Q_diag;
-        Q_diag << config_.q_pitch_pos, config_.q_pitch_vel;
+        Q_diag << q_pitch_pos, q_pitch_vel;
 
         Eigen::Matrix<double, 1, 1> R_diag;
-        R_diag << config_.r_pitch_acc;
+        R_diag << r_pitch_acc;
 
         tinympc::tiny_setup(
             &pitch_solver_,
             A, B, f,
             Q_diag.asDiagonal(),
             R_diag.asDiagonal(),
-            config_.rho, nx, nu, N, 0
+            rho, nx, nu, N, 0
         );
 
-        // 设置约束
         Eigen::MatrixXd x_min = Eigen::MatrixXd::Constant(nx, N, -1e17);
         Eigen::MatrixXd x_max = Eigen::MatrixXd::Constant(nx, N, 1e17);
-        Eigen::MatrixXd u_min = Eigen::MatrixXd::Constant(nu, N - 1, -config_.max_pitch_acc);
-        Eigen::MatrixXd u_max = Eigen::MatrixXd::Constant(nu, N - 1, config_.max_pitch_acc);
+        Eigen::MatrixXd u_min = Eigen::MatrixXd::Constant(nu, N - 1, -max_pitch_acc);
+        Eigen::MatrixXd u_max = Eigen::MatrixXd::Constant(nu, N - 1, max_pitch_acc);
 
         tinympc::tiny_set_bound_constraints(pitch_solver_, x_min, x_max, u_min, u_max);
-        pitch_solver_->settings->max_iter = config_.max_iter;
+        pitch_solver_->settings->max_iter = max_iter;
     }
 
+    // 缓存参数
+    cached_horizon_ = horizon;
+    cached_q_yaw_pos_ = q_yaw_pos;
+    cached_q_pitch_pos_ = q_pitch_pos;
     initialized_ = true;
 }
 
@@ -142,6 +153,13 @@ GimbalPlan GimbalPlanner::plan(
         return result;
     }
 
+    // 确保 solver 已初始化
+    ensure_solvers_initialized();
+
+    // 读取参数
+    int half_horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.half_horizon"));
+    double steady_state_t0 = runtime_param::get_param<double>("AutoAim.FireControl.Latency.steady_state_time_constant");
+
     // 生成参考轨迹 (同济方案：每步选最优装甲板)
     Trajectory ref = generate_reference(target, current_yaw, bullet_speed);
 
@@ -159,16 +177,11 @@ GimbalPlan GimbalPlanner::plan(
     result.yaw.position = normalize_angle(result.yaw.position + current_yaw);
 
     // 目标位置 (不含补偿)
-    result.target_yaw = normalize_angle(yaw_ref(0, config_.half_horizon) + current_yaw);
-    result.target_pitch = pitch_ref(0, config_.half_horizon);
+    result.target_yaw = normalize_angle(yaw_ref(0, half_horizon) + current_yaw);
+    result.target_pitch = pitch_ref(0, half_horizon);
 
     // ==================== 稳态偏差补偿 ====================
-    // 电控 PID 跟踪斜坡函数时存在稳态偏差 = yaw_v * t0
-    // 需要发送 yaw + t0 * yaw_v 来补偿
-    // 这样在稳态时，电控实际达到的角度 = 发送角度 - t0 * yaw_v = 期望角度
-    //
-    // 参考: rm.cv.fans 延迟模型
-    double t0 = config_.steady_state_t0;
+    double t0 = steady_state_t0;
     result.yaw.position = normalize_angle(result.yaw.position + t0 * result.yaw.velocity);
     result.pitch.position = result.pitch.position + t0 * result.pitch.velocity;
 
@@ -177,7 +190,7 @@ GimbalPlan GimbalPlanner::plan(
     double pitch_err = result.pitch.position - result.target_pitch - t0 * result.pitch.velocity;
     result.tracking_error = std::hypot(yaw_err, pitch_err);
 
-    // 计算开火误差 (考虑稳态后的实际误差)
+    // 计算开火误差
     compute_fire_decision(result, yaw_ref, pitch_ref);
 
     result.valid = true;
@@ -195,14 +208,21 @@ GimbalPlan GimbalPlanner::plan_simple(
 {
     GimbalPlan result;
 
+    // 确保 solver 已初始化
+    ensure_solvers_initialized();
+
     // 弹道解算
     AimResult aim = trajectory_solver_->solve(target_pos, bullet_speed);
     if (!aim.valid) {
         return result;
     }
 
+    // 读取参数
+    int horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.horizon"));
+    int half_horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.half_horizon"));
+
     // 构造简单参考轨迹 (恒定目标)
-    const int N = config_.horizon;
+    const int N = horizon;
     Eigen::Matrix<double, 2, Eigen::Dynamic> yaw_ref(2, N);
     Eigen::Matrix<double, 2, Eigen::Dynamic> pitch_ref(2, N);
 
@@ -240,9 +260,17 @@ GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
     double bullet_speed
 )
 {
-    const int N = config_.horizon;
-    const double dt = config_.dt;
-    const int half = config_.half_horizon;
+    // 读取参数
+    int horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.horizon"));
+    int half_horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.half_horizon"));
+    double dt = runtime_param::get_param<double>("AutoAim.FireControl.MPC.dt");
+    double img_to_predict = runtime_param::get_param<double>("AutoAim.FireControl.Latency.img_to_predict");
+    double predict_to_send = runtime_param::get_param<double>("AutoAim.FireControl.Latency.predict_to_send");
+    double send_to_control = runtime_param::get_param<double>("AutoAim.FireControl.Latency.send_to_control");
+    double img_to_control = img_to_predict + predict_to_send + send_to_control;
+
+    const int N = horizon;
+    const int half = half_horizon;
 
     Trajectory traj(4, N);
 
@@ -250,22 +278,7 @@ GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
     bool is_high_spin = target.spin.active &&
                         target.spin.level == predictor::SpinLevel::HIGH;
 
-    // 参考轨迹时间基准:
-    // - MPC 的 half_horizon 对应当前 predict 时刻
-    // - 需要预测到 control 时刻云台应该指向的位置
-    // - control 时刻发出的子弹需要 fly_time 后击中
-    //
-    // 时间轴:
-    //   img ──→ predict (现在) ──→ control ──→ hit
-    //    │                            │          │
-    //    │<── img_to_control ────────>│          │
-    //    │                            │<────────>│
-    //    │                              fly_time
-    //
-    // 预测时间 = (i - half) * dt + img_to_control + fly_time
-
     for (int i = 0; i < N; ++i) {
-        // 相对于 predict 时刻的时间偏移
         double t_from_predict = (i - half) * dt;
 
         // 首先用粗略位置估计飞行时间
@@ -283,9 +296,8 @@ GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
         AimResult rough_aim = trajectory_solver_->solve(rough_pos, bullet_speed);
         double fly_time = rough_aim.valid ? rough_aim.fly_time : 0.1;
 
-        // 完整预测时间 = img_to_control + fly_time
-        // 但 target 的状态是基于 img 时刻的，所以要加上 t_from_predict
-        double total_predict_time = t_from_predict + config_.img_to_control + fly_time;
+        // 完整预测时间
+        double total_predict_time = t_from_predict + img_to_control + fly_time;
 
         // 预测目标在 hit 时刻的位置
         Eigen::Vector3d pos;
@@ -341,19 +353,10 @@ int GimbalPlanner::select_best_armor_at_time(
     double min_dist = 1e10;
 
     for (int i = 0; i < target.armor_count; ++i) {
-        // 预测装甲板位置
         Eigen::Vector3d pos = target.predict_armor_position(i, t);
-
-        // 计算装甲板朝向角 (需要从 armor state 获取或计算)
-        // 简化：使用水平距离最近的装甲板 (同济做法)
         double horiz_dist = pos.head<2>().norm();
 
-        // 过滤：太远的不考虑
         if (horiz_dist > 10.0) continue;
-
-        // 过滤：角度太大的不考虑 (侧面装甲板)
-        // 注意：这里需要预测 t 时刻的 z_to_v，简化处理用距离
-        // 更精确的做法是计算装甲板法向量与视线的夹角
 
         if (horiz_dist < min_dist) {
             min_dist = horiz_dist;
@@ -371,16 +374,10 @@ void GimbalPlanner::compute_fire_decision(
     const Eigen::Matrix<double, 2, Eigen::Dynamic>& pitch_ref
 ) const
 {
-    // 开火决策: MPC 规划轨迹与参考轨迹在 half_horizon 处的误差
-    //
-    // 根据 rm.cv.fans 延迟模型:
-    // - control_to_fire 不参与预测时间计算
-    // - 假设子弹像水流一样持续发射
-    // - 只要 control 时刻瞄准正确，那一刻发出的子弹就能命中
-    //
-    // 因此开火决策只看当前时刻（half_horizon）的误差
+    int half_horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.half_horizon"));
+    double fire_threshold = runtime_param::get_param<double>("AutoAim.FireControl.fire_threshold");
 
-    int fire_idx = config_.half_horizon;
+    int fire_idx = half_horizon;
 
     // 获取 MPC 规划的轨迹在 fire_idx 时刻的位置
     double planned_yaw = yaw_solver_->work->x(0, fire_idx);
@@ -395,7 +392,7 @@ void GimbalPlanner::compute_fire_decision(
     double pitch_err = planned_pitch - ref_pitch;
 
     plan.fire_error = std::hypot(yaw_err, pitch_err);
-    plan.can_fire = plan.fire_error < config_.fire_threshold;
+    plan.can_fire = plan.fire_error < fire_threshold;
 }
 
 AxisPlan GimbalPlanner::solve_axis(
@@ -409,6 +406,8 @@ AxisPlan GimbalPlanner::solve_axis(
 
     if (!solver) return result;
 
+    int half_horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.half_horizon"));
+
     // 设置初始状态
     Eigen::VectorXd x0(2);
     x0 << pos0, vel0;
@@ -421,7 +420,7 @@ AxisPlan GimbalPlanner::solve_axis(
     tinympc::tiny_solve(solver);
 
     // 提取结果
-    const int half = config_.half_horizon;
+    const int half = half_horizon;
     result.position = solver->work->x(0, half);
     result.velocity = solver->work->x(1, half);
     result.acceleration = solver->work->u(0, half);

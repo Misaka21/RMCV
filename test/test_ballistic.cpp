@@ -42,7 +42,7 @@ std::atomic<bool> g_running{true};
 // IMU 数据
 std::mutex g_imu_mutex;
 Eigen::Quaterniond g_q_imu = Eigen::Quaterniond::Identity();
-float g_bullet_speed = 15.0f;
+float g_bullet_speed = 25.0f;
 bool g_imu_valid = false;
 
 // ============================================================================
@@ -117,8 +117,12 @@ int main() {
     std::string port_name = static_param::get_param<std::string>(config, "Serial", "port_name");
     int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
 
-    // 初始化参数系统
-    runtime_param::parameter_run("aimer.toml");
+    // 初始化参数系统 (在单独线程中运行，因为是阻塞函数)
+    std::thread param_thread([]() {
+        runtime_param::parameter_run("aimer.toml");
+    });
+    param_thread.detach();
+    std::this_thread::sleep_for(100ms);  // 等待参数加载
 
     // 初始化 TF 模块
     if (!tf::init()) {

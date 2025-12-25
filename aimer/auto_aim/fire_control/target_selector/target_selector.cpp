@@ -4,6 +4,7 @@
  *
  * 评分: 面积 + 静止 + 距离 + 类型 + 置信度
  * 切换: 迟滞比较，防止震荡
+ * 参数: 通过 runtime_param::get_param 实时获取
  */
 
 #include "target_selector.hpp"
@@ -12,16 +13,14 @@
 #include <cmath>
 #include <limits>
 
+#include "plugin/param/runtime_parameter.hpp"
+
 namespace autoaim::fire_control {
 
 // 装甲板尺寸 (m)
 constexpr double SMALL_ARMOR_WIDTH = 0.135;
 constexpr double LARGE_ARMOR_WIDTH = 0.230;
 constexpr double ARMOR_HEIGHT = 0.055;
-
-TargetSelector::TargetSelector(const Config& config)
-    : config_(config)
-{}
 
 TargetSelection TargetSelector::select(
     const predictor::BattlefieldSnapshot& snapshot,
@@ -30,6 +29,10 @@ TargetSelection TargetSelector::select(
     TargetSelection best;
     double best_score = -std::numeric_limits<double>::infinity();
 
+    // 读取参数
+    double max_angle = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.max_angle");
+    double area_filter_ratio = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.area_filter_ratio");
+
     // 第一遍：找最大面积 (用于过滤和归一化)
     double max_area = 0;
     snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
@@ -37,7 +40,7 @@ TargetSelection TargetSelector::select(
         for (int i = 0; i < vehicle.armor_count; ++i) {
             const auto& armor = vehicle.armors[i];
             if (!armor.visible && !vehicle.spin.active) continue;
-            if (std::abs(armor.z_to_v) > config_.max_angle) continue;
+            if (std::abs(armor.z_to_v) > max_angle) continue;
 
             double area = compute_projected_area(armor);
             max_area = std::max(max_area, area);
@@ -170,7 +173,7 @@ void TargetSelector::clear_target()
 double TargetSelector::compute_projected_area(const predictor::ArmorState& armor) const
 {
     // 装甲板实际尺寸
-    double width = (armor.type == predictor::ArmorType::LARGE)
+    double width = (armor.type == ArmorType::LARGE)
         ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
     double base_area = width * ARMOR_HEIGHT;
 
@@ -190,36 +193,45 @@ double TargetSelector::compute_score(
     const predictor::ArmorState& armor,
     double max_area) const
 {
+    // 读取参数
+    double w_area = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_area");
+    double w_still = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_still");
+    double w_distance = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_distance");
+    double w_priority = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_priority");
+    double w_confidence = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_confidence");
+    double still_speed_scale = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.still_speed_scale");
+    double max_distance = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.max_distance");
+
     double score = 0;
 
     // 1. 面积评分 (0~1, 归一化到最大面积)
     double area = compute_projected_area(armor);
     double area_score = area / max_area;
-    score += config_.w_area * area_score;
+    score += w_area * area_score;
 
     // 2. 静止评分 (0~1, 速度越小越好)
     // 注意: 高速陀螺的装甲板切向速度大但可预测，不适用此评分
     // 火控层面会根据 spin.level 决定打 armor 还是 center
     if (!vehicle.spin.active || vehicle.spin.level != predictor::SpinLevel::HIGH) {
         double speed = armor.velocity.norm();
-        double still_score = 1.0 / (1.0 + speed * config_.still_speed_scale);
-        score += config_.w_still * still_score;
+        double still_score = 1.0 / (1.0 + speed * still_speed_scale);
+        score += w_still * still_score;
     }
 
     // 3. 距离评分 (0~1, 近优先)
     double distance = armor.position.norm();
-    if (distance > config_.max_distance) {
+    if (distance > max_distance) {
         return -std::numeric_limits<double>::infinity();
     }
-    double dist_score = 1.0 - distance / config_.max_distance;
-    score += config_.w_distance * dist_score;
+    double dist_score = 1.0 - distance / max_distance;
+    score += w_distance * dist_score;
 
     // 4. 类型优先级
     double type_priority = get_type_priority(vehicle.enemy_type);
-    score += config_.w_priority * type_priority;
+    score += w_priority * type_priority;
 
     // 5. 置信度
-    score += config_.w_confidence * vehicle.confidence;
+    score += w_confidence * vehicle.confidence;
 
     return score;
 }
@@ -245,6 +257,11 @@ int TargetSelector::select_best_armor(
     const predictor::VehicleState& vehicle,
     double max_area) const
 {
+    // 读取参数
+    double max_angle = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.max_angle");
+    double area_filter_ratio = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.area_filter_ratio");
+    double still_speed_scale = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.still_speed_scale");
+
     int best_idx = -1;
     double best_score = -std::numeric_limits<double>::infinity();
 
@@ -255,15 +272,15 @@ int TargetSelector::select_best_armor(
         if (!armor.visible && !vehicle.spin.active) continue;
 
         // 角度过滤
-        if (std::abs(armor.z_to_v) > config_.max_angle) continue;
+        if (std::abs(armor.z_to_v) > max_angle) continue;
 
         // 面积过滤
         double area = compute_projected_area(armor);
-        if (area < max_area * config_.area_filter_ratio) continue;
+        if (area < max_area * area_filter_ratio) continue;
 
         // 简单评分: 面积 + 静止
         double speed = armor.velocity.norm();
-        double score = area / max_area + 1.0 / (1.0 + speed * config_.still_speed_scale);
+        double score = area / max_area + 1.0 / (1.0 + speed * still_speed_scale);
 
         if (score > best_score) {
             best_score = score;
@@ -276,14 +293,16 @@ int TargetSelector::select_best_armor(
 
 bool TargetSelector::should_switch_target(double new_score, double current_score) const
 {
+    double switch_hysteresis = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.switch_hysteresis");
     // 新目标必须比当前目标好 hysteresis 比例才切换
-    return new_score > current_score * (1.0 + config_.switch_hysteresis);
+    return new_score > current_score * (1.0 + switch_hysteresis);
 }
 
 bool TargetSelector::should_switch_armor(double new_score, double current_score) const
 {
+    double switch_armor_hysteresis = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.switch_armor_hysteresis");
     // 同一目标内切换装甲板，阈值可以小一点
-    return new_score > current_score * (1.0 + config_.switch_armor_hysteresis);
+    return new_score > current_score * (1.0 + switch_armor_hysteresis);
 }
 
 }  // namespace autoaim::fire_control

@@ -29,10 +29,11 @@ class GimbalPlanner;
  * @brief 火控控制器
  *
  * 从 BattlefieldSnapshot 中选择目标，规划云台轨迹，输出控制指令
+ * 参数通过 runtime_param::get_param 实时获取
  */
 class FireController {
 public:
-    explicit FireController(const FireControlConfig& config = {});
+    FireController();
     ~FireController();
 
     // 禁止拷贝
@@ -60,13 +61,6 @@ public:
     const TargetSelection& last_selection() const { return last_selection_; }
     const GimbalPlan& last_plan() const { return last_plan_; }
     const AimResult& last_aim() const { return last_aim_; }
-
-    // 配置
-    void set_config(const FireControlConfig& config);
-    const FireControlConfig& config() const { return config_; }
-
-    // 目标选择器配置
-    void set_selector_config(const TargetSelector::Config& config);
 
 private:
     /**
@@ -126,8 +120,6 @@ private:
     );
 
     // ==================== 数据 ====================
-
-    FireControlConfig config_;
 
     std::unique_ptr<TargetSelector> target_selector_;
     std::unique_ptr<TrajectorySolver> trajectory_solver_;

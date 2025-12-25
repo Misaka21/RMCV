@@ -6,6 +6,8 @@
  *   状态: [position, velocity]
  *   控制: acceleration
  *   模型: 双积分器 x[k+1] = A*x[k] + B*u[k]
+ *
+ * 参数通过 runtime_param::get_param 实时获取
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_GIMBAL_PLANNER_HPP__
@@ -33,38 +35,7 @@ namespace autoaim::fire_control {
  */
 class GimbalPlanner {
 public:
-    struct Config {
-        // 时间参数
-        double dt = 0.01;              // 控制周期 (s)
-        int horizon = 100;             // 预测时域
-        int half_horizon = 50;         // 取控制量的位置
-
-        // yaw 轴参数
-        double q_yaw_pos = 9e6;        // 位置权重
-        double q_yaw_vel = 0;          // 速度权重
-        double r_yaw_acc = 1.0;        // 控制权重
-        double max_yaw_acc = 50.0;     // 最大加速度 (rad/s²)
-
-        // pitch 轴参数
-        double q_pitch_pos = 9e6;
-        double q_pitch_vel = 0;
-        double r_pitch_acc = 1.0;
-        double max_pitch_acc = 100.0;
-
-        // 求解器参数
-        int max_iter = 10;             // 最大迭代次数
-        double rho = 1.0;              // ADMM 惩罚系数
-
-        // 延迟参数
-        double img_to_control = 0.015; // img → control 延迟 (s)
-        double steady_state_t0 = 0.015;// 稳态偏差补偿时间常数 (s)
-
-        // 开火决策参数
-        double fire_threshold = 0.02;  // 开火误差阈值 (rad)
-        double max_armor_angle = 1.2;  // 装甲板最大有效角度 (rad, ~70°)
-    };
-
-    explicit GimbalPlanner(const Config& config = {});
+    GimbalPlanner();
     ~GimbalPlanner();
 
     // 禁止拷贝
@@ -103,18 +74,14 @@ public:
         double bullet_speed
     );
 
-    // 配置
-    void set_config(const Config& config);
-    const Config& config() const { return config_; }
-
 private:
     // MPC 轨迹类型: [yaw, yaw_vel, pitch, pitch_vel] × horizon
     using Trajectory = Eigen::Matrix<double, 4, Eigen::Dynamic>;
 
     /**
-     * @brief 初始化求解器
+     * @brief 初始化求解器 (如果参数变化则重新初始化)
      */
-    void init_solvers();
+    void ensure_solvers_initialized();
 
     /**
      * @brief 生成参考轨迹
@@ -168,14 +135,17 @@ private:
      */
     static double normalize_angle(double angle);
 
-    Config config_;
-
     tinympc::TinySolver* yaw_solver_ = nullptr;
     tinympc::TinySolver* pitch_solver_ = nullptr;
 
     std::unique_ptr<TrajectorySolver> trajectory_solver_;
 
     bool initialized_ = false;
+
+    // 缓存的参数 (用于检测是否需要重新初始化 solver)
+    int cached_horizon_ = 0;
+    double cached_q_yaw_pos_ = 0;
+    double cached_q_pitch_pos_ = 0;
 };
 
 }  // namespace autoaim::fire_control
