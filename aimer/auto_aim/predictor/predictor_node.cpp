@@ -234,6 +234,10 @@ void start_predictor_node() {
             float latency = std::chrono::duration_cast<std::chrono::microseconds>(
                 predict_end - predict_start).count() / 1000.0f;
 
+            // 设置预测完成时间戳 (供火控计算 predict_to_send 延迟)
+            auto predict_time_since_epoch = predict_end.time_since_epoch();
+            snapshot.predict_timestamp = std::chrono::duration<double>(predict_time_since_epoch).count();
+
             // 发布结果
             pub.push(snapshot);
 

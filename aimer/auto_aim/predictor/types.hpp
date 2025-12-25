@@ -333,7 +333,9 @@ struct BattlefieldSnapshot {
     // 检测时刻的自身状态 (火控用)
     aimer::RobotState self_state;
 
-    double timestamp = 0;
+    // 时间戳
+    double timestamp = 0;          // 图像时间戳 (img_t)
+    double predict_timestamp = 0;  // 预测完成时间戳 (predict_t)
     int frame_id = 0;
 
     // ==================== 辅助方法 ====================
