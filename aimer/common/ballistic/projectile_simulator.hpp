@@ -180,12 +180,13 @@ public:
             Eigen::Vector3d pos_barrel = bullet.get_pos_barrel(
                 current_time, config_.g, config_.resistance_k);
 
-            // Barrel → World (使用发射时刻的 IMU)
-            // 注意: 这里简化处理，假设枪管随云台运动
-            // 实际应该用发射时刻的姿态
+            // Barrel → World: 使用发射时刻的姿态
+            // 子弹离开枪管后，其世界位置由发射时刻的姿态决定
+            // 飞行过程中只受重力和空气阻力影响，与云台后续运动无关
             Eigen::Vector3d pos_world = tf::gimbal_to_world(pos_barrel, bullet.q_imu_fire);
 
-            // World → Camera (使用当前时刻的 IMU)
+            // World → Camera: 使用当前时刻的姿态
+            // 把子弹的世界位置投影到当前相机视角
             Eigen::Vector3d pos_cam = tf::world_to_camera(pos_world, q_imu_now);
 
             // 检查是否在相机前方
