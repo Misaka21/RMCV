@@ -5,11 +5,11 @@ find_package(Ceres REQUIRED)
 
 # TinyMPC 库
 add_library(tinympc STATIC
-    planner/tinympc/admm.cpp
-    planner/tinympc/tiny_api.cpp
+    mpc/tinympc/admm.cpp
+    mpc/tinympc/tiny_api.cpp
 )
 target_include_directories(tinympc PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/planner
+    ${CMAKE_CURRENT_SOURCE_DIR}/mpc
 )
 target_link_libraries(tinympc PUBLIC
     Eigen3::Eigen
@@ -17,9 +17,19 @@ target_link_libraries(tinympc PUBLIC
 
 # 火控库
 add_library(fire_control STATIC
+    # 通用模块
     trajectory/trajectory_solver.cpp
     target_selector/target_selector.cpp
-    planner/gimbal_planner.cpp
+
+    # MPC 模式
+    mpc/gimbal_planner.cpp
+    mpc/mpc_controller.cpp
+
+    # PID 模式
+    pid/spin_aim.cpp
+    pid/pid_controller.cpp
+
+    # 调度器
     fire_controller.cpp
     fire_controller_node.cpp
 )
