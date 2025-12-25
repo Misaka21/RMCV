@@ -84,6 +84,9 @@ target_link_libraries(test_transformer ${OpenCV_LIBS} fmt::fmt aimer_common)
 add_executable(test_imu test/test_imu.cpp)
 target_link_libraries(test_imu ${OpenCV_LIBS} fmt::fmt plugin hardware)
 
+add_executable(test_ballistic test/test_ballistic.cpp)
+target_link_libraries(test_ballistic ${OpenCV_LIBS} fmt::fmt plugin hardware aimer_common)
+
 add_executable(test_playback test/test_playback.cpp)
 target_link_libraries(test_playback ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor rmcv_bag)
 
