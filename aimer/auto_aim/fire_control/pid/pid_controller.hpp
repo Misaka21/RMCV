@@ -15,7 +15,6 @@
 
 #include "aimer/auto_aim/fire_control/fire_strategy.hpp"
 #include "aimer/auto_aim/fire_control/types.hpp"
-#include "aimer/auto_aim/fire_control/common/latency_estimator.hpp"
 #include "spin_aim.hpp"
 
 namespace autoaim::fire_control {
@@ -134,7 +133,6 @@ private:
     std::unique_ptr<TargetSelector> target_selector_;
     std::unique_ptr<TrajectorySolver> trajectory_solver_;
     SpinAim spin_aim_;
-    LatencyEstimator latency_estimator_;
 
     // ==================== 状态缓存 ====================
 
