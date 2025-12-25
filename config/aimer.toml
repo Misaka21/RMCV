@@ -133,10 +133,14 @@
 # ==================== 火控配置 ====================
 
 [AutoAim.FireControl]
+    #@bool 是否使用MPC模式，false则使用简化模式 (仅位置跟踪)
+    use_mpc = false
     #@double 射击误差阈值 (rad)，MPC规划误差小于此值才开火
     fire_threshold = 0.02
     #@double 最小置信度，目标置信度低于此值不开火
     min_confidence = 0.3
+    #@double 误差容忍比例 (简化模式)，落点偏移 < 装甲板尺寸 * error_rate 时开火
+    error_rate = 0.6
 
 [AutoAim.FireControl.Latency]
     # 延迟模型 (参考 rm.cv.fans)
