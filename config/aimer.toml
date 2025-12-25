@@ -199,6 +199,13 @@
     #@int MPC 最大迭代次数
     max_iter = 10
 
+[AutoAim.FireControl.PID]
+    #@double 最大跟踪角 (deg)，装甲板朝向超过此角度切换到 INDIRECT 模式
+    max_orientation_angle = 60.0
+    #@double 开火提前量 (s)，INDIRECT 模式额外提前开火的时间
+    # 实际开火时机 = time_to_fire <= control_to_fire + fire_advance
+    fire_advance = 0.03
+
 [AutoAim.FireControl.Trajectory]
     #@double 重力加速度 (m/s²)
     gravity = 9.8
