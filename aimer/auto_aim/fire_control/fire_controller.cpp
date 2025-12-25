@@ -1,0 +1,255 @@
+/**
+ * @file fire_controller.cpp
+ * @brief 火控主类实现
+ */
+
+#include "fire_controller.hpp"
+
+#include <cmath>
+
+#include "planner/gimbal_planner.hpp"
+#include "target_selector/target_selector.hpp"
+#include "trajectory/trajectory_solver.hpp"
+
+namespace autoaim::fire_control {
+
+FireController::FireController(const FireControlConfig& config)
+    : config_(config)
+{
+    // 创建目标选择器
+    TargetSelector::Config selector_config;
+    target_selector_ = std::make_unique<TargetSelector>(selector_config);
+
+    // 创建弹道解算器
+    TrajectorySolver::Config traj_config;
+    traj_config.g = config.gravity;
+    traj_config.k = config.air_resistance_k;
+    traj_config.max_iter = config.trajectory_max_iter;
+    trajectory_solver_ = std::make_unique<TrajectorySolver>(traj_config);
+
+    // 创建云台规划器
+    GimbalPlanner::Config planner_config;
+    planner_config.q_yaw_pos = config.q_yaw_pos;
+    planner_config.q_yaw_vel = config.q_yaw_vel;
+    planner_config.r_yaw_acc = config.r_yaw_acc;
+    planner_config.q_pitch_pos = config.q_pitch_pos;
+    planner_config.q_pitch_vel = config.q_pitch_vel;
+    planner_config.r_pitch_acc = config.r_pitch_acc;
+    planner_config.max_yaw_acc = config.max_yaw_acc;
+    planner_config.max_pitch_acc = config.max_pitch_acc;
+    planner_config.max_iter = config.mpc_max_iter;
+    planner_config.img_to_control = config.latency.img_to_control();
+    planner_config.steady_state_t0 = config.latency.steady_state_time_constant;
+    planner_config.fire_threshold = config.fire_threshold;
+    gimbal_planner_ = std::make_unique<GimbalPlanner>(planner_config);
+}
+
+FireController::~FireController() = default;
+
+void FireController::set_config(const FireControlConfig& config)
+{
+    config_ = config;
+
+    // 更新子组件配置
+    TrajectorySolver::Config traj_config;
+    traj_config.g = config.gravity;
+    traj_config.k = config.air_resistance_k;
+    traj_config.max_iter = config.trajectory_max_iter;
+    trajectory_solver_->set_config(traj_config);
+
+    GimbalPlanner::Config planner_config;
+    planner_config.q_yaw_pos = config.q_yaw_pos;
+    planner_config.q_yaw_vel = config.q_yaw_vel;
+    planner_config.r_yaw_acc = config.r_yaw_acc;
+    planner_config.q_pitch_pos = config.q_pitch_pos;
+    planner_config.q_pitch_vel = config.q_pitch_vel;
+    planner_config.r_pitch_acc = config.r_pitch_acc;
+    planner_config.max_yaw_acc = config.max_yaw_acc;
+    planner_config.max_pitch_acc = config.max_pitch_acc;
+    planner_config.max_iter = config.mpc_max_iter;
+    planner_config.img_to_control = config.latency.img_to_control();
+    planner_config.steady_state_t0 = config.latency.steady_state_time_constant;
+    planner_config.fire_threshold = config.fire_threshold;
+    gimbal_planner_->set_config(planner_config);
+}
+
+void FireController::set_selector_config(const TargetSelector::Config& config)
+{
+    target_selector_->set_config(config);
+}
+
+void FireController::reset()
+{
+    target_selector_->clear_target();
+    last_selection_ = {};
+    last_plan_ = {};
+    last_aim_ = {};
+    lost_count_ = 0;
+}
+
+FireCommand FireController::control(
+    const predictor::BattlefieldSnapshot& snapshot,
+    double current_time
+)
+{
+    // 计算时间差 (用于插值)
+    double dt = current_time - snapshot.timestamp;
+
+    // 从 IMU 获取当前云台姿态
+    extract_euler(snapshot.self_state.q_imu, current_yaw_, current_pitch_);
+
+    // 计算云台速度 (简单差分)
+    if (last_time_ > 0) {
+        double time_diff = current_time - last_time_;
+        if (time_diff > 0.001) {
+            // 这里简化处理，实际应该从 IMU 获取角速度
+            // current_yaw_vel_ = ...
+            // current_pitch_vel_ = ...
+        }
+    }
+    last_time_ = current_time;
+
+    // 阶段1: 目标选择
+    TargetSelection selection = select_target(snapshot, dt);
+    last_selection_ = selection;
+
+    if (!selection.has_target) {
+        lost_count_++;
+        if (lost_count_ > MAX_LOST_COUNT) {
+            reset();
+        }
+        return no_target_command();
+    }
+    lost_count_ = 0;
+
+    // 阶段2: 弹道解算 (验证目标可达)
+    AimResult aim = solve_trajectory(
+        selection.predicted_pos,
+        snapshot.self_state.bullet_speed
+    );
+    last_aim_ = aim;
+
+    if (!aim.valid) {
+        return no_target_command();
+    }
+
+    // 阶段3: MPC 规划
+    GimbalPlan plan = plan_gimbal(
+        *selection.vehicle,
+        snapshot.self_state,
+        snapshot.self_state.bullet_speed
+    );
+    last_plan_ = plan;
+
+    if (!plan.valid) {
+        return no_target_command();
+    }
+
+    // 阶段4: 射击决策
+    bool fire = decide_fire(plan, selection.vehicle->confidence);
+
+    // 生成指令
+    return generate_command(selection, plan, fire);
+}
+
+TargetSelection FireController::select_target(
+    const predictor::BattlefieldSnapshot& snapshot,
+    double dt
+)
+{
+    return target_selector_->select(snapshot, dt);
+}
+
+AimResult FireController::solve_trajectory(
+    const Eigen::Vector3d& target_pos,
+    double bullet_speed
+)
+{
+    return trajectory_solver_->solve(target_pos, bullet_speed);
+}
+
+GimbalPlan FireController::plan_gimbal(
+    const predictor::VehicleState& target,
+    const aimer::RobotState& self_state,
+    double bullet_speed
+)
+{
+    return gimbal_planner_->plan(
+        target,
+        current_yaw_,
+        current_pitch_,
+        current_yaw_vel_,
+        current_pitch_vel_,
+        bullet_speed
+    );
+}
+
+bool FireController::decide_fire(
+    const GimbalPlan& plan,
+    double confidence
+)
+{
+    // 检查置信度
+    if (confidence < config_.min_confidence) {
+        return false;
+    }
+
+    // 使用 MPC 规划器的开火决策 (考虑开火延迟)
+    // plan.can_fire 已经在 GimbalPlanner::compute_fire_decision() 中计算
+    return plan.can_fire;
+}
+
+FireCommand FireController::generate_command(
+    const TargetSelection& selection,
+    const GimbalPlan& plan,
+    bool fire
+)
+{
+    FireCommand cmd;
+    cmd.control_enabled = true;
+
+    // 云台控制
+    cmd.yaw = static_cast<float>(plan.yaw.position);
+    cmd.yaw_vel = static_cast<float>(plan.yaw.velocity);
+    cmd.yaw_acc = static_cast<float>(plan.yaw.acceleration);
+
+    cmd.pitch = static_cast<float>(plan.pitch.position);
+    cmd.pitch_vel = static_cast<float>(plan.pitch.velocity);
+    cmd.pitch_acc = static_cast<float>(plan.pitch.acceleration);
+
+    // 射击控制
+    cmd.allow_fire = true;
+    cmd.fire_now = fire;
+
+    // 调试信息
+    cmd.target_id = selection.target_id;
+    cmd.tracking_error = static_cast<float>(plan.fire_error);  // 使用开火误差
+    cmd.confidence = static_cast<float>(selection.vehicle ? selection.vehicle->confidence : 0);
+
+    return cmd;
+}
+
+FireCommand FireController::no_target_command()
+{
+    FireCommand cmd;
+    cmd.control_enabled = false;
+    cmd.allow_fire = false;
+    cmd.fire_now = false;
+    cmd.target_id = -1;
+    return cmd;
+}
+
+void FireController::extract_euler(
+    const Eigen::Quaterniond& q,
+    double& yaw,
+    double& pitch
+)
+{
+    // 从四元数提取 yaw 和 pitch
+    // 假设 ZYX 顺序
+    Eigen::Vector3d euler = q.toRotationMatrix().eulerAngles(2, 1, 0);
+    yaw = euler[0];
+    pitch = euler[1];
+}
+
+}  // namespace autoaim::fire_control
