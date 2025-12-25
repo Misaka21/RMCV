@@ -89,12 +89,17 @@ private:
     );
 
     /**
-     * @brief 阶段4: 射击决策
+     * @brief 开火条件判断 (统一判断逻辑，基于物理落点)
+     *
+     * 将角度误差转换为落点偏移距离，与装甲板有效区域比较
      */
-    bool decide_fire(
-        const GimbalPlan& plan,
+    bool check_fire_condition(
+        double yaw_err,
+        double pitch_err,
+        double distance,
+        const predictor::ArmorState* armor,
         double confidence
-    );
+    ) const;
 
     /**
      * @brief 生成火控指令 (MPC 模式)

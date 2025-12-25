@@ -14,13 +14,9 @@
 #include <limits>
 
 #include "plugin/param/runtime_parameter.hpp"
+#include "aimer/auto_aim/common/types.hpp"  // 装甲板尺寸常量
 
 namespace autoaim::fire_control {
-
-// 装甲板尺寸 (m)
-constexpr double SMALL_ARMOR_WIDTH = 0.135;
-constexpr double LARGE_ARMOR_WIDTH = 0.230;
-constexpr double ARMOR_HEIGHT = 0.055;
 
 TargetSelection TargetSelector::select(
     const predictor::BattlefieldSnapshot& snapshot,
@@ -172,10 +168,8 @@ void TargetSelector::clear_target()
 
 double TargetSelector::compute_projected_area(const predictor::ArmorState& armor) const
 {
-    // 装甲板实际尺寸
-    double width = (armor.type == ArmorType::LARGE)
-        ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
-    double base_area = width * ARMOR_HEIGHT;
+    // 使用 ArmorState 的尺寸方法
+    double base_area = armor.width() * armor.height();
 
     // 距离平方 (投影面积与距离平方成反比)
     double dist_sq = armor.position.squaredNorm();

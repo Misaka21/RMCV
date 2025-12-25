@@ -96,44 +96,30 @@ FireCommand FireController::control(
             return no_target_command();
         }
 
-        // 阶段4: 射击决策 (基于 MPC 误差)
-        bool fire = decide_fire(plan, selection.vehicle->confidence);
+        // 阶段4: 射击决策 (统一使用物理判断)
+        // MPC 提供了考虑开火延迟后的目标角度
+        double yaw_err = plan.target_yaw - current_yaw_;
+        double pitch_err = plan.target_pitch - current_pitch_;
+        bool fire = check_fire_condition(
+            yaw_err, pitch_err, aim.distance,
+            selection.armor, selection.vehicle->confidence
+        );
 
         // 生成指令 (含速度/加速度前馈)
         return generate_command(selection, plan, fire);
 
     } else {
-        // ========== 简化模式: 仅位置跟踪 (参考 rm.cv.fans) ==========
-        // 直接用弹道解算结果，无 MPC 规划
-
-        // 计算当前云台指向与目标的误差
+        // ========== 简化模式: 仅位置跟踪 ==========
         double yaw_err = aim.yaw - current_yaw_;
         double pitch_err = aim.pitch - current_pitch_;
+        bool fire = check_fire_condition(
+            yaw_err, pitch_err, aim.distance,
+            selection.armor, selection.vehicle->confidence
+        );
 
-        // 将角度误差转换为落点偏移距离 (米)
-        // d = distance * tan(angle) ≈ distance * angle (小角度近似)
-        double distance = aim.distance;
-        double hit_offset_yaw = distance * std::tan(std::abs(yaw_err));
-        double hit_offset_pitch = distance * std::tan(std::abs(pitch_err));
-
-        // 装甲板尺寸 (参考 rm.cv.fans)
-        double armor_width = (selection.armor && selection.armor->type == predictor::ArmorType::LARGE)
-                             ? 0.225 : 0.133;
-        double armor_height = 0.050;
-
-        // 考虑装甲板朝向 (z_to_v 是装甲板法向与视线夹角余弦)
-        double cos_inclined = (selection.armor) ? std::abs(std::cos(selection.armor->z_to_v)) : 1.0;
-
-        // 开火判断: 落点偏移 < 装甲板有效区域
-        double error_rate = runtime_param::get_param<double>("AutoAim.FireControl.error_rate");
-        bool yaw_ok = hit_offset_yaw < (armor_width / 2.0) * cos_inclined * error_rate;
-        bool pitch_ok = hit_offset_pitch < (armor_height / 2.0) * error_rate;
-
-        // 综合判断: 置信度 + 落点在装甲板范围内
-        double min_confidence = runtime_param::get_param<double>("AutoAim.FireControl.min_confidence");
-        bool fire = yaw_ok && pitch_ok && (selection.vehicle->confidence >= min_confidence);
-
-        // 计算跟踪误差 (用于调试)
+        // 计算跟踪误差 (调试用)
+        double hit_offset_yaw = aim.distance * std::tan(std::abs(yaw_err));
+        double hit_offset_pitch = aim.distance * std::tan(std::abs(pitch_err));
         double tracking_error = std::hypot(hit_offset_yaw, hit_offset_pitch);
 
         // 生成简化指令 (仅位置，无前馈)
@@ -173,10 +159,13 @@ GimbalPlan FireController::plan_gimbal(
     );
 }
 
-bool FireController::decide_fire(
-    const GimbalPlan& plan,
+bool FireController::check_fire_condition(
+    double yaw_err,
+    double pitch_err,
+    double distance,
+    const predictor::ArmorState* armor,
     double confidence
-)
+) const
 {
     // 检查置信度
     double min_confidence = runtime_param::get_param<double>("AutoAim.FireControl.min_confidence");
@@ -184,9 +173,23 @@ bool FireController::decide_fire(
         return false;
     }
 
-    // 使用 MPC 规划器的开火决策 (考虑开火延迟)
-    // plan.can_fire 已经在 GimbalPlanner::compute_fire_decision() 中计算
-    return plan.can_fire;
+    // 将角度误差转换为落点偏移距离 (米)
+    double hit_offset_yaw = distance * std::tan(std::abs(yaw_err));
+    double hit_offset_pitch = distance * std::tan(std::abs(pitch_err));
+
+    // 装甲板尺寸 (使用 common/types.hpp 中的常量)
+    double armor_width = armor ? armor->width() : SMALL_ARMOR_WIDTH;
+    double armor_height = armor ? armor->height() : SMALL_ARMOR_HEIGHT;
+
+    // 考虑装甲板朝向 (z_to_v 是装甲板法向与视线夹角)
+    double cos_inclined = armor ? std::abs(std::cos(armor->z_to_v)) : 1.0;
+
+    // 开火判断: 落点偏移 < 装甲板有效区域
+    double error_rate = runtime_param::get_param<double>("AutoAim.FireControl.error_rate");
+    bool yaw_ok = hit_offset_yaw < (armor_width / 2.0) * cos_inclined * error_rate;
+    bool pitch_ok = hit_offset_pitch < (armor_height / 2.0) * error_rate;
+
+    return yaw_ok && pitch_ok;
 }
 
 FireCommand FireController::generate_command(

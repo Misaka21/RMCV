@@ -37,6 +37,17 @@ using EnemyType = ArmorNumber;  // 目标类型别名
 constexpr int MAX_TARGETS = 9;             // 数组大小 (索引 0-8, 目标编号 1-8)
 constexpr int MAX_ARMORS_PER_TARGET = 4;   // 每车最多装甲板数
 
+// 装甲板物理尺寸工具函数 (尺寸定义在 common/types.hpp)
+namespace armor_size {
+    inline constexpr double width(ArmorType type) {
+        return (type == ArmorType::LARGE) ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
+    }
+
+    inline constexpr double height(ArmorType type) {
+        return (type == ArmorType::LARGE) ? LARGE_ARMOR_HEIGHT : SMALL_ARMOR_HEIGHT;
+    }
+}
+
 // ==================== 陀螺等级 ====================
 
 enum class SpinLevel {
@@ -147,6 +158,10 @@ struct ArmorState {
     double score = 0;          // 打击评分 (0~1)
     bool visible = false;      // 当前帧是否可见
     double last_seen = 0;      // 上次看到的时间
+
+    // 装甲板物理尺寸
+    double width() const { return armor_size::width(type); }
+    double height() const { return armor_size::height(type); }
 
     // 插值预测
     Eigen::Vector3d predict_position(double dt) const {
