@@ -35,11 +35,12 @@ void MpcController::reset()
 
 FireCommand MpcController::process(
     const predictor::BattlefieldSnapshot& snapshot,
-    double current_time
+    double current_time,
+    const LatencyInfo& latency
 )
 {
-    // 计算时间差
-    double dt = current_time - snapshot.timestamp;
+    // 使用完整延迟进行位置预测
+    double prediction_dt = latency.prediction_latency();
 
     // 从 IMU 获取当前云台姿态
     extract_euler(snapshot.self_state.q_imu, current_yaw_, current_pitch_);
@@ -55,8 +56,8 @@ FireCommand MpcController::process(
     }
     last_time_ = current_time;
 
-    // 阶段1: 目标选择
-    TargetSelection selection = select_target(snapshot, dt);
+    // 阶段1: 目标选择 (使用完整延迟)
+    TargetSelection selection = select_target(snapshot, prediction_dt);
     last_selection_ = selection;
 
     if (!selection.has_target || !selection.vehicle) {

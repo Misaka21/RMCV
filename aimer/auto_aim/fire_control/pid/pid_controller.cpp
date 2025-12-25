@@ -33,18 +33,20 @@ void PidController::reset()
 
 FireCommand PidController::process(
     const predictor::BattlefieldSnapshot& snapshot,
-    double current_time
+    double current_time,
+    const LatencyInfo& latency
 )
 {
-    // 计算时间差
-    double dt = current_time - snapshot.timestamp;
-
     // 从 IMU 获取当前云台姿态
     extract_euler(snapshot.self_state.q_imu, current_yaw_, current_pitch_);
     last_time_ = current_time;
 
-    // 阶段1: 目标选择
-    TargetSelection selection = select_target(snapshot, dt);
+    // 计算预测延迟 (参考 rm.cv.fans)
+    // prediction_latency = img_to_predict + predict_to_send + send_to_control + fire_to_hit
+    double prediction_dt = latency.prediction_latency();
+
+    // 阶段1: 目标选择 (使用完整延迟进行位置预测)
+    TargetSelection selection = select_target(snapshot, prediction_dt);
     last_selection_ = selection;
 
     if (!selection.has_target || !selection.vehicle) {
@@ -56,15 +58,9 @@ FireCommand PidController::process(
     }
     lost_count_ = 0;
 
-    // 预估飞行时间 (用于反陀螺预测)
-    double distance = selection.predicted_pos.norm();
-    double fly_time = trajectory_solver_->estimate_fly_time(
-        distance,
-        snapshot.self_state.bullet_speed
-    );
-
-    // 阶段2: 反陀螺瞄准
-    SpinAimResult spin_aim = compute_spin_aim(*selection.vehicle, fly_time);
+    // 阶段2: 反陀螺瞄准 (使用 now_to_hit 延迟)
+    // now_to_hit = send_to_control + control_to_fire + fire_to_hit
+    SpinAimResult spin_aim = compute_spin_aim(*selection.vehicle, latency.now_to_hit());
     last_spin_aim_ = spin_aim;
 
     if (!spin_aim.valid) {
@@ -92,7 +88,8 @@ FireCommand PidController::process(
         aim,
         spin_aim,
         armor,
-        selection.vehicle->confidence
+        selection.vehicle->confidence,
+        latency
     );
 
     // 生成指令
@@ -127,7 +124,8 @@ bool PidController::check_fire_condition(
     const AimResult& aim,
     const SpinAimResult& spin_aim,
     const predictor::ArmorState* armor,
-    double confidence
+    double confidence,
+    const LatencyInfo& latency
 ) const
 {
     // 检查置信度
@@ -143,12 +141,11 @@ bool PidController::check_fire_condition(
         double fire_advance = runtime_param::get_param<double>(
             "AutoAim.FireControl.PID.fire_advance"
         );
-        double control_to_fire = runtime_param::get_param<double>(
-            "AutoAim.FireControl.Latency.control_to_fire"
-        );
-        // 开火时机 = 装甲板出现时间 - 指令到出膛延迟 - 提前量
-        // 即: time_to_fire <= control_to_fire + fire_advance 时开火
-        if (spin_aim.time_to_fire > control_to_fire + fire_advance) {
+        // 开火时机: 装甲板将在 now_to_hit 后命中
+        // time_to_fire 是装甲板出现时间
+        // 需要: time_to_fire <= now_to_hit + fire_advance
+        double now_to_hit = latency.send_to_control + latency.control_to_fire + latency.fire_to_hit;
+        if (spin_aim.time_to_fire > now_to_hit + fire_advance) {
             return false;
         }
     }

@@ -45,7 +45,8 @@ public:
 
     FireCommand process(
         const predictor::BattlefieldSnapshot& snapshot,
-        double current_time
+        double current_time,
+        const LatencyInfo& latency
     ) override;
 
     void reset() override;
@@ -101,7 +102,8 @@ private:
         const AimResult& aim,
         const SpinAimResult& spin_aim,
         const predictor::ArmorState* armor,
-        double confidence
+        double confidence,
+        const LatencyInfo& latency
     ) const;
 
     /**

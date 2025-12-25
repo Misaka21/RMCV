@@ -47,11 +47,13 @@ public:
      *
      * @param snapshot 战场快照 (来自 Predictor)
      * @param current_time 当前时间 (s)
+     * @param latency 延迟信息
      * @return 火控指令
      */
     FireCommand control(
         const predictor::BattlefieldSnapshot& snapshot,
-        double current_time
+        double current_time,
+        const LatencyInfo& latency
     );
 
     /**

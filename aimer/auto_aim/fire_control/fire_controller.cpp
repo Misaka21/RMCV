@@ -49,7 +49,8 @@ void FireController::ensure_strategy_initialized()
 
 FireCommand FireController::control(
     const predictor::BattlefieldSnapshot& snapshot,
-    double current_time
+    double current_time,
+    const LatencyInfo& latency
 )
 {
     ensure_strategy_initialized();
@@ -61,7 +62,7 @@ FireCommand FireController::control(
         return cmd;
     }
 
-    return current_strategy_->process(snapshot, current_time);
+    return current_strategy_->process(snapshot, current_time, latency);
 }
 
 void FireController::reset()

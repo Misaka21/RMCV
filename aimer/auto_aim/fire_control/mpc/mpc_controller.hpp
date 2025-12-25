@@ -45,7 +45,8 @@ public:
 
     FireCommand process(
         const predictor::BattlefieldSnapshot& snapshot,
-        double current_time
+        double current_time,
+        const LatencyInfo& latency
     ) override;
 
     void reset() override;

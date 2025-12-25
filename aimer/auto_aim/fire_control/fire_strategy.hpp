@@ -27,11 +27,13 @@ public:
      *
      * @param snapshot 战场快照
      * @param current_time 当前时间 (s)
+     * @param latency 延迟信息 (用于位置预测)
      * @return 火控指令
      */
     virtual FireCommand process(
         const predictor::BattlefieldSnapshot& snapshot,
-        double current_time
+        double current_time,
+        const LatencyInfo& latency
     ) = 0;
 
     /**

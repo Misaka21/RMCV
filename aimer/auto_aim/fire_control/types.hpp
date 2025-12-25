@@ -22,6 +22,49 @@ constexpr double CONTROL_DT = 0.01;        // 控制周期 10ms (100Hz)
 constexpr int MPC_HORIZON = 100;           // MPC 预测时域
 constexpr int MPC_HALF_HORIZON = 50;       // 取控制量的位置 (500ms)
 
+// ==================== 延迟信息 ====================
+
+/**
+ * @brief 延迟信息 (火控全链路延迟)
+ *
+ * 时间线: img → predict → send → control → fire → hit
+ *
+ * 用法:
+ *   prediction_latency = 位置预测用 (不含 control_to_fire)
+ *   hit_latency = 命中时刻计算用 (含 control_to_fire)
+ */
+struct LatencyInfo {
+    double img_to_predict = 0;     // 图像→预测完成 (直接计算)
+    double predict_to_send = 0;    // 预测→发送 (卡尔曼滤波)
+    double send_to_control = 0;    // 发送→控制器响应 (静态配置)
+    double control_to_fire = 0;    // 控制器→出膛 (静态配置)
+    double fire_to_hit = 0;        // 出膛→命中 (distance/bullet_speed)
+
+    /**
+     * @brief 位置预测延迟 (不含 control_to_fire)
+     * 参考 rm.cv.fans: 用于预测目标在控制生效时的位置
+     */
+    double prediction_latency() const {
+        return img_to_predict + predict_to_send + send_to_control + fire_to_hit;
+    }
+
+    /**
+     * @brief 命中延迟 (含 control_to_fire)
+     * 用于反陀螺开火时机判断
+     */
+    double hit_latency() const {
+        return img_to_predict + predict_to_send + send_to_control + control_to_fire + fire_to_hit;
+    }
+
+    /**
+     * @brief 从当前时刻到命中的延迟 (用于开火判断)
+     * = send_to_control + control_to_fire + fire_to_hit
+     */
+    double now_to_hit() const {
+        return send_to_control + control_to_fire + fire_to_hit;
+    }
+};
+
 // ==================== 瞄准结果 ====================
 
 /**
