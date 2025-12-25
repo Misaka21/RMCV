@@ -239,6 +239,9 @@ VehicleState VehicleModel::predict(double timestamp) const {
 
     double dt = timestamp - last_update_time_;
 
+    // 用于置信度计算的变量
+    double best_score = 0;
+
     // 根据陀螺等级选择模型
     if (spin_motion_.get_spin_level() >= SpinLevel::LOW && spin_motion_.valid()) {
         // ========== 陀螺模式: 用 SpinMotion ==========
@@ -256,7 +259,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
         vs.armor_count = armor_num;
 
-        double best_score = -1;
+        double local_best_score = -1;
         int best_idx = -1;
 
         for (int i = 0; i < armor_num; ++i) {
@@ -274,13 +277,14 @@ VehicleState VehicleModel::predict(double timestamp) const {
             double angle_diff = std::abs(math::reduced_angle(armor_yaw - view_yaw - M_PI));
             as.score = std::cos(angle_diff);
 
-            if (as.score > best_score) {
-                best_score = as.score;
+            if (as.score > local_best_score) {
+                local_best_score = as.score;
                 best_idx = i;
             }
         }
 
         vs.recommended_armor_idx = best_idx;
+        best_score = std::max(0.0, local_best_score);
 
     } else {
         // ========== 普通模式: 用 ArmorMotion ==========
@@ -288,7 +292,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
 
         vs.armor_count = static_cast<int>(std::min(armor_states.size(), size_t(MAX_ARMORS_PER_TARGET)));
 
-        double best_score = -1;
+        double local_best_score = -1;
         int best_idx = -1;
         Eigen::Vector3d center_sum = Eigen::Vector3d::Zero();
         Eigen::Vector3d vel_sum = Eigen::Vector3d::Zero();
@@ -301,8 +305,8 @@ VehicleState VehicleModel::predict(double timestamp) const {
             vel_sum += armor_states[i].velocity;
             ++valid_count;
 
-            if (armor_states[i].score > best_score) {
-                best_score = armor_states[i].score;
+            if (armor_states[i].score > local_best_score) {
+                local_best_score = armor_states[i].score;
                 best_idx = i;
             }
         }
@@ -313,7 +317,17 @@ VehicleState VehicleModel::predict(double timestamp) const {
         }
 
         vs.recommended_armor_idx = best_idx;
+        best_score = std::max(0.0, local_best_score);
     }
+
+    // ========== 计算置信度 ==========
+    // 综合考虑: 装甲板朝向分数 + 时间衰减 + 连续观测帧数
+    // 1. 时间衰减: 距上次观测越久越不可靠
+    double time_decay = std::exp(-dt / 0.5);  // 0.5秒时间常数，0.5s后衰减到37%
+    // 2. 帧数因子: 连续观测帧数越多越可靠
+    double frame_factor = std::min(1.0, static_cast<double>(frame_count_) / 5.0);  // 5帧后满分
+    // 3. 综合置信度
+    vs.confidence = best_score * time_decay * frame_factor;
 
     return vs;
 }
