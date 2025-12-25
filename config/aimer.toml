@@ -130,3 +130,101 @@
     #@bool 强制速度清零，每次更新后将vx,vy设为0
     force_zero_velocity = true
 
+# ==================== 火控配置 ====================
+
+[AutoAim.FireControl]
+    #@double 射击误差阈值 (rad)，MPC规划误差小于此值才开火
+    fire_threshold = 0.02
+    #@double 最小置信度，目标置信度低于此值不开火
+    min_confidence = 0.3
+
+[AutoAim.FireControl.Latency]
+    # 延迟模型 (参考 rm.cv.fans)
+    # 时间轴: img → predict → send → control → fire → hit
+    #
+    # 预测时间 = img_to_control + fly_time
+    # 开火时机 = control_to_fire (用于反陀螺打击时机)
+
+    #@double 图像传输 + 神经网络推理延迟 (s)
+    img_to_predict = 0.010
+    #@double 预测计算 + 发送准备延迟 (s)
+    predict_to_send = 0.002
+    #@double 信号传输延迟 (s)
+    # @param +: 调大将使对运动靶的跟踪更超前
+    send_to_control = 0.003
+
+    #@double 控制到开火的延迟 (s)，测量值
+    # @param +: 调大将提早反陀螺模型的打击
+    # @note 不参与预测时间计算，仅用于反陀螺打击时机
+    control_to_fire = 0.020
+
+    #@double 稳态偏差补偿时间常数 t0 (s)
+    # 电控 PID 跟踪斜坡函数时存在稳态偏差 = yaw_v * t0
+    # 需要发送 yaw + t0 * yaw_v 来补偿
+    # 通过跟踪匀速目标实验来暴力测出
+    steady_state_time_constant = 0.015
+
+[AutoAim.FireControl.MPC]
+    #@double 控制周期 (s)
+    dt = 0.01
+    #@int 预测时域
+    horizon = 100
+    #@int 取控制量的位置 (对应500ms)
+    half_horizon = 50
+
+    # yaw 轴参数
+    #@double yaw 位置权重
+    q_yaw_pos = 9e6
+    #@double yaw 速度权重
+    q_yaw_vel = 0.0
+    #@double yaw 控制 (加速度) 权重
+    r_yaw_acc = 1.0
+    #@double yaw 最大加速度 (rad/s²)
+    max_yaw_acc = 50.0
+
+    # pitch 轴参数
+    #@double pitch 位置权重
+    q_pitch_pos = 9e6
+    #@double pitch 速度权重
+    q_pitch_vel = 0.0
+    #@double pitch 控制 (加速度) 权重
+    r_pitch_acc = 1.0
+    #@double pitch 最大加速度 (rad/s²)
+    max_pitch_acc = 100.0
+
+    #@int MPC 最大迭代次数
+    max_iter = 10
+
+[AutoAim.FireControl.Trajectory]
+    #@double 重力加速度 (m/s²)
+    gravity = 9.8
+    #@double 空气阻力系数 k (线性阻力模型)
+    air_resistance_k = 0.01
+    #@int 弹道解算最大迭代次数
+    max_iter = 10
+
+[AutoAim.FireControl.TargetSelector]
+    # 权重系数
+    #@double 面积权重 (最重要)
+    w_area = 2.0
+    #@double 静止权重 (速度越小越好)
+    w_still = 1.5
+    #@double 距离权重 (近优先)
+    w_distance = 1.0
+    #@double 类型优先级权重 (英雄>步兵>哨兵)
+    w_priority = 1.0
+    #@double 置信度权重
+    w_confidence = 0.5
+
+    #@double 面积过滤比例，小于最大面积*此比例的装甲板排除
+    area_filter_ratio = 0.4
+    #@double 目标切换迟滞，新目标必须好于当前*此比例才切换
+    switch_hysteresis = 0.15
+    #@double 同一目标内装甲板切换迟滞
+    switch_armor_hysteresis = 0.10
+    #@double 静止判定速度影响系数
+    still_speed_scale = 2.0
+    #@double 最大有效距离 (m)
+    max_distance = 10.0
+    #@double 最大有效角度 (rad, 约70°)
+    max_angle = 1.2
