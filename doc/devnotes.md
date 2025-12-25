@@ -1,6 +1,9 @@
 # 12.24
 对于predictor和fire_controller,是一对多的关系，因此我不准备用发布订阅，我准备用BasicObjManager或者objmanager，那么我的tf是不是也可以用这个？这样子就不需要传两边参，像rmcvfans，或者有什么更好的解决方案？
 
+对于/Users/david/Documents/GitHub/RMCV/config/aimer.toml里面的transformer，还有/Users/david/Documents/GitHub/RMCV/config/camera.yaml里的旋转矩阵，虽然我是让机械量的，但难免会有装配误差，这时候就需要一个一个尝试，显然不太现实，那能不能有个程序，能够把当前相机的xyz平移，比如+-1cm还有ypr旋转，比如+-10度都搜索一遍，然后选出最优的解，误差最小。比如就是按空格拍下相机前面静止的标定版，pnp测出距离，拍下多组，用opencv？eigen？ceres找出最优解？可以吗？
+
+我可以假设我从枪管系发射了一连串子弹，然后他有自己的初速度和空气阻力，我想把它模拟出来然后画出来，这样子我可以知道我的枪管装的准不准，你可以20hz的发射频率，然后用空心圆把它画出来，并在左边打上发射出去的时候的时间戳
 # 12.20
 数据结构：
 对于架构：用 aimer 作为顶层
