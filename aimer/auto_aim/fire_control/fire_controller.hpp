@@ -97,12 +97,22 @@ private:
     );
 
     /**
-     * @brief 生成火控指令
+     * @brief 生成火控指令 (MPC 模式)
      */
     FireCommand generate_command(
         const TargetSelection& selection,
         const GimbalPlan& plan,
         bool fire
+    );
+
+    /**
+     * @brief 生成简化指令 (仅位置，无 MPC 前馈)
+     */
+    FireCommand generate_simple_command(
+        const TargetSelection& selection,
+        const AimResult& aim,
+        bool fire,
+        double tracking_error
     );
 
     /**
