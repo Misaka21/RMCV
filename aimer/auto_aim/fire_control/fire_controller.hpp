@@ -84,8 +84,7 @@ private:
      */
     GimbalPlan plan_gimbal(
         const predictor::VehicleState& target,
-        const aimer::RobotState& self_state,
-        double bullet_speed
+        const aimer::RobotState& self_state
     );
 
     /**
@@ -94,11 +93,8 @@ private:
      * 将角度误差转换为落点偏移距离，与装甲板有效区域比较
      */
     bool check_fire_condition(
-        double yaw_err,
-        double pitch_err,
-        double distance,
-        const predictor::ArmorState* armor,
-        double confidence
+        const AimResult& aim,
+        const TargetSelection& selection
     ) const;
 
     /**
@@ -116,8 +112,7 @@ private:
     FireCommand generate_simple_command(
         const TargetSelection& selection,
         const AimResult& aim,
-        bool fire,
-        double tracking_error
+        bool fire
     );
 
     /**

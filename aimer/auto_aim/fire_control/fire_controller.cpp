@@ -85,45 +85,27 @@ FireCommand FireController::control(
     if (use_mpc) {
         // ========== MPC 模式: 完整轨迹规划 ==========
         // 阶段3: MPC 规划
-        GimbalPlan plan = plan_gimbal(
-            *selection.vehicle,
-            snapshot.self_state,
-            snapshot.self_state.bullet_speed
-        );
+        GimbalPlan plan = plan_gimbal(*selection.vehicle, snapshot.self_state);
         last_plan_ = plan;
 
         if (!plan.valid) {
             return no_target_command();
         }
 
-        // 阶段4: 射击决策 (统一使用物理判断)
-        // MPC 提供了考虑开火延迟后的目标角度
-        double yaw_err = plan.target_yaw - current_yaw_;
-        double pitch_err = plan.target_pitch - current_pitch_;
-        bool fire = check_fire_condition(
-            yaw_err, pitch_err, aim.distance,
-            selection.armor, selection.vehicle->confidence
-        );
+        // 阶段4: 射击决策
+        // TODO: MPC 模式应该用 plan.target_yaw/pitch 而不是 aim.yaw/pitch
+        // 当前暂时用 aim，后续可优化为使用 MPC 预测的目标角度
+        bool fire = check_fire_condition(aim, selection);
 
         // 生成指令 (含速度/加速度前馈)
         return generate_command(selection, plan, fire);
 
     } else {
         // ========== 简化模式: 仅位置跟踪 ==========
-        double yaw_err = aim.yaw - current_yaw_;
-        double pitch_err = aim.pitch - current_pitch_;
-        bool fire = check_fire_condition(
-            yaw_err, pitch_err, aim.distance,
-            selection.armor, selection.vehicle->confidence
-        );
-
-        // 计算跟踪误差 (调试用)
-        double hit_offset_yaw = aim.distance * std::tan(std::abs(yaw_err));
-        double hit_offset_pitch = aim.distance * std::tan(std::abs(pitch_err));
-        double tracking_error = std::hypot(hit_offset_yaw, hit_offset_pitch);
+        bool fire = check_fire_condition(aim, selection);
 
         // 生成简化指令 (仅位置，无前馈)
-        return generate_simple_command(selection, aim, fire, tracking_error);
+        return generate_simple_command(selection, aim, fire);
     }
 }
 
@@ -145,8 +127,7 @@ AimResult FireController::solve_trajectory(
 
 GimbalPlan FireController::plan_gimbal(
     const predictor::VehicleState& target,
-    const aimer::RobotState& self_state,
-    double bullet_speed
+    const aimer::RobotState& self_state
 )
 {
     return gimbal_planner_->plan(
@@ -155,18 +136,22 @@ GimbalPlan FireController::plan_gimbal(
         current_pitch_,
         current_yaw_vel_,
         current_pitch_vel_,
-        bullet_speed
+        self_state.bullet_speed  // 从 self_state 获取
     );
 }
 
 bool FireController::check_fire_condition(
-    double yaw_err,
-    double pitch_err,
-    double distance,
-    const predictor::ArmorState* armor,
-    double confidence
+    const AimResult& aim,
+    const TargetSelection& selection
 ) const
 {
+    // 从结构体提取数据
+    double yaw_err = aim.yaw - current_yaw_;
+    double pitch_err = aim.pitch - current_pitch_;
+    double distance = aim.distance;
+    const auto* armor = selection.armor;
+    double confidence = selection.vehicle ? selection.vehicle->confidence : 0;
+
     // 检查置信度
     double min_confidence = runtime_param::get_param<double>("AutoAim.FireControl.min_confidence");
     if (confidence < min_confidence) {
@@ -177,7 +162,7 @@ bool FireController::check_fire_condition(
     double hit_offset_yaw = distance * std::tan(std::abs(yaw_err));
     double hit_offset_pitch = distance * std::tan(std::abs(pitch_err));
 
-    // 装甲板尺寸 (使用 common/types.hpp 中的常量)
+    // 装甲板尺寸
     double armor_width = armor ? armor->width() : SMALL_ARMOR_WIDTH;
     double armor_height = armor ? armor->height() : SMALL_ARMOR_HEIGHT;
 
@@ -225,8 +210,7 @@ FireCommand FireController::generate_command(
 FireCommand FireController::generate_simple_command(
     const TargetSelection& selection,
     const AimResult& aim,
-    bool fire,
-    double tracking_error
+    bool fire
 )
 {
     FireCommand cmd;
@@ -234,8 +218,8 @@ FireCommand FireController::generate_simple_command(
 
     // 云台控制 (仅位置，无前馈)
     cmd.yaw = static_cast<float>(aim.yaw);
-    cmd.yaw_vel = 0;   // 无速度前馈
-    cmd.yaw_acc = 0;   // 无加速度前馈
+    cmd.yaw_vel = 0;
+    cmd.yaw_acc = 0;
 
     cmd.pitch = static_cast<float>(aim.pitch);
     cmd.pitch_vel = 0;
@@ -247,8 +231,14 @@ FireCommand FireController::generate_simple_command(
 
     // 调试信息
     cmd.target_id = selection.target_id;
-    cmd.tracking_error = static_cast<float>(tracking_error);
     cmd.confidence = static_cast<float>(selection.vehicle ? selection.vehicle->confidence : 0);
+
+    // 计算跟踪误差 (内部计算)
+    double yaw_err = aim.yaw - current_yaw_;
+    double pitch_err = aim.pitch - current_pitch_;
+    double hit_offset_yaw = aim.distance * std::tan(std::abs(yaw_err));
+    double hit_offset_pitch = aim.distance * std::tan(std::abs(pitch_err));
+    cmd.tracking_error = static_cast<float>(std::hypot(hit_offset_yaw, hit_offset_pitch));
 
     return cmd;
 }
