@@ -102,7 +102,7 @@ void fire_control_run(const std::string& /* config_path */)
                 distance = armor->position.norm();
             }
         }
-        double bullet_speed = std::max(snapshot.self_state.bullet_speed, 10.0);
+        double bullet_speed = std::max(static_cast<double>(snapshot.self_state.bullet_speed), 10.0);
         latency.fire_to_hit = distance / bullet_speed;
 
         // ========== 执行控制 ==========

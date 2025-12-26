@@ -21,6 +21,10 @@
 
 [AutoAim]
 [AutoAim.Predictor]
+    # 可视化
+    #@bool 是否显示预测可视化窗口
+    show_window = true
+
     # 面积过滤
     #@double 已存在装甲板的最小面积比例
     existing_armor_area_ratio = 0.30

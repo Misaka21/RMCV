@@ -6,19 +6,14 @@
  *   状态: [position, velocity]
  *   控制: acceleration
  *   模型: 双积分器 x[k+1] = A*x[k] + B*u[k]
- *
- * 参数通过 runtime_param::get_param 实时获取
  */
 
-#ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_GIMBAL_PLANNER_HPP__
-#define __AIMER_AUTO_AIM_FIRE_CONTROL_GIMBAL_PLANNER_HPP__
-
-#include <memory>
+#ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_MPC_GIMBAL_PLANNER_HPP__
+#define __AIMER_AUTO_AIM_FIRE_CONTROL_MPC_GIMBAL_PLANNER_HPP__
 
 #include <Eigen/Core>
 
 #include "aimer/auto_aim/fire_control/types.hpp"
-#include "aimer/auto_aim/fire_control/trajectory/trajectory_solver.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
 // 前向声明
@@ -27,6 +22,9 @@ namespace tinympc {
 }
 
 namespace autoaim::fire_control {
+
+// 前向声明
+class TrajectorySolver;
 
 /**
  * @brief 云台 MPC 规划器
@@ -46,33 +44,24 @@ public:
      * @brief 规划云台轨迹
      *
      * @param target 目标状态
-     * @param current_yaw 当前 yaw (rad)
-     * @param current_pitch 当前 pitch (rad)
-     * @param current_yaw_vel 当前 yaw 速度 (rad/s)
-     * @param current_pitch_vel 当前 pitch 速度 (rad/s)
+     * @param gimbal 当前云台状态
+     * @param solver 弹道解算器 (共享引用)
+     * @param latency 延迟信息
      * @param bullet_speed 弹速 (m/s)
      * @return 规划结果
      */
     GimbalPlan plan(
         const predictor::VehicleState& target,
-        double current_yaw,
-        double current_pitch,
-        double current_yaw_vel,
-        double current_pitch_vel,
+        const GimbalState& gimbal,
+        TrajectorySolver& solver,
+        const LatencyInfo& latency,
         double bullet_speed
     );
 
     /**
-     * @brief 简化规划 (直接跟踪单点)
+     * @brief 重置状态
      */
-    GimbalPlan plan_simple(
-        const Eigen::Vector3d& target_pos,
-        double current_yaw,
-        double current_pitch,
-        double current_yaw_vel,
-        double current_pitch_vel,
-        double bullet_speed
-    );
+    void reset();
 
 private:
     // MPC 轨迹类型: [yaw, yaw_vel, pitch, pitch_vel] × horizon
@@ -91,17 +80,14 @@ private:
      */
     Trajectory generate_reference(
         const predictor::VehicleState& target,
-        double yaw0,
+        const GimbalState& gimbal,
+        TrajectorySolver& solver,
+        const LatencyInfo& latency,
         double bullet_speed
     );
 
     /**
      * @brief 选择某时刻的最优装甲板
-     *
-     * @param target 目标状态
-     * @param t 预测时间 (相对当前)
-     * @param out_pos 输出：装甲板位置
-     * @return 装甲板索引，-1 表示无有效装甲板
      */
     int select_best_armor_at_time(
         const predictor::VehicleState& target,
@@ -110,20 +96,11 @@ private:
     ) const;
 
     /**
-     * @brief 计算开火误差
-     *
-     * 考虑开火延迟，计算子弹出膛时刻的预测误差
-     */
-    void compute_fire_decision(
-        GimbalPlan& plan,
-        const Eigen::Matrix<double, 2, Eigen::Dynamic>& yaw_ref,
-        const Eigen::Matrix<double, 2, Eigen::Dynamic>& pitch_ref
-    ) const;
-
-    /**
      * @brief 求解单轴 MPC
+     *
+     * @return {position, velocity, acceleration}
      */
-    AxisPlan solve_axis(
+    std::tuple<double, double, double> solve_axis(
         tinympc::TinySolver* solver,
         const Eigen::Matrix<double, 2, Eigen::Dynamic>& ref,
         double pos0,
@@ -138,8 +115,6 @@ private:
     tinympc::TinySolver* yaw_solver_ = nullptr;
     tinympc::TinySolver* pitch_solver_ = nullptr;
 
-    std::unique_ptr<TrajectorySolver> trajectory_solver_;
-
     bool initialized_ = false;
 
     // 缓存的参数 (用于检测是否需要重新初始化 solver)
@@ -150,4 +125,4 @@ private:
 
 }  // namespace autoaim::fire_control
 
-#endif  // __AIMER_AUTO_AIM_FIRE_CONTROL_GIMBAL_PLANNER_HPP__
+#endif  // __AIMER_AUTO_AIM_FIRE_CONTROL_MPC_GIMBAL_PLANNER_HPP__

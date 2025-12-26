@@ -17,19 +17,18 @@ target_link_libraries(tinympc PUBLIC
 
 # 火控库
 add_library(fire_control STATIC
-    # 通用模块
+    # 共享模块
     trajectory/trajectory_solver.cpp
     target_selector/target_selector.cpp
+    fire_decision.cpp
 
     # MPC 模式
     mpc/gimbal_planner.cpp
-    mpc/mpc_controller.cpp
 
     # PID 模式
     pid/spin_aim.cpp
-    pid/pid_controller.cpp
 
-    # 调度器
+    # 主类
     fire_controller.cpp
     fire_controller_node.cpp
 )
@@ -43,7 +42,6 @@ target_include_directories(fire_control PUBLIC
 target_link_libraries(fire_control PUBLIC
     tinympc
     Eigen3::Eigen
-    umt
-    debug_log
+    plugin
     ${CERES_LIBRARIES}
 )

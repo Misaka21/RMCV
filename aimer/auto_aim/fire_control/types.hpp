@@ -3,13 +3,16 @@
  * @brief 火控模块类型定义
  *
  * 数据流:
- *   BattlefieldSnapshot → 目标选择 → 弹道解算 → MPC规划 → FireCommand → 串口
+ *   BattlefieldSnapshot → 目标选择 → 弹道解算 → 规划 → FireCommand
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_TYPES_HPP__
 #define __AIMER_AUTO_AIM_FIRE_CONTROL_TYPES_HPP__
 
+#include <cmath>
+
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/common/robot_state.hpp"
@@ -19,8 +22,48 @@ namespace autoaim::fire_control {
 // ==================== 常量定义 ====================
 
 constexpr double CONTROL_DT = 0.01;        // 控制周期 10ms (100Hz)
-constexpr int MPC_HORIZON = 100;           // MPC 预测时域
-constexpr int MPC_HALF_HORIZON = 50;       // 取控制量的位置 (500ms)
+
+// ==================== 云台状态 ====================
+
+/**
+ * @brief 云台当前状态
+ */
+struct GimbalState {
+    double yaw = 0;            // 当前 yaw (rad)
+    double pitch = 0;          // 当前 pitch (rad)
+    double yaw_vel = 0;        // yaw 角速度 (rad/s)
+    double pitch_vel = 0;      // pitch 角速度 (rad/s)
+
+    double last_yaw = 0;
+    double last_pitch = 0;
+
+    /**
+     * @brief 从 IMU 四元数更新状态
+     */
+    void update(const Eigen::Quaterniond& q_imu, double dt) {
+        // 提取 yaw/pitch (ZYX 顺序)
+        Eigen::Vector3d euler = q_imu.toRotationMatrix().eulerAngles(2, 1, 0);
+        double new_yaw = euler[0];
+        double new_pitch = euler[1];
+
+        // 计算角速度 (简单差分)
+        if (dt > 0.001) {
+            yaw_vel = normalize_angle(new_yaw - last_yaw) / dt;
+            pitch_vel = (new_pitch - last_pitch) / dt;
+        }
+
+        last_yaw = yaw;
+        last_pitch = pitch;
+        yaw = new_yaw;
+        pitch = new_pitch;
+    }
+
+    static double normalize_angle(double angle) {
+        while (angle > M_PI) angle -= 2 * M_PI;
+        while (angle < -M_PI) angle += 2 * M_PI;
+        return angle;
+    }
+};
 
 // ==================== 延迟信息 ====================
 
@@ -82,32 +125,25 @@ struct AimResult {
     Eigen::Vector3d hit_point = Eigen::Vector3d::Zero();
 };
 
-// ==================== MPC 规划结果 ====================
+// ==================== 规划结果 ====================
 
 /**
- * @brief 云台规划结果 (单轴)
- */
-struct AxisPlan {
-    double position = 0;       // 位置 (rad)
-    double velocity = 0;       // 速度 (rad/s)
-    double acceleration = 0;   // 加速度 (rad/s²)
-};
-
-/**
- * @brief 云台规划结果 (双轴)
+ * @brief 云台规划结果 (MPC 输出)
  */
 struct GimbalPlan {
     bool valid = false;
 
-    AxisPlan yaw;
-    AxisPlan pitch;
+    // 位置
+    double yaw = 0;            // yaw (rad)
+    double pitch = 0;          // pitch (rad)
 
-    double target_yaw = 0;     // 目标 yaw (用于计算误差)
-    double target_pitch = 0;   // 目标 pitch
+    // 速度 (MPC 前馈，PID 模式为 0)
+    double yaw_vel = 0;        // yaw 速度 (rad/s)
+    double pitch_vel = 0;      // pitch 速度 (rad/s)
 
-    double tracking_error = 0; // 当前跟踪误差 (rad)
-    double fire_error = 0;     // 考虑开火延迟后的预测误差 (rad)
-    bool can_fire = false;     // 是否可以开火 (fire_error < threshold)
+    // 加速度 (MPC 前馈，PID 模式为 0)
+    double yaw_acc = 0;        // yaw 加速度 (rad/s²)
+    double pitch_acc = 0;      // pitch 加速度 (rad/s²)
 };
 
 // ==================== 火控指令 ====================
