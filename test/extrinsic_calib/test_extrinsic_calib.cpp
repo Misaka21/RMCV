@@ -299,8 +299,14 @@ int main() {
     std::string port_name = static_param::get_param<std::string>(config, "Serial", "port_name");
     int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
 
-    // 初始化参数系统 (读取aimer.toml中的offset)
-    runtime_param::parameter_run("aimer.toml");
+    // 启动运行时参数热重载线程 (读取aimer.toml中的offset)
+    std::thread param_thread([]() {
+        runtime_param::parameter_run("aimer.toml");
+    });
+    param_thread.detach();
+
+    // 等待参数加载完成
+    runtime_param::wait_for_param("ok");
 
     // 初始化TF模块 (加载相机内参和基础外参)
     if (!tf::init()) {

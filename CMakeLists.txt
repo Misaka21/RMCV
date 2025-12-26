@@ -87,6 +87,9 @@ target_link_libraries(test_imu ${OpenCV_LIBS} fmt::fmt plugin hardware)
 add_executable(test_ballistic test/test_ballistic.cpp)
 target_link_libraries(test_ballistic ${OpenCV_LIBS} fmt::fmt plugin hardware aimer_common)
 
+add_executable(test_calibration test/test_calibration.cpp)
+target_link_libraries(test_calibration ${OpenCV_LIBS} fmt::fmt plugin hardware)
+
 add_executable(test_playback test/test_playback.cpp)
 target_link_libraries(test_playback ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor rmcv_bag)
 
@@ -117,6 +120,14 @@ endif()
 add_executable(test_timestamp test/time_sync/test_timestamp.cpp)
 target_include_directories(test_timestamp PRIVATE ${PROJECT_SOURCE_DIR}/test)
 target_link_libraries(test_timestamp ${OpenCV_LIBS} fmt::fmt plugin hardware)
+
+# 火控可视化测试 (默认使用实车硬件，可选模拟器)
+add_executable(test_fire_control test/test_fire_control.cpp)
+target_link_libraries(test_fire_control ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor fire_control)
+if(SIMULATOR_FOUND)
+    target_compile_definitions(test_fire_control PRIVATE SIMULATOR_FOUND)
+    target_link_libraries(test_fire_control simulator)
+endif()
 
 # Simulator测试 (需要ROS2环境)
 if(SIMULATOR_FOUND)
