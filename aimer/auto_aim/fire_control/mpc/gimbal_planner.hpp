@@ -23,9 +23,6 @@ namespace tinympc {
 
 namespace autoaim::fire_control {
 
-// 前向声明
-class TrajectorySolver;
-
 /**
  * @brief 云台 MPC 规划器
  *
@@ -45,7 +42,6 @@ public:
      *
      * @param target 目标状态
      * @param gimbal 当前云台状态
-     * @param solver 弹道解算器 (共享引用)
      * @param latency 延迟信息
      * @param bullet_speed 弹速 (m/s)
      * @return 规划结果
@@ -53,7 +49,6 @@ public:
     GimbalPlan plan(
         const predictor::VehicleState& target,
         const GimbalState& gimbal,
-        TrajectorySolver& solver,
         const LatencyInfo& latency,
         double bullet_speed
     );
@@ -81,7 +76,6 @@ private:
     Trajectory generate_reference(
         const predictor::VehicleState& target,
         const GimbalState& gimbal,
-        TrajectorySolver& solver,
         const LatencyInfo& latency,
         double bullet_speed
     );

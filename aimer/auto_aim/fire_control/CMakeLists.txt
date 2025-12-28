@@ -19,6 +19,7 @@ target_link_libraries(tinympc PUBLIC
 add_library(fire_control STATIC
     # 共享模块
     trajectory/trajectory_solver.cpp
+    trajectory/rk4_trajectory_solver.cpp
     target_selector/target_selector.cpp
     fire_decision.cpp
 

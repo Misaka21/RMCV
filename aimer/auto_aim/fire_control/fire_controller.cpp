@@ -73,7 +73,7 @@ FireCommand FireController::control(
         );
 
         // 弹道解算
-        AimResult aim = trajectory_solver_.solve(
+        AimResult aim = trajectory::solve(
             predicted_pos, snapshot.self_state.bullet_speed
         );
 
@@ -103,11 +103,10 @@ FireCommand FireController::process_mpc(
     const LatencyInfo& latency
 )
 {
-    // MPC 规划 (使用共享的 trajectory_solver_)
+    // MPC 规划
     GimbalPlan plan = gimbal_planner_->plan(
         *selection.vehicle,
         gimbal_state_,
-        trajectory_solver_,
         latency,
         snapshot.self_state.bullet_speed
     );
@@ -118,7 +117,7 @@ FireCommand FireController::process_mpc(
     }
 
     // 弹道解算 (用于开火判断)
-    AimResult aim = trajectory_solver_.solve(
+    AimResult aim = trajectory::solve(
         selection.predicted_pos,
         snapshot.self_state.bullet_speed
     );
@@ -162,7 +161,7 @@ FireCommand FireController::process_pid(
     }
 
     // 弹道解算
-    AimResult aim = trajectory_solver_.solve(
+    AimResult aim = trajectory::solve(
         spin_result.target_pos,
         snapshot.self_state.bullet_speed
     );

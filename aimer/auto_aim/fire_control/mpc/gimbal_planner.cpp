@@ -10,7 +10,7 @@
 #include <tuple>
 
 #include "tinympc/tiny_api.hpp"
-#include "aimer/auto_aim/fire_control/trajectory/trajectory_solver.hpp"
+#include "aimer/auto_aim/fire_control/trajectory/trajectory_solver_factory.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
@@ -143,7 +143,6 @@ void GimbalPlanner::ensure_solvers_initialized()
 GimbalPlan GimbalPlanner::plan(
     const predictor::VehicleState& target,
     const GimbalState& gimbal,
-    TrajectorySolver& solver,
     const LatencyInfo& latency,
     double bullet_speed
 )
@@ -160,8 +159,8 @@ GimbalPlan GimbalPlanner::plan(
     // 读取参数
     int half_horizon = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.MPC.half_horizon"));
 
-    // 生成参考轨迹 (使用传入的 solver)
-    Trajectory ref = generate_reference(target, gimbal, solver, latency, bullet_speed);
+    // 生成参考轨迹
+    Trajectory ref = generate_reference(target, gimbal, latency, bullet_speed);
 
     // 提取 yaw 和 pitch 参考
     Eigen::Matrix<double, 2, Eigen::Dynamic> yaw_ref = ref.topRows(2);
@@ -189,7 +188,6 @@ GimbalPlan GimbalPlanner::plan(
 GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
     const predictor::VehicleState& target,
     const GimbalState& gimbal,
-    TrajectorySolver& solver,
     const LatencyInfo& latency,
     double bullet_speed
 )
@@ -226,7 +224,7 @@ GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
         }
 
         // 弹道解算获取飞行时间
-        AimResult rough_aim = solver.solve(rough_pos, bullet_speed);
+        AimResult rough_aim = trajectory::solve(rough_pos, bullet_speed);
         double fly_time = rough_aim.valid ? rough_aim.fly_time : 0.1;
 
         // 完整预测时间
@@ -244,7 +242,7 @@ GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
         }
 
         // 弹道解算得到瞄准角度
-        AimResult aim = solver.solve(pos, bullet_speed);
+        AimResult aim = trajectory::solve(pos, bullet_speed);
         if (!aim.valid) {
             if (i > 0) {
                 traj.col(i) = traj.col(i - 1);

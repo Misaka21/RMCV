@@ -214,12 +214,24 @@
     fire_advance = 0.03
 
 [AutoAim.FireControl.Trajectory]
+    #@string 求解器类型: "analytic_linear" (解析解+Ceres,快), "rk4_linear" (RK4+线性阻力), "rk4_quadratic" (RK4+二次阻力,吊射推荐)
+    solver = "analytic_linear"
+    #@string 阻力模型 (仅RK4生效): "linear" 或 "quadratic"
+    drag_model = "quadratic"
     #@double 重力加速度 (m/s²)
     gravity = 9.8
-    #@double 空气阻力系数 k (线性阻力模型)
+    #@double 空气阻力系数 k
+    # 线性模型: a = -k*v, 单位 1/s
+    # 二次模型: a = -k*v*|v|, 单位 1/m, 对于17mm弹丸约 0.001~0.005
     air_resistance_k = 0.01
-    #@int 弹道解算最大迭代次数
+    #@int 弹道解算最大迭代次数 (Ceres)
     max_iter = 10
+    #@double RK4积分步长 (s)
+    rk4_dt = 0.001
+    #@int RK4二分法最大迭代
+    rk4_max_iter = 50
+    #@double RK4收敛阈值 (m)
+    rk4_tolerance = 0.001
 
 [AutoAim.FireControl.TargetSelector]
     # 权重系数
