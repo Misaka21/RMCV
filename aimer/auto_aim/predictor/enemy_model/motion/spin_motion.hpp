@@ -282,8 +282,10 @@ private:
 
     /**
      * @brief 构建观测噪声矩阵
+     * @param distance 装甲板距离
+     * @param z_to_v 装甲板朝向与视线夹角 (越大越侧面)
      */
-    MatrixZZ build_R(double distance) const;
+    MatrixZZ build_R(double distance, double z_to_v) const;
 
     // ==================== EKF ====================
     Ekf ekf_;

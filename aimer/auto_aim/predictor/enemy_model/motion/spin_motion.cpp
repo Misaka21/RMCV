@@ -181,7 +181,7 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
 
     // 观测更新
     SpinMeasure measure_func(dz_);
-    MatrixZZ R = build_R(obs.z[obs::DIST]);
+    MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
     ekf_.update_forward(measure_func, z, R);
 
     // 限制半径范围
@@ -333,19 +333,23 @@ SpinMotion::MatrixXX SpinMotion::build_Q(double dt) const {
     return Q;
 }
 
-SpinMotion::MatrixZZ SpinMotion::build_R(double distance) const {
+SpinMotion::MatrixZZ SpinMotion::build_R(double distance, double z_to_v) const {
     MatrixZZ R = MatrixZZ::Zero();
 
     double r_angle = get_r_angle();
     double r_dis_k = get_r_dis_k();
     double r_armor_yaw = get_r_armor_yaw();
 
+    // 侧面观看时距离噪声更大 (陀螺模式尤其重要)
+    // z_to_v 越大越侧面，log(|z_to_v| + 1) + 1 作为缩放因子
+    double side_factor = std::log(std::abs(z_to_v) + 1) + 1;
+
     // 角度噪声: 与距离无关
     R(spin_model::YAW, spin_model::YAW) = r_angle;
     R(spin_model::PITCH, spin_model::PITCH) = r_angle;
 
-    // 距离噪声: ∝ d²
-    R(spin_model::DIS, spin_model::DIS) = r_dis_k * distance * distance;
+    // 距离噪声: ∝ d² × side_factor
+    R(spin_model::DIS, spin_model::DIS) = r_dis_k * distance * distance * side_factor;
 
     // 装甲板朝向噪声
     R(spin_model::ARMOR_YAW, spin_model::ARMOR_YAW) = r_armor_yaw;
