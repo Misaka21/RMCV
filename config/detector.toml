@@ -4,6 +4,8 @@
     #@string 检测器类型: "traditional" 或 "yolo"
     type = "traditional"
 
+# ==================== 传统检测器配置 ====================
+
 [Detector.traditional]
     #@bool 是否开启调试模式
     debug = false
@@ -48,10 +50,36 @@
     #@double 装甲板最大倾斜角度 (度)
     max_angle = 35.0
 
+# ==================== YOLO 检测器配置 ====================
+# 来自 RobotPilots 的魔改 YOLOv5 (MobileNetV3 backbone)
+# 模型直接输出关键点 + 颜色 + 类别
+
 [Detector.yolo]
-    #@string YOLO检测模型路径
-    detect_model = ""
-    #@string YOLO分类模型路径
-    classify_model = ""
-    #@double 最小置信度
-    min_confidence = 0.5
+    #@string 推理后端: "openvino" | "tensorrt" | "onnxruntime"
+    backend = "openvino"
+
+    #@string 模型文件 (相对于 asset 目录)
+    model = "armor_0526.onnx"
+
+    #@int 输入尺寸 (正方形)
+    input_size = 640
+
+    #@double 置信度阈值
+    conf_threshold = 0.65
+
+    #@double NMS 阈值
+    nms_threshold = 0.45
+
+# OpenVINO 后端配置
+[Detector.yolo.openvino]
+    #@string 推理设备: "CPU" | "GPU" | "AUTO"
+    device = "GPU"
+
+# TensorRT 后端配置 (预留)
+[Detector.yolo.tensorrt]
+    #@bool 使用 FP16 推理
+    fp16 = true
+    #@bool 使用 INT8 量化
+    int8 = false
+    #@int 工作空间大小 (MB)
+    workspace_mb = 1024

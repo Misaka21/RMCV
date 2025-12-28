@@ -13,9 +13,9 @@
 // 传统检测器 (始终可用)
 #include "detector_rv/armor_detector.hpp"
 
-// YOLO检测器 (可选)
+// YOLO检测器 (可选，OpenVINO 后端)
 #ifdef ENABLE_YOLO_DETECTOR
-// #include "detector_yolo/yolo_detector.hpp"
+#include "detector_ov/openvino_detector.hpp"
 #endif
 
 namespace autoaim::detector {
@@ -36,8 +36,7 @@ inline std::unique_ptr<DetectorInterface> create_detector_from_config(
 
         case DetectorType::YOLO:
 #ifdef ENABLE_YOLO_DETECTOR
-            // return YoloDetector::from_config(color);
-            throw std::runtime_error("YOLO detector not implemented yet");
+            return OpenvinoDetector::from_config(color);
 #else
             throw std::runtime_error(
                 "YOLO detector not enabled. "

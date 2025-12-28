@@ -8,12 +8,12 @@ option(ENABLE_YOLO_DETECTOR "Enable YOLO detector (requires OpenVINO)" OFF)
 # 添加传统检测器 (始终编译)
 add_subdirectory(detector_rv)
 
-# 可选: YOLO检测器
+# 可选: YOLO 检测器 (OpenVINO)
 if(ENABLE_YOLO_DETECTOR)
-    # add_subdirectory(detector_yolo)
-    message(STATUS "YOLO detector: ENABLED")
+    add_subdirectory(detector_ov)
+    message(STATUS "YOLO detector (OpenVINO): ENABLED")
 else()
-    message(STATUS "YOLO detector: DISABLED")
+    message(STATUS "YOLO detector (OpenVINO): DISABLED")
 endif()
 
 # 创建 detector_node 库
@@ -36,10 +36,10 @@ target_link_libraries(detector_node PUBLIC
     fmt::fmt
 )
 
-# 传递编译宏
+# 传递编译宏并链接 YOLO 检测器
 if(ENABLE_YOLO_DETECTOR)
     target_compile_definitions(detector_node PUBLIC ENABLE_YOLO_DETECTOR)
-    # target_link_libraries(detector_node PUBLIC detector_yolo)
+    target_link_libraries(detector_node PUBLIC detector_openvino)
 endif()
 
 # 创建 detector 统一接口库
