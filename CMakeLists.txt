@@ -9,7 +9,12 @@ option(ENABLE_PROFILING "Enable profiling support for VTune/perf" OFF)
 
 find_program(CCACHE_PROGRAM ccache)
 if (CCACHE_PROGRAM)
+    message(STATUS "ccache found - compilation will be cached for faster rebuilds")
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+else ()
+    message(STATUS "ccache not found - to speed up compilation, install it:")
+    message(STATUS "  Ubuntu/Debian: sudo apt-get install ccache")
+    message(STATUS "  macOS: brew install ccache")
 endif ()
 add_compile_options(-Wall -Werror=return-type -Wno-unused-variable)
 
