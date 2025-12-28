@@ -140,6 +140,24 @@ void print_calibration_result(const cv::Mat& camera_matrix, const cv::Mat& dist_
               << dist_coeffs.at<double>(3) << ", "
               << dist_coeffs.at<double>(4) << " ]\n";
     std::cout << "===================================================\n";
+
+    // 记录到日志文件
+    debug::print("info", "Calibration", "========== 相机内参标定结果 ==========");
+    debug::print("info", "Calibration", "RMS 重投影误差: {:.6f} 像素", rms_error);
+    debug::print("info", "Calibration", "图像尺寸: {} x {}", image_size.width, image_size.height);
+    debug::print("info", "Calibration", "camera_matrix:");
+    debug::print("info", "Calibration", "  fx = {:.16f}", camera_matrix.at<double>(0, 0));
+    debug::print("info", "Calibration", "  fy = {:.16f}", camera_matrix.at<double>(1, 1));
+    debug::print("info", "Calibration", "  cx = {:.16f}", camera_matrix.at<double>(0, 2));
+    debug::print("info", "Calibration", "  cy = {:.16f}", camera_matrix.at<double>(1, 2));
+    debug::print("info", "Calibration", "distort_coeffs: [ {:.16f}, {:.16f}, {:.16f}, {:.16f}, {:.16f} ]",
+        dist_coeffs.at<double>(0), dist_coeffs.at<double>(1), dist_coeffs.at<double>(2),
+        dist_coeffs.at<double>(3), dist_coeffs.at<double>(4));
+    debug::print("info", "Calibration", "YAML格式:");
+    debug::print("info", "Calibration", "camera_matrix: [ {:.16f}, 0, {:.16f}, 0, {:.16f}, {:.16f}, 0, 0, 1 ]",
+        camera_matrix.at<double>(0, 0), camera_matrix.at<double>(0, 2),
+        camera_matrix.at<double>(1, 1), camera_matrix.at<double>(1, 2));
+    debug::print("info", "Calibration", "===========================================");
 }
 
 void save_captured_images(const std::string& dir) {

@@ -36,6 +36,7 @@
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/debug/logger.hpp"
 #include "umt/umt.hpp"
 
 #include "extrinsic_calib.hpp"
@@ -288,6 +289,9 @@ int main() {
         BOARD_WIDTH, BOARD_HEIGHT, static_cast<int>(SQUARE_SIZE * 1000)
     );
 
+    // 初始化日志
+    debug::init_session("test_extrinsic_calib");
+
 #if HAS_CERES
     fmt::print(fmt::fg(fmt::color::green), "Ceres 已启用\n\n");
 #else
@@ -526,6 +530,19 @@ int main() {
 
                 result.print();
 
+                // 记录标定结果到日志
+                debug::print("info", "ExtrinsicCalib", "========== 外参标定结果 ==========");
+                debug::print("info", "ExtrinsicCalib", "状态: {}", result.success ? "成功" : "失败");
+                debug::print("info", "ExtrinsicCalib", "初始标准差: {:.4f} m", result.initial_std);
+                debug::print("info", "ExtrinsicCalib", "最终标准差: {:.4f} m", result.final_std);
+                debug::print("info", "ExtrinsicCalib", "改进: {:.1f}%", (1.0 - result.final_std / result.initial_std) * 100);
+                debug::print("info", "ExtrinsicCalib", "平移 (m): x={:.4f}, y={:.4f}, z={:.4f}",
+                    result.params.offset_x, result.params.offset_y, result.params.offset_z);
+                debug::print("info", "ExtrinsicCalib", "偏差 (deg): roll={:.2f}, pitch={:.2f}, yaw={:.2f}",
+                    result.params.delta_roll * 180.0 / M_PI,
+                    result.params.delta_pitch * 180.0 / M_PI,
+                    result.params.delta_yaw * 180.0 / M_PI);
+
                 if (result.success) {
                     fmt::print(fmt::fg(fmt::color::green),
                         "\n========== 请将以下配置写入文件 ==========\n\n");
@@ -543,6 +560,17 @@ int main() {
                         R_final(1,0), R_final(1,1), R_final(1,2),
                         R_final(2,0), R_final(2,1), R_final(2,2));
 
+                    // 记录配置到日志
+                    debug::print("info", "ExtrinsicCalib", "config/aimer.toml [Transformer]:");
+                    debug::print("info", "ExtrinsicCalib", "    camera_offset_x = {:.4f}", result.params.offset_x);
+                    debug::print("info", "ExtrinsicCalib", "    camera_offset_y = {:.4f}", result.params.offset_y);
+                    debug::print("info", "ExtrinsicCalib", "    camera_offset_z = {:.4f}", result.params.offset_z);
+                    debug::print("info", "ExtrinsicCalib", "config/camera.yaml:");
+                    debug::print("info", "ExtrinsicCalib", "R_camera2gimbal: [ {:.6f}, {:.6f}, {:.6f}, {:.6f}, {:.6f}, {:.6f}, {:.6f}, {:.6f}, {:.6f} ]",
+                        R_final(0,0), R_final(0,1), R_final(0,2),
+                        R_final(1,0), R_final(1,1), R_final(1,2),
+                        R_final(2,0), R_final(2,1), R_final(2,2));
+
                     // 角度偏差较大时提醒
                     double max_delta = std::max({
                         std::abs(result.params.delta_roll),
@@ -553,6 +581,10 @@ int main() {
                         fmt::print(fmt::fg(fmt::color::yellow),
                             "\n注意: 姿态偏差较大 (roll={:.2f}°, pitch={:.2f}°, yaw={:.2f}°)\n"
                             "      请更新 camera.yaml 中的 R_camera2gimbal\n",
+                            result.params.delta_roll * 180 / M_PI,
+                            result.params.delta_pitch * 180 / M_PI,
+                            result.params.delta_yaw * 180 / M_PI);
+                        debug::print("warning", "ExtrinsicCalib", "姿态偏差较大: roll={:.2f}°, pitch={:.2f}°, yaw={:.2f}°",
                             result.params.delta_roll * 180 / M_PI,
                             result.params.delta_pitch * 180 / M_PI,
                             result.params.delta_yaw * 180 / M_PI);
@@ -578,6 +610,18 @@ int main() {
                 fmt::print("\n\n开始网格搜索...\n");
                 auto result = extrinsic_calib::two_stage_search(samples_copy, base_extrinsic, true);
                 result.print();
+
+                // 记录网格搜索结果到日志
+                debug::print("info", "ExtrinsicCalib", "========== 网格搜索结果 ==========");
+                debug::print("info", "ExtrinsicCalib", "状态: {}", result.success ? "成功" : "失败");
+                debug::print("info", "ExtrinsicCalib", "初始标准差: {:.4f} m", result.initial_std);
+                debug::print("info", "ExtrinsicCalib", "最终标准差: {:.4f} m", result.final_std);
+                debug::print("info", "ExtrinsicCalib", "平移 (m): x={:.4f}, y={:.4f}, z={:.4f}",
+                    result.params.offset_x, result.params.offset_y, result.params.offset_z);
+                debug::print("info", "ExtrinsicCalib", "偏差 (deg): roll={:.2f}, pitch={:.2f}, yaw={:.2f}",
+                    result.params.delta_roll * 180.0 / M_PI,
+                    result.params.delta_pitch * 180.0 / M_PI,
+                    result.params.delta_yaw * 180.0 / M_PI);
             }
 
         } catch (const std::exception& e) {

@@ -19,6 +19,7 @@
 
 #include "hardware/hik_cam/hik_camera.hpp"
 #include "plugin/param/static_config.hpp"
+#include "plugin/debug/logger.hpp"
 
 using namespace std::chrono;
 using SteadyClock = std::chrono::steady_clock;
@@ -29,6 +30,9 @@ int main() {
         "    海康 nHostTimeStamp 时间戳验证工具\n"
         "==================================================\n\n"
     );
+
+    // 初始化日志
+    debug::init_session("test_timestamp");
 
     // 加载配置
     auto config = static_param::parse_file("hardware.toml");
@@ -212,6 +216,25 @@ int main() {
     fmt::print("  最大: {} us\n", *std::max_element(call_durations.begin(), call_durations.end()));
 
     fmt::print("\n");
+
+    // 记录分析结果到日志
+    debug::print("info", "Timestamp", "========== 时间戳验证结果 ==========");
+    debug::print("info", "Timestamp", "帧率: {:.1f} Hz", 1e6 / mean_steady_diff);
+    debug::print("info", "Timestamp", "nHostTimeStamp 单位: {}", unit_guess);
+    debug::print("info", "Timestamp", "host_diff / steady_diff = {:.3f}", ratio);
+    debug::print("info", "Timestamp", "偏移平均: {:.1f} us", mean_offset);
+    debug::print("info", "Timestamp", "偏移标准差: {:.1f} us", std_offset);
+
+    if (std_offset < 100) {
+        debug::print("info", "Timestamp", "结论: nHostTimeStamp 和 steady_clock 同源 (标准差 < 100us)");
+    } else if (std_offset < 500) {
+        debug::print("warning", "Timestamp", "结论: nHostTimeStamp 和 steady_clock 可能同源，但抖动较大 (标准差 = {:.1f}us)", std_offset);
+    } else {
+        debug::print("warning", "Timestamp", "结论: nHostTimeStamp 和 steady_clock 可能不同源 (标准差 = {:.1f}us)", std_offset);
+    }
+
+    debug::print("info", "Timestamp", "GetImageBuffer 调用耗时: 平均 {:.1f}us, 标准差 {:.1f}us", mean_duration, std_duration);
+    debug::print("info", "Timestamp", "==========================================");
 
     return 0;
 }

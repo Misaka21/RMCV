@@ -33,6 +33,7 @@
 #include "aimer/auto_aim/common/types.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/static_config.hpp"
+#include "plugin/debug/logger.hpp"
 #include "umt/umt.hpp"
 
 #include "time_sync.hpp"
@@ -239,6 +240,9 @@ int main() {
         COLLECT_DURATION_SEC
     );
 
+    // 初始化日志
+    debug::init_session("test_time_sync");
+
     // 加载配置
     auto config = static_param::parse_file("hardware.toml");
     std::string port_name = static_param::get_param<std::string>(config, "Serial", "port_name");
@@ -357,6 +361,15 @@ int main() {
                         fmt::print("\n开始标定...\n\n");
                         auto result = time_sync::calibrate(cam_copy, imu_copy, extrinsic, 100.0, 1.0, true);
                         result.print();
+
+                        // 记录标定结果到日志
+                        debug::print("info", "TimeSync", "========== 时间戳标定结果 ==========");
+                        debug::print("info", "TimeSync", "状态: {}", result.success ? "成功" : "失败");
+                        debug::print("info", "TimeSync", "时间偏移: {:.1f} us ({:.3f} ms)", result.delta_t_us, result.delta_t_us / 1000.0);
+                        debug::print("info", "TimeSync", "优化前标准差: {:.3f} mm", result.initial_std * 1000.0);
+                        debug::print("info", "TimeSync", "优化后标准差: {:.3f} mm", result.final_std * 1000.0);
+                        debug::print("info", "TimeSync", "config/hardware.toml [TimeSync]:");
+                        debug::print("info", "TimeSync", "    delta_t_us = {:.0f}", result.delta_t_us);
 
                         if (result.success) {
                             fmt::print(fmt::fg(fmt::color::green),
@@ -511,6 +524,15 @@ int main() {
                         fmt::print("\n\n开始标定...\n\n");
                         auto result = time_sync::calibrate(cam_copy, imu_copy, extrinsic, 100.0, 1.0, true);
                         result.print();
+
+                        // 记录标定结果到日志
+                        debug::print("info", "TimeSync", "========== 时间戳标定结果 (手动模式) ==========");
+                        debug::print("info", "TimeSync", "状态: {}", result.success ? "成功" : "失败");
+                        debug::print("info", "TimeSync", "时间偏移: {:.1f} us ({:.3f} ms)", result.delta_t_us, result.delta_t_us / 1000.0);
+                        debug::print("info", "TimeSync", "优化前标准差: {:.3f} mm", result.initial_std * 1000.0);
+                        debug::print("info", "TimeSync", "优化后标准差: {:.3f} mm", result.final_std * 1000.0);
+                        debug::print("info", "TimeSync", "config/hardware.toml [TimeSync]:");
+                        debug::print("info", "TimeSync", "    delta_t_us = {:.0f}", result.delta_t_us);
 
                         if (result.success) {
                             fmt::print(fmt::fg(fmt::color::green),
