@@ -369,12 +369,12 @@ void draw_armor_rect(cv::Mat& img, const Eigen::Vector3d& center, double yaw,
     Eigen::Vector3d right(-sin_yaw * w / 2, cos_yaw * w / 2, 0);
     Eigen::Vector3d up(0, 0, h / 2);
 
-    // 四个角点: 左下、左上、右上、右下
+    // 四个角点: 左上、左下、右下、右上 (逆时针)
     std::array<Eigen::Vector3d, 4> corners = {
-        center - right - up,  // 左下
         center - right + up,  // 左上
-        center + right + up,  // 右上
-        center + right - up   // 右下
+        center - right - up,  // 左下
+        center + right - up,  // 右下
+        center + right + up   // 右上
     };
 
     // 投影到图像
@@ -424,8 +424,8 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     for (const auto& obs : prev_armors_) {
         if (obs.pts.size() >= 4) {
             // X 形状: 连接对角线
-            cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左下-右上
-            cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左上-右下
+            cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左上-右下
+            cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左下-右上
             // 标注 target_id
             cv::putText(img, std::to_string(target_id_),
                         obs.center_2d + cv::Point2f(10, -10),

@@ -101,36 +101,36 @@ struct Armor {
         center = (left_light.center + right_light.center) / 2;
     }
 
-    // 构建物体坐标系中的点，从左下角开始顺时针排列
+    // 构建物体坐标系中的点，从左上角开始逆时针排列
     template<typename PointType>
     static std::vector<PointType> buildObjectPoints(double w, double h) noexcept {
         if constexpr (N_LANDMARKS == 4) {
             return {
-                PointType(0, w / 2, -h / 2),
-                PointType(0, w / 2, h / 2),
-                PointType(0, -w / 2, h / 2),
-                PointType(0, -w / 2, -h / 2)
+                PointType(0, w / 2, h / 2),    // 左上
+                PointType(0, w / 2, -h / 2),   // 左下
+                PointType(0, -w / 2, -h / 2),  // 右下
+                PointType(0, -w / 2, h / 2)    // 右上
             };
         } else {
             return {
-                PointType(0, w / 2, -h / 2),
-                PointType(0, w / 2, 0),
                 PointType(0, w / 2, h / 2),
-                PointType(0, -w / 2, h / 2),
+                PointType(0, w / 2, 0),
+                PointType(0, w / 2, -h / 2),
+                PointType(0, -w / 2, -h / 2),
                 PointType(0, -w / 2, 0),
-                PointType(0, -w / 2, -h / 2)
+                PointType(0, -w / 2, h / 2)
             };
         }
     }
 
-    // 获取关键点，从左下角开始顺时针排列
+    // 获取关键点，从左上角开始逆时针排列
     std::vector<cv::Point2f> landmarks() const {
         if constexpr (N_LANDMARKS == 4) {
-            return {left_light.bottom, left_light.top, right_light.top, right_light.bottom};
+            return {left_light.top, left_light.bottom, right_light.bottom, right_light.top};
         } else {
             return {
-                left_light.bottom, left_light.center, left_light.top,
-                right_light.top, right_light.center, right_light.bottom
+                left_light.top, left_light.center, left_light.bottom,
+                right_light.bottom, right_light.center, right_light.top
             };
         }
     }

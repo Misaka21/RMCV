@@ -97,8 +97,8 @@ ArmorObservation ArmorObserver::solve_pnp(
 
     // 计算装甲板法向量 (相机坐标系)
     // 物体坐标系: x水平(右), y垂直(上), z=0平面
-    // 点序为顺时针(从+Z看)，叉积法向量指向-Z (远离相机侧)
-    // 正对时相机在物体+Z侧，所以前表面法向量是+Z，即R.col(2)
+    // 点序为逆时针(从+Z看)，正对时相机在物体+Z侧
+    // 前表面法向量是+Z，即R.col(2)
     cv::Mat rotation_matrix;
     cv::Rodrigues(rvec, rotation_matrix);
     Eigen::Vector3d normal_cam(
@@ -281,12 +281,12 @@ std::array<cv::Point2f, 4> ArmorObserver::project_armor_corners(
               std::cos(pitch);
 
     // 计算四角点 (世界坐标系)
-    // 顺序: 左下、左上、右上、右下 (从相机看)
+    // 顺序: 左上、左下、右下、右上 (逆时针，从相机看)
     std::array<Eigen::Vector3d, 4> corners_world;
-    corners_world[0] = pos_world + x_axis * (w / 2) + y_axis * (-h / 2);   // 左下
-    corners_world[1] = pos_world + x_axis * (w / 2) + y_axis * (h / 2);    // 左上
-    corners_world[2] = pos_world + x_axis * (-w / 2) + y_axis * (h / 2);   // 右上
-    corners_world[3] = pos_world + x_axis * (-w / 2) + y_axis * (-h / 2);  // 右下
+    corners_world[0] = pos_world + x_axis * (w / 2) + y_axis * (h / 2);    // 左上
+    corners_world[1] = pos_world + x_axis * (w / 2) + y_axis * (-h / 2);   // 左下
+    corners_world[2] = pos_world + x_axis * (-w / 2) + y_axis * (-h / 2);  // 右下
+    corners_world[3] = pos_world + x_axis * (-w / 2) + y_axis * (h / 2);   // 右上
 
     // 变换到相机坐标系并投影
     const cv::Mat& camera_matrix = tf::get_camera_matrix();

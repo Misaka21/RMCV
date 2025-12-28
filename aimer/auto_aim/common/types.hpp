@@ -131,7 +131,7 @@ constexpr double LARGE_ARMOR_HEIGHT = 0.050;  // 大装甲板高度
  * @brief 检测到的装甲板 - 所有检测器的统一输出类型
  */
 struct DetectedArmor {
-    // 关键点 (图像坐标), 4点: 左下、左上、右上、右下
+    // 关键点 (图像坐标), 4点: 左上、左下、右下、右上 (逆时针)
     std::vector<cv::Point2f> landmarks;
 
     // 装甲板中心 (图像坐标)
@@ -156,17 +156,17 @@ struct DetectedArmor {
      *   y: 垂直方向 (正=上, 负=下)
      *   z: 深度 (z=0为装甲板平面)
      *
-     * 点顺序与landmarks一一对应: 左下、左上、右上、右下
+     * 点顺序与landmarks一一对应: 左上、左下、右下、右上 (逆时针)
      */
     std::vector<cv::Point3f> object_points() const {
         double w = (type == ArmorType::LARGE) ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
         double h = (type == ArmorType::LARGE) ? LARGE_ARMOR_HEIGHT : SMALL_ARMOR_HEIGHT;
 
         return {
-            cv::Point3f(-w / 2, -h / 2, 0),  // 左下
             cv::Point3f(-w / 2,  h / 2, 0),  // 左上
-            cv::Point3f( w / 2,  h / 2, 0),  // 右上
-            cv::Point3f( w / 2, -h / 2, 0)   // 右下
+            cv::Point3f(-w / 2, -h / 2, 0),  // 左下
+            cv::Point3f( w / 2, -h / 2, 0),  // 右下
+            cv::Point3f( w / 2,  h / 2, 0)   // 右上
         };
     }
 
