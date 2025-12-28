@@ -1,6 +1,6 @@
 /**
- * @file openvino_detector.hpp
- * @brief 基于 OpenVINO 的 YOLO 装甲板检测器
+ * @file tensorrt_detector.hpp
+ * @brief 基于 TensorRT 的 YOLO 装甲板检测器
  *
  * 移植自 RobotPilots 视觉自瞄网络模型
  * 使用 MobileNetV3 backbone 的魔改 YOLOv5
@@ -12,15 +12,16 @@
  *   [13-21]: 类别独热 (G, 1, 2, 3, 4, 5, O, Bs, Bb)
  */
 
-#ifndef AIMER_AUTOAIM_DETECTOR_OPENVINO_DETECTOR_HPP
-#define AIMER_AUTOAIM_DETECTOR_OPENVINO_DETECTOR_HPP
+#ifndef AIMER_AUTOAIM_DETECTOR_TENSORRT_DETECTOR_HPP
+#define AIMER_AUTOAIM_DETECTOR_TENSORRT_DETECTOR_HPP
 
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <opencv2/core.hpp>
-#include <openvino/openvino.hpp>
+#include <NvInfer.h>
+#include <cuda_runtime.h>
 
 #include "detector_interface.hpp"
 #include "types.hpp"
@@ -28,44 +29,58 @@
 namespace autoaim::detector {
 
 /**
- * @brief OpenVINO 检测器配置
+ * @brief TensorRT Logger
  */
-struct OpenvinoConfig {
-    std::string model_path;          // ONNX 模型路径
-    std::string device = "GPU";      // 推理设备 (CPU/GPU/AUTO)
-    int input_size = 640;            // 输入尺寸 (正方形)
-    float conf_threshold = 0.65f;    // 置信度阈值
-    float nms_threshold = 0.45f;     // NMS 阈值
+class TrtLogger : public nvinfer1::ILogger {
+public:
+    void log(Severity severity, const char* msg) noexcept override;
 };
 
 /**
- * @brief 基于 OpenVINO 的 YOLO 检测器
+ * @brief TensorRT 检测器配置
+ */
+struct TensorrtConfig {
+    std::string model_path;          // ONNX 或 engine 文件路径
+    int input_size = 640;            // 输入尺寸 (正方形)
+    float conf_threshold = 0.65f;    // 置信度阈值
+    float nms_threshold = 0.45f;     // NMS 阈值
+    bool fp16 = true;                // 使用 FP16 推理
+    bool int8 = false;               // 使用 INT8 量化
+    int workspace_mb = 1024;         // 工作空间大小 (MB)
+};
+
+/**
+ * @brief 基于 TensorRT 的 YOLO 检测器
  *
  * 特点:
- *   - 使用 Intel OpenVINO 推理引擎
- *   - 支持 CPU 和 GPU (Intel 核显) 推理
- *   - 直接输出关键点，无需后处理角点
+ *   - 使用 NVIDIA TensorRT 推理引擎
+ *   - 支持 FP16/INT8 量化加速
+ *   - 自动缓存编译后的 engine 文件
  */
-class OpenvinoDetector : public DetectorInterface {
+class TensorrtDetector : public DetectorInterface {
 public:
     /**
      * @brief 构造函数
      * @param config 检测器配置
      * @param color 敌方颜色
      */
-    OpenvinoDetector(const OpenvinoConfig& config, EnemyColor color);
+    TensorrtDetector(const TensorrtConfig& config, EnemyColor color);
 
     /**
      * @brief 从配置文件创建检测器
      * @param color 敌方颜色
      * @param config_file 配置文件名
      */
-    static std::unique_ptr<OpenvinoDetector> from_config(
+    static std::unique_ptr<TensorrtDetector> from_config(
         EnemyColor color,
         const std::string& config_file = "detector.toml"
     );
 
-    ~OpenvinoDetector() override;
+    ~TensorrtDetector() override;
+
+    // 禁止拷贝
+    TensorrtDetector(const TensorrtDetector&) = delete;
+    TensorrtDetector& operator=(const TensorrtDetector&) = delete;
 
     // ============================================================================
     // DetectorInterface 接口实现
@@ -78,6 +93,26 @@ public:
 
 private:
     /**
+     * @brief 从 ONNX 构建 TensorRT engine
+     */
+    void build_engine_from_onnx();
+
+    /**
+     * @brief 加载已有的 engine 文件
+     */
+    bool load_engine(const std::string& engine_path);
+
+    /**
+     * @brief 保存 engine 到文件
+     */
+    void save_engine(const std::string& engine_path);
+
+    /**
+     * @brief 获取 engine 缓存路径
+     */
+    std::string get_engine_path() const;
+
+    /**
      * @brief 预处理图像
      * @param image 输入图像 (BGR)
      * @return 缩放后的图像和缩放比例
@@ -86,11 +121,16 @@ private:
 
     /**
      * @brief 后处理推理结果
-     * @param output 网络输出张量
+     * @param output 网络输出数据
+     * @param num_detections 检测数量
      * @param scale 缩放比例 (用于还原坐标)
      * @return 检测到的装甲板列表
      */
-    std::vector<DetectedArmor> postprocess(const ov::Tensor& output, float scale);
+    std::vector<DetectedArmor> postprocess(
+        const float* output,
+        int num_detections,
+        float scale
+    );
 
     /**
      * @brief Sigmoid 函数
@@ -107,14 +147,24 @@ private:
      */
     static ArmorType get_armor_type(int label, float ratio);
 
-    // OpenVINO 组件
-    ov::Core core_;
-    std::shared_ptr<ov::Model> model_;
-    ov::CompiledModel compiled_model_;
-    ov::InferRequest infer_request_;
+    // TensorRT 组件
+    TrtLogger logger_;
+    std::unique_ptr<nvinfer1::IRuntime> runtime_;
+    std::unique_ptr<nvinfer1::ICudaEngine> engine_;
+    std::unique_ptr<nvinfer1::IExecutionContext> context_;
+
+    // CUDA 缓冲区
+    void* device_buffers_[2] = {nullptr, nullptr};  // 输入和输出
+    std::vector<float> output_buffer_;
+
+    // 模型信息
+    int input_idx_ = 0;
+    int output_idx_ = 0;
+    nvinfer1::Dims input_dims_;
+    nvinfer1::Dims output_dims_;
 
     // 配置
-    OpenvinoConfig config_;
+    TensorrtConfig config_;
     EnemyColor detect_color_;
 
     // 调试
@@ -124,4 +174,4 @@ private:
 
 }  // namespace autoaim::detector
 
-#endif  // AIMER_AUTOAIM_DETECTOR_OPENVINO_DETECTOR_HPP
+#endif  // AIMER_AUTOAIM_DETECTOR_TENSORRT_DETECTOR_HPP

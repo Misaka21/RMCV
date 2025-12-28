@@ -3,17 +3,29 @@
 # ==============================================================================
 
 # 检测器选项
-option(ENABLE_YOLO_DETECTOR "Enable YOLO detector (requires OpenVINO)" OFF)
+option(ENABLE_OPENVINO_DETECTOR "Enable OpenVINO YOLO detector" OFF)
+option(ENABLE_TENSORRT_DETECTOR "Enable TensorRT YOLO detector" OFF)
+
+# 定义 common 目录路径供子模块使用
+set(DETECTOR_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/common)
 
 # 添加传统检测器 (始终编译)
 add_subdirectory(detector_rv)
 
-# 可选: YOLO 检测器 (OpenVINO)
-if(ENABLE_YOLO_DETECTOR)
+# 可选: OpenVINO 检测器
+if(ENABLE_OPENVINO_DETECTOR)
     add_subdirectory(detector_ov)
     message(STATUS "YOLO detector (OpenVINO): ENABLED")
 else()
     message(STATUS "YOLO detector (OpenVINO): DISABLED")
+endif()
+
+# 可选: TensorRT 检测器
+if(ENABLE_TENSORRT_DETECTOR)
+    add_subdirectory(detector_trt)
+    message(STATUS "YOLO detector (TensorRT): ENABLED")
+else()
+    message(STATUS "YOLO detector (TensorRT): DISABLED")
 endif()
 
 # 创建 detector_node 库
@@ -37,9 +49,14 @@ target_link_libraries(detector_node PUBLIC
 )
 
 # 传递编译宏并链接 YOLO 检测器
-if(ENABLE_YOLO_DETECTOR)
-    target_compile_definitions(detector_node PUBLIC ENABLE_YOLO_DETECTOR)
+if(ENABLE_OPENVINO_DETECTOR)
+    target_compile_definitions(detector_node PUBLIC ENABLE_OPENVINO_DETECTOR)
     target_link_libraries(detector_node PUBLIC detector_openvino)
+endif()
+
+if(ENABLE_TENSORRT_DETECTOR)
+    target_compile_definitions(detector_node PUBLIC ENABLE_TENSORRT_DETECTOR)
+    target_link_libraries(detector_node PUBLIC detector_tensorrt)
 endif()
 
 # 创建 detector 统一接口库
