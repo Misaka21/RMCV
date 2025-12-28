@@ -95,18 +95,30 @@ private:
     );
 
     /**
-     * @brief 给定 z_to_v 计算装甲板四角点在图像上的投影
-     * @param pos 装甲板中心 (相机系)
+     * @brief 获取相机 Z 轴在世界 XY 平面的投影 (归一化)
+     *
+     * 参考 rm.cv.fans: converter->get_camera_z_i2()
+     */
+    Eigen::Vector2d get_camera_z_i2(const Eigen::Quaterniond& q_imu);
+
+    /**
+     * @brief 给定 z_to_v 计算装甲板四角点在图像上的投影 (世界坐标系方法)
+     *
+     * 参考 rm.cv.fans: radial_armor_corners + radial_armor_pts
+     *
+     * @param pos_world 装甲板中心 (世界坐标系)
      * @param type 装甲板类型
-     * @param pitch 装甲板俯仰角
-     * @param z_to_v 装甲板法向与相机视线的夹角
-     * @return 投影的四角点
+     * @param pitch 装甲板俯仰角 (规则定义)
+     * @param z_to_v 装甲板法向量相对于相机前向的旋转角 (绕世界 Z 轴)
+     * @param q_imu IMU 四元数
+     * @return 投影的四角点 (像素坐标)
      */
     std::array<cv::Point2f, 4> project_armor_corners(
-        const Eigen::Vector3d& pos,
+        const Eigen::Vector3d& pos_world,
         ArmorType type,
         double pitch,
-        double z_to_v
+        double z_to_v,
+        const Eigen::Quaterniond& q_imu
     );
 
     /**
@@ -123,20 +135,28 @@ private:
     );
 
     /**
-     * @brief 三分搜索找到最优的 z_to_v
-     * @param pos 装甲板中心 (相机系)
+     * @brief 三分搜索找到最优的 z_to_v (世界坐标系方法)
+     *
+     * z_to_v 是装甲板法向量相对于相机前向的旋转角 (绕世界 Z 轴)
+     * - z_to_v = 0: 装甲板正对相机
+     * - z_to_v > 0: 装甲板法向量逆时针偏离相机前向
+     * - z_to_v < 0: 装甲板法向量顺时针偏离相机前向
+     *
+     * @param pos_world 装甲板中心 (世界坐标系)
      * @param type 装甲板类型
      * @param pitch 装甲板俯仰角
      * @param pus 畸变矫正后的检测四角点
-     * @param z_to_v_init 初始估计 (PnP 结果)
+     * @param z_to_v_init 初始估计
+     * @param q_imu IMU 四元数
      * @return 优化后的 z_to_v
      */
     double fit_z_to_v(
-        const Eigen::Vector3d& pos,
+        const Eigen::Vector3d& pos_world,
         ArmorType type,
         double pitch,
         const std::array<cv::Point2f, 4>& pus,
-        double z_to_v_init
+        double z_to_v_init,
+        const Eigen::Quaterniond& q_imu
     );
 
     // ==================== 数据 ====================

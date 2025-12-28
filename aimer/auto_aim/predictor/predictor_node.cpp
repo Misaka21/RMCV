@@ -17,6 +17,7 @@
 #include "aimer/common/transformer/transformer.hpp"
 #include "enemy_predictor.hpp"
 #include "plugin/debug/logger.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "umt/umt.hpp"
 
@@ -278,8 +279,12 @@ void start_predictor_node() {
                 // 发布可视化帧供录制
                 vis_pub.push(vis);
 
-                cv::imshow("Predictor", vis);
-                cv::waitKey(1);
+                // 根据配置决定是否显示窗口
+                bool show_window = runtime_param::get_param<bool>("AutoAim.Predictor.show_window");
+                if (show_window) {
+                    cv::imshow("Predictor", vis);
+                    cv::waitKey(1);
+                }
             }
 
         } catch (const umt::MessageError_Timeout&) {
