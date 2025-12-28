@@ -9,8 +9,8 @@
  *    │ 计算  │  滤波  │  静态  │  静态  │ 计算 │
  *
  * 用法:
- *   double img_to_predict = now - snapshot.timestamp;
- *   double predict_to_send = estimator.update_predict_to_send(latency, now);
+ *   latency_estimator.update_predict_to_send(current_time - snapshot.predict_timestamp, current_time);
+ *   LatencyInfo latency = latency_estimator.build(snapshot, current_time);
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_COMMON_LATENCY_ESTIMATOR_HPP__
@@ -19,13 +19,18 @@
 #include <algorithm>
 
 #include "aimer/common/filter/single_filter.hpp"
+#include "aimer/auto_aim/fire_control/types.hpp"
+#include "aimer/auto_aim/predictor/types.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
 
 /**
  * @brief 延迟估计器
  *
- * 只负责滤波，时间戳从 snapshot 读取
+ * 负责:
+ *   1. 滤波 predict_to_send 延迟
+ *   2. 构建完整的 LatencyInfo
  */
 class LatencyEstimator {
 public:
@@ -56,40 +61,50 @@ public:
     }
 
     /**
-     * @brief 计算 img → prediction 延迟 (用于位置预测)
+     * @brief 构建完整的延迟信息
      *
-     * = img_to_predict + predict_to_send + send_to_control + fire_to_hit
-     * (忽略 control_to_fire，参考 rm.cv.fans 设计)
+     * @param snapshot 战场快照 (提供时间戳、目标距离)
+     * @param current_time 当前时间 (s)
+     * @return LatencyInfo 完整延迟信息
      */
-    double get_prediction_latency(
-        double img_to_predict,
-        double send_to_control,
-        double distance,
-        double bullet_speed
+    LatencyInfo build(
+        const predictor::BattlefieldSnapshot& snapshot,
+        double current_time
     ) const {
-        double fire_to_hit = distance / std::max(bullet_speed, 10.0);
-        return img_to_predict + get_predict_to_send() + send_to_control + fire_to_hit;
-    }
+        LatencyInfo latency;
 
-    /**
-     * @brief 计算 img → hit 延迟 (用于反陀螺打击时机)
-     *
-     * = img_to_predict + predict_to_send + send_to_control + control_to_fire + fire_to_hit
-     */
-    double get_hit_latency(
-        double img_to_predict,
-        double send_to_control,
-        double control_to_fire,
-        double distance,
-        double bullet_speed
-    ) const {
-        double fire_to_hit = distance / std::max(bullet_speed, 10.0);
-        return img_to_predict + get_predict_to_send() + send_to_control
-             + control_to_fire + fire_to_hit;
-    }
+        // img_to_predict: 直接计算
+        latency.img_to_predict = (snapshot.predict_timestamp > 0)
+            ? (snapshot.predict_timestamp - snapshot.timestamp)
+            : 0.015;  // 默认 15ms
 
-    void set_default_predict_to_send(double value) {
-        default_predict_to_send_ = value;
+        // predict_to_send: 卡尔曼滤波
+        latency.predict_to_send = get_predict_to_send();
+
+        // send_to_control: 运行时参数
+        latency.send_to_control = runtime_param::get_param<double>(
+            "AutoAim.FireControl.Latency.send_to_control"
+        );
+
+        // control_to_fire: 运行时参数
+        latency.control_to_fire = runtime_param::get_param<double>(
+            "AutoAim.FireControl.Latency.control_to_fire"
+        );
+
+        // fire_to_hit: 根据目标距离计算 (初始估计)
+        double distance = 5.0;  // 默认 5m
+        if (snapshot.get_primary()) {
+            const auto* armor = snapshot.get_primary()->get_recommended_armor();
+            if (armor) {
+                distance = armor->position.norm();
+            }
+        }
+        latency.bullet_speed = std::max(
+            static_cast<double>(snapshot.self_state.bullet_speed), 10.0
+        );
+        latency.fire_to_hit = distance / latency.bullet_speed;
+
+        return latency;
     }
 
 private:

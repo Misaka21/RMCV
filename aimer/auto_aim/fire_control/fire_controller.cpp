@@ -33,18 +33,21 @@ void FireController::reset()
 FireCommand FireController::control(
     const predictor::BattlefieldSnapshot& snapshot,
     double current_time,
-    const LatencyInfo& latency
+    const LatencyInfo& latency_in
 )
 {
     // 读取模式
     use_mpc_ = runtime_param::get_param<bool>("AutoAim.FireControl.use_mpc");
+
+    // 复制延迟信息 (需要迭代更新 fire_to_hit)
+    LatencyInfo latency = latency_in;
 
     // 1. 更新云台状态
     double dt = (last_time_ > 0) ? (current_time - last_time_) : CONTROL_DT;
     gimbal_state_.update(snapshot.self_state.q_imu, dt);
     last_time_ = current_time;
 
-    // 2. 目标选择 (共享)
+    // 2. 目标选择 (用初始延迟估计)
     double prediction_dt = latency.prediction_latency();
     TargetSelection selection = target_selector_.select(snapshot, prediction_dt);
     last_selection_ = selection;
@@ -59,7 +62,34 @@ FireCommand FireController::control(
     }
     lost_count_ = 0;
 
-    // 4. 分支处理
+    // 4. 迭代更新延迟 (参考 rm.cv.fans filter_to_prediction_time)
+    //    用弹道解算后的距离更新 fire_to_hit，然后重新预测位置
+    constexpr int NUM_ITERATIONS = 2;
+    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
+        // 预测位置
+        prediction_dt = latency.prediction_latency();
+        Eigen::Vector3d predicted_pos = selection.vehicle->predict_armor_position(
+            selection.armor_idx, prediction_dt
+        );
+
+        // 弹道解算
+        AimResult aim = trajectory_solver_.solve(
+            predicted_pos, snapshot.self_state.bullet_speed
+        );
+
+        if (aim.valid) {
+            // 用瞄准点距离更新 fire_to_hit
+            latency.update_fire_to_hit(aim.distance);
+        }
+    }
+
+    // 更新选择结果的预测位置 (用最终的延迟)
+    selection.predicted_pos = selection.vehicle->predict_armor_position(
+        selection.armor_idx, latency.prediction_latency()
+    );
+    last_selection_ = selection;
+
+    // 5. 分支处理
     if (use_mpc_) {
         return process_mpc(selection, snapshot, latency);
     } else {

@@ -75,6 +75,11 @@ struct GimbalState {
  * 用法:
  *   prediction_latency = 位置预测用 (不含 control_to_fire)
  *   hit_latency = 命中时刻计算用 (含 control_to_fire)
+ *
+ * 注意: fire_to_hit 需要迭代计算
+ *   1. 初始用装甲板位置估计
+ *   2. 弹道解算后用瞄准点距离更新
+ *   3. 重复 2-3 次收敛
  */
 struct LatencyInfo {
     double img_to_predict = 0;     // 图像→预测完成 (直接计算)
@@ -82,6 +87,17 @@ struct LatencyInfo {
     double send_to_control = 0;    // 发送→控制器响应 (静态配置)
     double control_to_fire = 0;    // 控制器→出膛 (静态配置)
     double fire_to_hit = 0;        // 出膛→命中 (distance/bullet_speed)
+
+    // 缓存弹速，用于更新 fire_to_hit
+    double bullet_speed = 15.0;
+
+    /**
+     * @brief 更新 fire_to_hit (用弹道解算后的距离)
+     * @param aim_distance 瞄准点距离 (弹道解算输出)
+     */
+    void update_fire_to_hit(double aim_distance) {
+        fire_to_hit = aim_distance / std::max(bullet_speed, 10.0);
+    }
 
     /**
      * @brief 位置预测延迟 (不含 control_to_fire)

@@ -1,10 +1,6 @@
 /**
  * @file fire_controller_node.cpp
  * @brief 火控线程节点实现
- *
- * 延迟估计在此处进行:
- *   img_to_predict = predict_timestamp - timestamp  (直接计算)
- *   predict_to_send = now - predict_timestamp       (卡尔曼滤波)
  */
 
 #include "fire_controller_node.hpp"
@@ -17,7 +13,6 @@
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "umt/BasicObjManager.hpp"
 #include "plugin/debug/logger.hpp"
-#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
 
@@ -66,46 +61,14 @@ void fire_control_run(const std::string& /* config_path */)
         // 检测新帧，更新延迟估计
         if (snapshot.frame_id != last_frame_id && snapshot.predict_timestamp > 0) {
             last_frame_id = snapshot.frame_id;
-
-            // 计算 predict_to_send 延迟 (本次观测)
             double predict_to_send = current_time - snapshot.predict_timestamp;
             latency_estimator.update_predict_to_send(predict_to_send, current_time);
         }
 
-        // ========== 构建延迟信息 ==========
-        LatencyInfo latency;
+        // 构建延迟信息
+        LatencyInfo latency = latency_estimator.build(snapshot, current_time);
 
-        // img_to_predict: 直接计算
-        latency.img_to_predict = (snapshot.predict_timestamp > 0)
-            ? (snapshot.predict_timestamp - snapshot.timestamp)
-            : 0.015;  // 默认 15ms
-
-        // predict_to_send: 卡尔曼滤波
-        latency.predict_to_send = latency_estimator.get_predict_to_send();
-
-        // send_to_control: 静态配置
-        latency.send_to_control = runtime_param::get_param<double>(
-            "AutoAim.FireControl.Latency.send_to_control"
-        );
-
-        // control_to_fire: 静态配置
-        latency.control_to_fire = runtime_param::get_param<double>(
-            "AutoAim.FireControl.Latency.control_to_fire"
-        );
-
-        // fire_to_hit: 根据目标距离计算
-        // 这里使用主目标的距离，如果没有目标则使用默认值
-        double distance = 5.0;  // 默认 5m
-        if (snapshot.get_primary()) {
-            const auto* armor = snapshot.get_primary()->get_recommended_armor();
-            if (armor) {
-                distance = armor->position.norm();
-            }
-        }
-        double bullet_speed = std::max(static_cast<double>(snapshot.self_state.bullet_speed), 10.0);
-        latency.fire_to_hit = distance / bullet_speed;
-
-        // ========== 执行控制 ==========
+        // 执行控制
         FireCommand cmd = controller.control(snapshot, current_time, latency);
 
         // 输出控制指令
