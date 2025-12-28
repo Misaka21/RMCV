@@ -5,11 +5,14 @@
     # Camera → Gimbal 平移 (米, 在Gimbal坐标系下)
     # 坐标系约定: x前, y左, z上 (ROS惯例)
     #@double 相机在云台前方距离
-    camera_offset_x = 0.0
+    #camera_offset_x = 0.0
     #@double 相机在云台左侧距离
-    camera_offset_y = 0.0
+    #camera_offset_y = 0.0
     #@double 相机在云台上方距离
-    camera_offset_z = 0.0
+    #camera_offset_z = 0.0
+    camera_offset_x = 0.0116
+    camera_offset_y = -0.0029
+    camera_offset_z = 0.0547
 
     # Barrel → Gimbal 平移 (米, 在Gimbal坐标系下)
     #@double 枪口在云台前方距离

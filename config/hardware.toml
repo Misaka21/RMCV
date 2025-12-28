@@ -16,7 +16,7 @@
 # 枚举类型请使用字符串,参考MV_CC_SetEnumValueByString
 [Camera.config]
     #@float 曝光时间 (us)
-    ExposureTime = 2500.0
+    ExposureTime = 3500.0
     #@float 增益
     Gain = 16.9
     #@bool 水平翻转
