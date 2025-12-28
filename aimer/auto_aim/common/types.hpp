@@ -151,17 +151,22 @@ struct DetectedArmor {
 
     /**
      * @brief 获取PnP用的物体坐标系点
-     * 物体坐标系: x前(指向相机), y左, z上
+     * 物体坐标系 (z=0平面，与rm.cv.fans一致):
+     *   x: 水平方向 (负=左, 正=右)
+     *   y: 垂直方向 (正=上, 负=下)
+     *   z: 深度 (z=0为装甲板平面)
+     *
+     * 点顺序与landmarks一一对应: 左下、左上、右上、右下
      */
     std::vector<cv::Point3f> object_points() const {
         double w = (type == ArmorType::LARGE) ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
         double h = (type == ArmorType::LARGE) ? LARGE_ARMOR_HEIGHT : SMALL_ARMOR_HEIGHT;
 
         return {
-            cv::Point3f(0, w / 2, -h / 2),   // 左下
-            cv::Point3f(0, w / 2, h / 2),    // 左上
-            cv::Point3f(0, -w / 2, h / 2),   // 右上
-            cv::Point3f(0, -w / 2, -h / 2)   // 右下
+            cv::Point3f(-w / 2, -h / 2, 0),  // 左下
+            cv::Point3f(-w / 2,  h / 2, 0),  // 左上
+            cv::Point3f( w / 2,  h / 2, 0),  // 右上
+            cv::Point3f( w / 2, -h / 2, 0)   // 右下
         };
     }
 
