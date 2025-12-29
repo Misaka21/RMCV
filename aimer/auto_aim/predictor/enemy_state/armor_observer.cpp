@@ -146,7 +146,17 @@ ArmorObservation ArmorObserver::solve_pnp(
         z_to_v = fit_z_to_v(pos_world, armor.type, armor_pitch, pus, z_to_v_raw, q_imu);
     }
 
-    // DEBUG: 显示 raw 和 fit 对比
+    // DEBUG: 详细的法向量调试信息
+    // normal_cam: PnP 解算的法向量 (相机坐标系)
+    //   - 正对时应该是 (0, 0, 1) 指向相机
+    //   - 侧面 60° 时应该是 (±0.866, 0, 0.5)
+    // 3D 夹角: 法向量与相机 Z 轴的夹角 (包含俯仰分量)
+    double cos_3d_angle = -normal_cam.z();  // normal_cam 指向相机时是负的
+    double angle_3d = std::acos(std::clamp(cos_3d_angle, -1.0, 1.0)) * 180.0 / M_PI;
+
+    fmt::print(fmt::fg(fmt::color::cyan),
+        "[PnP] normal_cam: ({:.3f}, {:.3f}, {:.3f}) → 3D夹角: {:.1f}°\n",
+        normal_cam.x(), normal_cam.y(), normal_cam.z(), angle_3d);
     fmt::print(fmt::fg(fmt::color::orange),
         "[z_to_v] raw: {:.1f}° → fit: {:.1f}° (pnp_pitch: {:.1f}°)\n",
         z_to_v_raw * 180.0 / M_PI, z_to_v * 180.0 / M_PI, pnp_pitch * 180.0 / M_PI);
@@ -372,7 +382,7 @@ double ArmorObserver::fit_z_to_v(
 ) {
     // 搜索范围: 初始值 ±45度
     // z_to_v 范围是 [-π, π]，正对时接近 0
-    constexpr double SEARCH_MARGIN = M_PI / 4;  // 45度
+    constexpr double SEARCH_MARGIN = M_PI;  // 45度
     double z_min = z_to_v_init - SEARCH_MARGIN;
     double z_max = z_to_v_init + SEARCH_MARGIN;
 
