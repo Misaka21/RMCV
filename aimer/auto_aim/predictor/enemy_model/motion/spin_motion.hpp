@@ -198,11 +198,24 @@ public:
     void init(const ArmorData& armor, double timestamp);
 
     /**
-     * @brief 更新
+     * @brief 更新 (单装甲板)
      * @param armor 装甲板数据 (带 ID，用于跳变检测)
      * @param timestamp 时间戳
      */
     void update(const ArmorData& armor, double timestamp);
+
+    /**
+     * @brief 更新 (多装甲板)
+     *
+     * 当同时看到多块装甲板时，利用几何关系直接计算:
+     * - 旋转中心 (两块装甲板位置 + 朝向)
+     * - 半径 (两块装甲板间距 / 法向量差)
+     * - 高度差 (两块装甲板 z 坐标差)
+     *
+     * @param armors 装甲板数据列表 (按 z_to_v 排序)
+     * @param timestamp 时间戳
+     */
+    void update(const std::vector<ArmorData>& armors, double timestamp);
 
     /**
      * @brief 预测旋转中心位置

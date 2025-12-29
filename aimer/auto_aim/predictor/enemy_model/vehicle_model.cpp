@@ -106,9 +106,9 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
     armor_motion_.update(armors_with_id, timestamp);
 
-    // 4. SpinMotion: 整车 EKF 滤波 (用最正对的装甲板，带 ID)
+    // 4. SpinMotion: 整车 EKF 滤波 (传所有装甲板，利用几何关系)
     if (!armors_with_id.empty()) {
-        spin_motion_.update(armors_with_id[0], timestamp);
+        spin_motion_.update(armors_with_id, timestamp);
     }
 
     // DEBUG: 输出装甲板数量和 ID
