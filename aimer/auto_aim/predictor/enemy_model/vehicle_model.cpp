@@ -488,6 +488,13 @@ void draw_armor_rect(cv::Mat& img, const Eigen::Vector3d& center, double yaw,
 void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
     if (!initialized_) return;
 
+    // 计算距离上次更新的时间，用于判断数据是否过时
+    double time_since_update = timestamp - last_update_time_;
+    bool data_fresh = time_since_update < 0.1;  // 100ms 内认为数据新鲜
+
+    // 预测时间 (用于绘图外推)
+    double draw_dt = get_draw_predict_dt();
+
     // 颜色定义
     const cv::Scalar COLOR_DETECTED(0, 255, 0);    // 绿色: 检测到的
     const cv::Scalar COLOR_FILTERED(255, 200, 0);  // 蓝色: 滤波后的
@@ -512,47 +519,55 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     }
 
     // 1. 绘制检测到的装甲板 (X 形状: 对角线连接)
-    for (const auto& obs : prev_armors_) {
-        if (obs.pts.size() >= 4) {
-            // X 形状: 连接对角线
-            cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左上-右下
-            cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左下-右上
-            // 标注 target_id
-            cv::putText(img, std::to_string(target_id_),
-                        obs.center_2d + cv::Point2f(10, -10),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_DETECTED, 2);
+    // 只有数据新鲜时才绘制，避免绘制过时的观测
+    if (data_fresh) {
+        for (const auto& obs : prev_armors_) {
+            if (obs.pts.size() >= 4) {
+                // X 形状: 连接对角线
+                cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左上-右下
+                cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左下-右上
+                // 标注 target_id
+                cv::putText(img, std::to_string(target_id_),
+                            obs.center_2d + cv::Point2f(10, -10),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_DETECTED, 2);
+            }
         }
     }
 
     // 2. 绘制 ArmorMotion 滤波后的位置 (空心圈，近大远小)
     // ArmorMotion 没有 yaw 信息，侧向时画口字形不准，改用空心圈
-    double draw_dt = get_draw_predict_dt();
-    auto armor_states = armor_motion_.get_armor_states(timestamp);  // 用原始时间获取
-    for (auto& as : armor_states) {
-        // 手动外推位置
-        Eigen::Vector3d predicted_pos = as.position + as.velocity * draw_dt;
-        bool valid = false;
-        cv::Point2f pt = tf::world_to_pixel(predicted_pos, q_imu, valid);
-        if (valid) {
-            // 近大远小: 半径 = base_size / distance
-            double distance = predicted_pos.norm();
-            int radius = static_cast<int>(50.0 / std::max(distance, 0.5));  // 1m处50px，2m处25px
-            radius = std::clamp(radius, 5, 100);  // 限制范围
-            cv::circle(img, pt, radius, COLOR_FILTERED, 2);
-            // 标注 armor_id
-            cv::putText(img, "A" + std::to_string(as.id),
-                        pt + cv::Point2f(radius + 5, 5),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_FILTERED, 1);
+    // 只有数据新鲜时才绘制
+    if (data_fresh) {
+        auto armor_states = armor_motion_.get_armor_states(timestamp);  // 用原始时间获取
+        for (auto& as : armor_states) {
+            // 手动外推位置
+            Eigen::Vector3d predicted_pos = as.position + as.velocity * draw_dt;
+            bool valid = false;
+            cv::Point2f pt = tf::world_to_pixel(predicted_pos, q_imu, valid);
+            if (valid) {
+                // 近大远小: 半径 = base_size / distance
+                double distance = predicted_pos.norm();
+                int radius = static_cast<int>(50.0 / std::max(distance, 0.5));  // 1m处50px，2m处25px
+                radius = std::clamp(radius, 5, 100);  // 限制范围
+                cv::circle(img, pt, radius, COLOR_FILTERED, 2);
+                // 标注 armor_id
+                cv::putText(img, "A" + std::to_string(as.id),
+                            pt + cv::Point2f(radius + 5, 5),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_FILTERED, 1);
+            }
         }
     }
 
     // 3. 绘制 SpinMotion/LmtdMotion 预测 (口字形) - EKF 滤波后的
     // 即使未激活也绘制，方便调试
+    // EKF 预测可以继续绘制，因为它有自己的时间预测能力
     if (spin_valid) {
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
         double omega = use_lmtd_ ? lmtd_motion_.get_omega() : spin_motion_.get_omega();
         double theta = use_lmtd_ ? lmtd_motion_.get_theta() : spin_motion_.get_theta();
-        theta += omega * draw_dt;
+        // 注意: predict_armor_pos 内部已经对 theta 做了 draw_dt 外推
+        // 这里也要做同样的外推，保持一致
+        double theta_predicted = theta + omega * draw_dt;
 
         // 绘制所有装甲板预测位置
         for (int i = 0; i < armor_num; ++i) {
@@ -561,8 +576,8 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
                 : spin_motion_.predict_armor_pos(i, draw_dt);
 
             // draw_armor_rect 需要装甲板朝向 (面朝方向, INWARD)
-            // theta 是 OUTWARD (从中心指向装甲板), 装甲板朝向 = theta + π
-            double armor_yaw = theta + i * (2.0 * M_PI / armor_num) + M_PI;
+            // theta_predicted 是 OUTWARD (从中心指向装甲板), 装甲板朝向 = theta + π
+            double armor_yaw = theta_predicted + i * (2.0 * M_PI / armor_num) + M_PI;
 
             // 当前追踪的装甲板用粗线
             int thickness = (i == 0) ? 3 : 1;
@@ -599,7 +614,8 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
 
     // 4. 绘制从观测反推的装甲板 (洋红色) - 无滤波滞后
     // 用途: 直观验证几何参数 (r, another_r, dz) 估计是否准确
-    if (spin_valid && !prev_armors_.empty()) {
+    // 必须数据新鲜才绘制，因为依赖 prev_armors_
+    if (spin_valid && data_fresh && !prev_armors_.empty()) {
         const cv::Scalar COLOR_GEOMETRY(255, 0, 255);  // 洋红色: 几何反推
 
         // 取最正对的观测装甲板
