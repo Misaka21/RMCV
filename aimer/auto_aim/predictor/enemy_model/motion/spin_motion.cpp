@@ -180,7 +180,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         x0[spin_model::XC] = xc;
         x0[spin_model::YC] = yc;
         x0[spin_model::ZC] = zc;
-        x0[spin_model::THETA] = yaw0;
+        x0[spin_model::THETA] = yaw0 + M_PI;  // 转为 OUTWARD！
         x0[spin_model::R] = r;
 
         ekf_.init(x0);
