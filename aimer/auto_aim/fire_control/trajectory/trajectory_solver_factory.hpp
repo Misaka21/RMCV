@@ -46,23 +46,6 @@ inline SolverType get_solver_type_from_config() {
 }
 
 /**
- * @brief 统一求解接口 (自动选择求解器)
- *
- * @param target_pos 目标位置 (枪管坐标系)
- * @param bullet_speed 弹速 (m/s)
- * @param vehicle_velocity 车辆速度 (动打动)
- * @return AimResult 瞄准结果
- */
-inline AimResult solve(
-    const Eigen::Vector3d& target_pos,
-    double bullet_speed,
-    const Eigen::Vector3d& vehicle_velocity = Eigen::Vector3d::Zero())
-{
-    SolverType type = get_solver_type_from_config();
-    return solve(target_pos, bullet_speed, vehicle_velocity, type);
-}
-
-/**
  * @brief 统一求解接口 (指定求解器类型)
  */
 inline AimResult solve(
@@ -86,6 +69,23 @@ inline AimResult solve(
         default:
             return AimResult{};
     }
+}
+
+/**
+ * @brief 统一求解接口 (自动选择求解器)
+ *
+ * @param target_pos 目标位置 (枪管坐标系)
+ * @param bullet_speed 弹速 (m/s)
+ * @param vehicle_velocity 车辆速度 (动打动)
+ * @return AimResult 瞄准结果
+ */
+inline AimResult solve(
+    const Eigen::Vector3d& target_pos,
+    double bullet_speed,
+    const Eigen::Vector3d& vehicle_velocity = Eigen::Vector3d::Zero())
+{
+    SolverType type = get_solver_type_from_config();
+    return solve(target_pos, bullet_speed, vehicle_velocity, type);
 }
 
 /**

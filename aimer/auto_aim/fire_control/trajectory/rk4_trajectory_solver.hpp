@@ -25,6 +25,7 @@
 #include <Eigen/Core>
 
 #include "aimer/auto_aim/fire_control/types.hpp"
+#include "trajectory_solver.hpp"  // for TrajectoryInput
 
 namespace autoaim::fire_control {
 
