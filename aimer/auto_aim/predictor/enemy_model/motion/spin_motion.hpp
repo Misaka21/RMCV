@@ -11,18 +11,18 @@
  *   [xc, vx, yc, vy, zc, vz, θ, ω, r]
  *   - xc, yc, zc: 旋转中心位置 (世界系)
  *   - vx, vy, vz: 旋转中心速度
- *   - θ: 当前装甲板朝向角 (从装甲板指向中心的方向, INWARD, rad)
+ *   - θ: 当前装甲板朝向角 (从中心指向装甲板的方向, OUTWARD, rad)
  *   - ω: 角速度 (rad/s)
  *   - r: 当前装甲板半径
  *
  * 观测向量 (4维):
  *   [yaw_a, pitch_a, dis_a, θ_a]
  *   - yaw_a, pitch_a, dis_a: 装甲板位置的球坐标
- *   - θ_a: 装甲板朝向角 (= θ, INWARD)
+ *   - θ_a: 装甲板朝向角 (= θ, OUTWARD)
  *
- * 几何关系:
- *   center = armor + r * (cos θ, sin θ)   (因为 θ 指向中心)
- *   armor = center - r * (cos θ, sin θ)   (从中心反推装甲板位置)
+ * 几何关系 (OUTWARD):
+ *   armor = center + r * (cos θ, sin θ)   (θ 从中心指向装甲板)
+ *   center = armor - r * (cos θ, sin θ)   (从装甲板反推中心)
  *
  * 外部维护 (跳变时交换):
  *   - another_r: 另一个半径 (4装甲板车辆长短轴)
@@ -125,20 +125,18 @@ struct SpinCVPredict {
  *
  * 从旋转中心和朝向角计算装甲板位置，再转换为 YPD 球坐标
  *
- * 约定: θ 是装甲板朝向角 (从装甲板指向中心的方向, INWARD)
+ * 约定: θ 是装甲板朝向角 (从中心指向装甲板的方向, OUTWARD)
  *
- * 装甲板位置 (从中心反推):
- *   xa = xc - r·cos(θ)
- *   ya = yc - r·sin(θ)
+ * 装甲板位置 (OUTWARD):
+ *   xa = xc + r·cos(θ)
+ *   ya = yc + r·sin(θ)
  *   za = zc + dz
- *
- * 解释: 因为 θ 指向中心，所以装甲板在中心的 -θ 方向
  *
  * YPD 观测:
  *   yaw = atan2(ya, xa)
  *   pitch = atan2(za, √(xa² + ya²))
  *   dis = √(xa² + ya² + za²)
- *   armor_yaw = θ  (装甲板朝向角, INWARD)
+ *   armor_yaw = θ  (装甲板朝向角, OUTWARD)
  */
 struct SpinMeasure {
     double dz;  // 高度差 (外部维护)
@@ -154,10 +152,9 @@ struct SpinMeasure {
         T theta = x[spin_model::THETA];
         T r = x[spin_model::R];
 
-        // 计算装甲板位置 (世界系)
-        // θ 指向中心 (INWARD)，所以装甲板在 -θ 方向
-        T xa = xc - r * ceres::cos(theta);
-        T ya = yc - r * ceres::sin(theta);
+        // 计算装甲板位置 (世界系, OUTWARD)
+        T xa = xc + r * ceres::cos(theta);
+        T ya = yc + r * ceres::sin(theta);
         T za = zc + T(dz);
 
         // 计算 YPD 观测
@@ -168,7 +165,7 @@ struct SpinMeasure {
         y[spin_model::YAW] = ceres::atan2(ya, xa);
         y[spin_model::PITCH] = ceres::atan2(za, rho);
         y[spin_model::DIS] = d;
-        y[spin_model::ARMOR_YAW] = theta;  // 装甲板朝向 = θ (INWARD)
+        y[spin_model::ARMOR_YAW] = theta;  // 装甲板朝向 = θ (OUTWARD)
     }
 };
 
@@ -293,7 +290,7 @@ public:
      * - 反推其他装甲板位置
      *
      * @param observed_pos 观测到的装甲板位置
-     * @param observed_theta 观测到的装甲板朝向 (INWARD)
+     * @param observed_theta 观测到的装甲板朝向 (OUTWARD)
      * @return 所有装甲板位置 (idx=0 是观测装甲板)
      */
     std::vector<Eigen::Vector3d> compute_all_armors_from_observation(

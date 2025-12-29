@@ -28,17 +28,20 @@ void SpinMotion::init(const ArmorData& armor, double timestamp) {
     double xa = obs.pos.x();
     double ya = obs.pos.y();
     double za = obs.pos.z();
-    double armor_yaw = obs.z[obs::ARMOR_YAW];
+
+    // 装甲板朝向 (PnP 输出的是装甲板面朝方向，即 INWARD)
+    // 需要转换为 OUTWARD: 从中心指向装甲板
+    double armor_yaw_inward = obs.z[obs::ARMOR_YAW];
+    double theta = armor_yaw_inward + M_PI;  // 转为 OUTWARD
 
     // 初始半径
     double r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
     another_r_ = r;
 
     // 从装甲板位置反推旋转中心
-    // armor_yaw 是从装甲板指向中心的方向 (INWARD)
-    // center = armor + r * (cos θ, sin θ)
-    double xc = xa + r * std::cos(armor_yaw);
-    double yc = ya + r * std::sin(armor_yaw);
+    // OUTWARD: center = armor - r * (cos θ, sin θ)
+    double xc = xa - r * std::cos(theta);
+    double yc = ya - r * std::sin(theta);
     double zc = za;
 
     // 初始化状态
@@ -46,7 +49,7 @@ void SpinMotion::init(const ArmorData& armor, double timestamp) {
     x0[spin_model::XC] = xc;
     x0[spin_model::YC] = yc;
     x0[spin_model::ZC] = zc;
-    x0[spin_model::THETA] = armor_yaw;
+    x0[spin_model::THETA] = theta;  // OUTWARD
     x0[spin_model::R] = r;
     // 速度初始为 0
 
@@ -55,7 +58,7 @@ void SpinMotion::init(const ArmorData& armor, double timestamp) {
     // 重置状态
     dz_ = 0;
     another_dz_ = 0;
-    last_yaw_ = armor_yaw;
+    last_yaw_ = theta;  // 保存 OUTWARD 角度
     spin_level_ = SpinLevel::NONE;
 
     last_update_time_ = timestamp;
@@ -78,20 +81,21 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     MatrixXX Q = build_Q(dt);
     ekf_.predict_forward(predict_func, Q);
 
-    // 观测更新
-    double armor_yaw = obs.z[obs::ARMOR_YAW];
+    // 观测的装甲板朝向 (INWARD → OUTWARD)
+    double armor_yaw_inward = obs.z[obs::ARMOR_YAW];
+    double armor_yaw_outward = armor_yaw_inward + M_PI;  // 转为 OUTWARD
 
-    // 连续化 yaw (避免 ±π 跳变)
+    // 连续化 theta (避免 ±π 跳变)
     VectorX x = ekf_.get_x();
     double theta_pred = x[spin_model::THETA];
-    double yaw_continuous = theta_pred + math::angle_diff(theta_pred, armor_yaw);
+    double theta_continuous = theta_pred + math::angle_diff(theta_pred, armor_yaw_outward);
 
     // 构建观测向量 (YPD)
     VectorZ z;
     z[spin_model::YAW] = obs.z[obs::YAW];
     z[spin_model::PITCH] = obs.z[obs::PITCH];
     z[spin_model::DIS] = obs.z[obs::DIST];
-    z[spin_model::ARMOR_YAW] = yaw_continuous;
+    z[spin_model::ARMOR_YAW] = theta_continuous;  // OUTWARD
 
     // 观测更新
     SpinMeasure measure_func(dz_);
@@ -127,7 +131,7 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
         ekf_.set_x(x);
     }
 
-    last_yaw_ = armor_yaw;
+    last_yaw_ = armor_yaw_outward;
     last_update_time_ = timestamp;
 }
 
@@ -202,11 +206,12 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 
     // 用主装甲板做观测更新
     const auto& obs = a0.observation;
-    double armor_yaw = obs.z[obs::ARMOR_YAW];
+    double armor_yaw_inward = obs.z[obs::ARMOR_YAW];
+    double armor_yaw_outward = armor_yaw_inward + M_PI;  // 转为 OUTWARD
 
     VectorX x = ekf_.get_x();
     double theta_pred = x[spin_model::THETA];
-    double yaw_continuous = theta_pred + math::angle_diff(theta_pred, armor_yaw);
+    double yaw_continuous = theta_pred + math::angle_diff(theta_pred, armor_yaw_outward);
 
     VectorZ z;
     z[spin_model::YAW] = obs.z[obs::YAW];
@@ -271,7 +276,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     ekf_.set_x(x);
 
     update_spin_level();
-    last_yaw_ = armor_yaw;
+    last_yaw_ = armor_yaw_outward;
     last_update_time_ = timestamp;
 }
 
@@ -279,7 +284,9 @@ void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
     if (!initialized_ || jump_index <= 0 || jump_index >= armor_num_) return;
 
     const auto& obs = new_armor.observation;
-    double armor_yaw = obs.z[obs::ARMOR_YAW];
+    // 转换为 OUTWARD
+    double armor_yaw_inward = obs.z[obs::ARMOR_YAW];
+    double armor_yaw_outward = armor_yaw_inward + M_PI;
 
     VectorX x = ekf_.get_x();
     double theta_pred = x[spin_model::THETA];
@@ -291,8 +298,8 @@ void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
     }
     // 3装甲板 (前哨站): 半径固定，不需要交换
 
-    // 更新朝向角为观测值 (连续化)
-    x[spin_model::THETA] = theta_pred + math::angle_diff(theta_pred, armor_yaw);
+    // 更新朝向角为观测值 (连续化, OUTWARD)
+    x[spin_model::THETA] = theta_pred + math::angle_diff(theta_pred, armor_yaw_outward);
 
     // 从新装甲板位置推算中心
     double xa = obs.pos.x();
@@ -301,9 +308,9 @@ void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
     double r = x[spin_model::R];
     double theta = x[spin_model::THETA];
 
-    // θ 指向中心 (INWARD): center = armor + r * (cos θ, sin θ)
-    double xc_obs = xa + r * std::cos(theta);
-    double yc_obs = ya + r * std::sin(theta);
+    // OUTWARD: center = armor - r * (cos θ, sin θ)
+    double xc_obs = xa - r * std::cos(theta);
+    double yc_obs = ya - r * std::sin(theta);
 
     double xc_pred = x[spin_model::XC];
     double yc_pred = x[spin_model::YC];
@@ -445,10 +452,9 @@ Eigen::Vector3d SpinMotion::predict_armor_pos(int armor_idx, double dt) const {
         height_diff = dz_;
     }
 
-    // 计算装甲板位置: armor = center - r * (cos θ, sin θ)
-    // 因为 θ 指向中心 (INWARD)，装甲板在 -θ 方向
-    double xa = xc - r * std::cos(armor_theta);
-    double ya = yc - r * std::sin(armor_theta);
+    // 计算装甲板位置 (OUTWARD): armor = center + r * (cos θ, sin θ)
+    double xa = xc + r * std::cos(armor_theta);
+    double ya = yc + r * std::sin(armor_theta);
     double za = zc + height_diff;
 
     return Eigen::Vector3d(xa, ya, za);
@@ -477,10 +483,9 @@ std::vector<Eigen::Vector3d> SpinMotion::compute_all_armors_from_observation(
     double z0_diff = dz_;             // 当前高度差
     double z1_diff = another_dz_;     // 另一个高度差
 
-    // 从观测装甲板反推中心: center = armor + r * (cos θ, sin θ)
-    // 因为 θ 是 INWARD (从装甲板指向中心)
-    double xc = observed_pos.x() + r0 * std::cos(observed_theta);
-    double yc = observed_pos.y() + r0 * std::sin(observed_theta);
+    // 从观测装甲板反推中心 (OUTWARD): center = armor - r * (cos θ, sin θ)
+    double xc = observed_pos.x() - r0 * std::cos(observed_theta);
+    double yc = observed_pos.y() - r0 * std::sin(observed_theta);
     double zc = observed_pos.z() - z0_diff;  // 中心 z = 装甲板 z - 高度差
 
     // 计算所有装甲板位置
@@ -491,9 +496,9 @@ std::vector<Eigen::Vector3d> SpinMotion::compute_all_armors_from_observation(
     for (int i = 0; i < armor_num_; ++i) {
         double theta_i = observed_theta + i * angle_step;
 
-        // 装甲板位置: armor = center - r * (cos θ, sin θ)
-        double xa = xc - current_r * std::cos(theta_i);
-        double ya = yc - current_r * std::sin(theta_i);
+        // 装甲板位置 (OUTWARD): armor = center + r * (cos θ, sin θ)
+        double xa = xc + current_r * std::cos(theta_i);
+        double ya = yc + current_r * std::sin(theta_i);
         double za = zc + current_dz;
 
         result.emplace_back(xa, ya, za);

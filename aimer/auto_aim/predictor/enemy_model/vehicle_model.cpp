@@ -555,13 +555,9 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
                 ? lmtd_motion_.predict_armor_pos(i, draw_dt)
                 : spin_motion_.predict_armor_pos(i, draw_dt);
 
-            // draw_armor_rect 需要装甲板朝向 (面朝方向)
-            // LMTD: theta 是 OUTWARD (从中心指向装甲板), 装甲板朝向 = theta + π
-            // SpinMotion: theta 是 INWARD (从装甲板指向中心), 装甲板朝向 = theta
-            double armor_yaw = theta + i * (2.0 * M_PI / armor_num);
-            if (use_lmtd_) {
-                armor_yaw += M_PI;  // OUTWARD → 装甲板朝向
-            }
+            // draw_armor_rect 需要装甲板朝向 (面朝方向, INWARD)
+            // theta 是 OUTWARD (从中心指向装甲板), 装甲板朝向 = theta + π
+            double armor_yaw = theta + i * (2.0 * M_PI / armor_num) + M_PI;
 
             // 当前追踪的装甲板用粗线
             int thickness = (i == 0) ? 3 : 1;
@@ -604,21 +600,16 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         // 取最正对的观测装甲板
         const auto& best_obs = prev_armors_[0];  // prev_armors_ 已按 z_to_v 排序
         double obs_armor_yaw = best_obs.z[obs::ARMOR_YAW];  // 装甲板朝向 (INWARD)
+        double obs_theta_outward = obs_armor_yaw + M_PI;     // 转为 OUTWARD
 
-        // 从观测反推所有装甲板
-        // LMTD 期望 OUTWARD 的 theta = armor_yaw + π
-        // SpinMotion 期望 INWARD 的 theta = armor_yaw
-        std::vector<Eigen::Vector3d> all_armors;
-        if (use_lmtd_) {
-            double obs_theta_outward = obs_armor_yaw + M_PI;
-            all_armors = lmtd_motion_.compute_all_armors_from_observation(best_obs.pos, obs_theta_outward);
-        } else {
-            all_armors = spin_motion_.compute_all_armors_from_observation(best_obs.pos, obs_armor_yaw);
-        }
+        // 从观测反推所有装甲板 (两个模型都用 OUTWARD)
+        std::vector<Eigen::Vector3d> all_armors = use_lmtd_
+            ? lmtd_motion_.compute_all_armors_from_observation(best_obs.pos, obs_theta_outward)
+            : spin_motion_.compute_all_armors_from_observation(best_obs.pos, obs_theta_outward);
 
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
         for (int i = 0; i < armor_num && i < static_cast<int>(all_armors.size()); ++i) {
-            // draw_armor_rect 需要装甲板朝向，obs_armor_yaw 本身就是装甲板朝向
+            // draw_armor_rect 需要装甲板朝向 (INWARD)
             double armor_yaw = obs_armor_yaw + i * (2.0 * M_PI / armor_num);
 
             // idx=0 是观测装甲板本身，用虚线; 其他用实线
@@ -634,29 +625,16 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             }
         }
 
-        // 绘制从观测反推的中心
+        // 绘制从观测反推的中心 (OUTWARD: center = armor - r * (cos θ, sin θ))
         double r0 = use_lmtd_ ? lmtd_motion_.get_radius() : spin_motion_.get_radius();
         double dz = use_lmtd_ ? lmtd_motion_.get_dz() : spin_motion_.get_dz();
         double another_r = use_lmtd_ ? lmtd_motion_.get_another_radius() : spin_motion_.get_another_radius();
 
-        // 计算中心：需要用 OUTWARD theta
-        // LMTD: center = armor - r * (cos θ_out, sin θ_out), θ_out = armor_yaw + π
-        // SpinMotion: center = armor + r * (cos θ_in, sin θ_in), θ_in = armor_yaw
-        Eigen::Vector3d obs_center;
-        if (use_lmtd_) {
-            double theta_out = obs_armor_yaw + M_PI;
-            obs_center = Eigen::Vector3d(
-                best_obs.pos.x() - r0 * std::cos(theta_out),
-                best_obs.pos.y() - r0 * std::sin(theta_out),
-                best_obs.pos.z() - dz
-            );
-        } else {
-            obs_center = Eigen::Vector3d(
-                best_obs.pos.x() + r0 * std::cos(obs_armor_yaw),
-                best_obs.pos.y() + r0 * std::sin(obs_armor_yaw),
-                best_obs.pos.z() - dz
-            );
-        }
+        Eigen::Vector3d obs_center(
+            best_obs.pos.x() - r0 * std::cos(obs_theta_outward),
+            best_obs.pos.y() - r0 * std::sin(obs_theta_outward),
+            best_obs.pos.z() - dz
+        );
         bool valid = false;
         cv::Point2f pt = tf::world_to_pixel(obs_center, q_imu, valid);
         if (valid) {
