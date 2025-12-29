@@ -133,20 +133,8 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor) {
     }
 
     // 直接用观测的朝向角 (不用 possible_theta，因为角速度慢时不准)
+    // 参考 rm.cv.fans: 只更新 theta，不更新 xc, yc，让 EKF 自己收敛
     x[lmtd_model::THETA] = new_orient;
-
-    // 从新装甲板位置反推中心，修正 xc, yc
-    // OUTWARD: center = armor - r * (cos θ, sin θ)
-    // 跳变时必须更新中心，否则旧中心 + 新 theta 会导致位置错误
-    double xa = obs.pos.x();
-    double ya = obs.pos.y();
-    double r = x[lmtd_model::R];
-    double xc_obs = xa - r * std::cos(new_orient);
-    double yc_obs = ya - r * std::sin(new_orient);
-
-    x[lmtd_model::XC] = xc_obs;
-    x[lmtd_model::YC] = yc_obs;
-    // 速度保持不变，让 EKF 逐渐修正
 
     ekf_.set_x(x);
     tracked_armor_id_ = armor.id;
@@ -319,7 +307,7 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     ekf_.predict_forward(predict_func, Q);
     predict_t_ = timestamp;
 
-    // 内部跳变检测
+    // 跳变检测 (参考 rm.cv.fans: 双装甲板时也需要)
     detect_and_handle_jump(primary);
 
     // 观测更新 (用主装甲板)
