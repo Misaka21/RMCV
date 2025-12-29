@@ -167,6 +167,52 @@ runtime_param::parameter_run("config.toml");
 auto dynamic_value = runtime_param::get_param<std::string>("section.key");
 ```
 
+#### ⚠️ 运行时参数访问规范 (重要!)
+
+**必须在使用点直接调用 `runtime_param::get_param<T>()`，禁止封装或缓存！**
+
+这是为了保证参数热重载生效。参考 rm.cv.fans 的写法：
+
+```cpp
+// ✅ 正确: 每次使用时直接调用 get_param
+MatrixXX SpinMotion::build_Q(double dt) const {
+    double q_pos = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_pos");
+    double q_vel = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_vel");
+    double q_theta = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_theta");
+    // ... 使用参数构建矩阵
+}
+
+// ✅ 正确: 条件判断也直接调用
+if (runtime_param::get_param<bool>("AutoAim.Predictor.SpinEKF.force_zero_vz")) {
+    x[spin_model::VZ] = 0;
+}
+
+// ❌ 错误: 封装成 helper 函数 (启动时调用一次，之后不更新)
+double get_q_pos() {
+    static double val = runtime_param::get_param<double>("...");  // 只执行一次!
+    return val;
+}
+
+// ❌ 错误: 在构造函数/init中缓存
+class SpinMotion {
+    double q_pos_;  // 成员变量缓存
+    void init() {
+        q_pos_ = runtime_param::get_param<double>("...");  // 只在init时读取!
+    }
+};
+
+// ❌ 错误: 用 struct 包装参数
+struct SpinConfig {
+    double q_pos;
+    static SpinConfig load() { ... }  // 只在启动时加载!
+};
+```
+
+**TOML 类型严格匹配:**
+- `2.8` = double, `2` = int64, `false` = bool
+- `get_param<double>()` 对 int64/bool 类型会返回 0.0 并输出 ERROR 日志
+- 修改配置文件时注意保持类型一致
+
 ### UMT Object Management
 ```cpp
 // BasicObjManager - 用于基本类型和结构体
