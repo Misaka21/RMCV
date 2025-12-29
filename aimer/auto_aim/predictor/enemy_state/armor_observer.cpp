@@ -5,7 +5,9 @@
 
 #include "armor_observer.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <opencv2/imgproc.hpp>
 
 #include "aimer/common/math/math.hpp"
@@ -34,6 +36,10 @@ constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
 // PnP 解算的俯仰角超过此阈值时，不使用三分法优化
 constexpr double ARMOR_PITCH_MAX_FOR_FIT = 30.0 * M_PI / 180.0;
 
+// 位置相近性合并阈值 (米)
+// 同一辆车的两块装甲板距离通常 < 1m，两辆车之间通常 > 2m
+constexpr double SAME_VEHICLE_DISTANCE_THRESHOLD = 1.5;
+
 const ArmorObservationTable& ArmorObserver::observe(
     const DetectionResult& detection,
     double timestamp
@@ -43,11 +49,51 @@ const ArmorObservationTable& ArmorObserver::observe(
 
     const auto& q_imu = detection.state.q_imu;
 
+    // 第一步：收集所有有效的观测
+    std::vector<ArmorObservation> observations;
     for (const auto& armor : detection.armors) {
         auto obs = solve_pnp(armor, timestamp, q_imu);
         if (obs.valid) {
-            table_.add(obs);
+            observations.push_back(obs);
         }
+    }
+
+    // 第二步：位置相近性合并
+    // 如果两块装甲板位置很近但 target_id 不同，说明分类器可能误判
+    // 将它们合并到同一个 target_id（使用距离更近的那个的编号）
+    if (observations.size() >= 2) {
+        // 按距离排序，优先使用距离近的编号
+        std::vector<size_t> sorted_indices(observations.size());
+        std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
+        std::sort(sorted_indices.begin(), sorted_indices.end(),
+            [&observations](size_t a, size_t b) {
+                return observations[a].distance() < observations[b].distance();
+            });
+
+        // 合并：如果两块装甲板位置很近，统一使用距离近的那个的编号
+        for (size_t i = 0; i < sorted_indices.size(); ++i) {
+            auto& obs_i = observations[sorted_indices[i]];
+            for (size_t j = i + 1; j < sorted_indices.size(); ++j) {
+                auto& obs_j = observations[sorted_indices[j]];
+
+                // 计算两块装甲板的距离
+                double dist = (obs_i.pos - obs_j.pos).norm();
+
+                if (dist < SAME_VEHICLE_DISTANCE_THRESHOLD && obs_i.target_id != obs_j.target_id) {
+                    // 位置相近但编号不同，说明可能是同一辆车
+                    // 使用距离更近的那个的编号
+                    fmt::print(fmt::fg(fmt::color::yellow),
+                        "[ArmorObserver] 合并相近装甲板: T{} + T{} (dist={:.2f}m) → T{}\n",
+                        obs_i.target_id, obs_j.target_id, dist, obs_i.target_id);
+                    obs_j.target_id = obs_i.target_id;
+                }
+            }
+        }
+    }
+
+    // 第三步：添加到表
+    for (const auto& obs : observations) {
+        table_.add(obs);
     }
 
     return table_;
