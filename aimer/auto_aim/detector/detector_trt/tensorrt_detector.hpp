@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -115,21 +116,25 @@ private:
     /**
      * @brief 预处理图像
      * @param image 输入图像 (BGR)
-     * @return 缩放后的图像和缩放比例
+     * @return {缩放后图像, scale, dx, dy}
      */
-    std::pair<cv::Mat, float> preprocess(const cv::Mat& image);
+    std::tuple<cv::Mat, float, int, int> preprocess(const cv::Mat& image);
 
     /**
      * @brief 后处理推理结果
      * @param output 网络输出数据
      * @param num_detections 检测数量
-     * @param scale 缩放比例 (用于还原坐标)
+     * @param scale 缩放比例
+     * @param dx letterbox x 偏移
+     * @param dy letterbox y 偏移
      * @return 检测到的装甲板列表
      */
     std::vector<DetectedArmor> postprocess(
         const float* output,
         int num_detections,
-        float scale
+        float scale,
+        int dx,
+        int dy
     );
 
     /**
@@ -153,15 +158,22 @@ private:
     std::unique_ptr<nvinfer1::ICudaEngine> engine_;
     std::unique_ptr<nvinfer1::IExecutionContext> context_;
 
-    // CUDA 缓冲区
-    void* device_buffers_[2] = {nullptr, nullptr};  // 输入和输出
+    // CUDA 缓冲区 (新 API 使用命名张量)
+    void* input_device_ = nullptr;
+    void* output_device_ = nullptr;
     std::vector<float> output_buffer_;
 
+    // CUDA 流
+    cudaStream_t stream_ = nullptr;
+
     // 模型信息
-    int input_idx_ = 0;
-    int output_idx_ = 0;
+    std::string input_name_;
+    std::string output_name_;
     nvinfer1::Dims input_dims_;
     nvinfer1::Dims output_dims_;
+    size_t input_size_ = 0;
+    size_t output_size_ = 0;
+    int num_detections_ = 0;
 
     // 配置
     TensorrtConfig config_;
