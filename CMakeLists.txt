@@ -134,6 +134,13 @@ if(SIMULATOR_FOUND)
     target_link_libraries(test_fire_control simulator)
 endif()
 
+# TensorRT Engine 生成测试 (需要TensorRT)
+if(ENABLE_TENSORRT_DETECTOR)
+    add_executable(test_trt_engine test/test_trt_engine.cpp)
+    target_link_libraries(test_trt_engine ${OpenCV_LIBS} fmt::fmt plugin detector)
+    message(STATUS "test_trt_engine will be built (TensorRT enabled)")
+endif()
+
 # Simulator测试 (需要ROS2环境)
 if(SIMULATOR_FOUND)
     add_executable(test_simulator test/test_simulator.cpp)
