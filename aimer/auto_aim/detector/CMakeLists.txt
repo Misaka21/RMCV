@@ -2,9 +2,30 @@
 # Detector 模块 CMakeLists.txt
 # ==============================================================================
 
-# 检测器选项
-option(ENABLE_OPENVINO_DETECTOR "Enable OpenVINO YOLO detector" OFF)
-option(ENABLE_TENSORRT_DETECTOR "Enable TensorRT YOLO detector" OFF)
+# 添加 TensorRT 查找模块路径
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/detector_trt)
+
+# 自动检测 TensorRT
+find_package(TensorRT QUIET)
+if(TensorRT_FOUND)
+    set(_TENSORRT_DEFAULT ON)
+    message(STATUS "TensorRT ${TensorRT_VERSION} detected, auto-enabling")
+else()
+    set(_TENSORRT_DEFAULT OFF)
+endif()
+
+# 自动检测 OpenVINO
+find_package(OpenVINO QUIET)
+if(OpenVINO_FOUND)
+    set(_OPENVINO_DEFAULT ON)
+    message(STATUS "OpenVINO detected, auto-enabling")
+else()
+    set(_OPENVINO_DEFAULT OFF)
+endif()
+
+# 检测器选项 (自动检测后可手动覆盖)
+option(ENABLE_OPENVINO_DETECTOR "Enable OpenVINO YOLO detector" ${_OPENVINO_DEFAULT})
+option(ENABLE_TENSORRT_DETECTOR "Enable TensorRT YOLO detector" ${_TENSORRT_DEFAULT})
 
 # 定义 common 目录路径供子模块使用
 set(DETECTOR_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/common)
