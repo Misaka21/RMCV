@@ -51,54 +51,55 @@ inline YoloBackend parse_yolo_backend(const std::string& backend) {
 /**
  * @brief 从配置文件创建检测器
  * @param color 初始敌方颜色
- * @param type 检测器类型 (默认传统检测)
  * @param config_file 配置文件名
  * @return DetectorInterface 接口指针
+ *
+ * 自动根据配置文件中的 [Detector].type 选择检测器类型：
+ *   - "traditional": 传统检测器
+ *   - "yolo": YOLO 检测器 (根据 backend 选择 OpenVINO/TensorRT)
  */
 inline std::unique_ptr<DetectorInterface> create_detector_from_config(
     EnemyColor color,
-    DetectorType type = DetectorType::TRADITIONAL,
     const std::string& config_file = "detector.toml"
 ) {
-    switch (type) {
-        case DetectorType::TRADITIONAL:
-            return Detector::from_config(color);
+    auto param = static_param::parse_file(config_file);
 
-        case DetectorType::YOLO: {
-            // 读取后端配置
-            auto param = static_param::parse_file(config_file);
-            std::string backend_str = static_param::get_param<std::string>(
-                param, "Detector", "yolo", "backend");
-            YoloBackend backend = parse_yolo_backend(backend_str);
+    // 读取检测器类型
+    std::string type_str = static_param::get_param<std::string>(param, "Detector", "type");
 
-            switch (backend) {
-                case YoloBackend::OPENVINO:
-#ifdef ENABLE_OPENVINO_DETECTOR
-                    return OpenvinoDetector::from_config(color, config_file);
-#else
-                    throw std::runtime_error(
-                        "OpenVINO detector not enabled. "
-                        "Rebuild with -DENABLE_OPENVINO_DETECTOR=ON"
-                    );
-#endif
-
-                case YoloBackend::TENSORRT:
-#ifdef ENABLE_TENSORRT_DETECTOR
-                    return TensorrtDetector::from_config(color, config_file);
-#else
-                    throw std::runtime_error(
-                        "TensorRT detector not enabled. "
-                        "Rebuild with -DENABLE_TENSORRT_DETECTOR=ON"
-                    );
-#endif
-            }
-            break;
-        }
-
-        default:
-            throw std::runtime_error("Unknown detector type");
+    if (type_str == "traditional") {
+        return Detector::from_config(color);
     }
-    return nullptr;  // 不会执行到这里
+    else if (type_str == "yolo") {
+        // 读取后端配置
+        std::string backend_str = static_param::get_param<std::string>(
+            param, "Detector.yolo", "backend");
+        YoloBackend backend = parse_yolo_backend(backend_str);
+
+        switch (backend) {
+            case YoloBackend::OPENVINO:
+#ifdef ENABLE_OPENVINO_DETECTOR
+                return OpenvinoDetector::from_config(color, config_file);
+#else
+                throw std::runtime_error(
+                    "OpenVINO detector not enabled. "
+                    "Rebuild with -DENABLE_OPENVINO_DETECTOR=ON"
+                );
+#endif
+
+            case YoloBackend::TENSORRT:
+#ifdef ENABLE_TENSORRT_DETECTOR
+                return TensorrtDetector::from_config(color, config_file);
+#else
+                throw std::runtime_error(
+                    "TensorRT detector not enabled. "
+                    "Rebuild with -DENABLE_TENSORRT_DETECTOR=ON"
+                );
+#endif
+        }
+    }
+
+    throw std::runtime_error("Unknown detector type: " + type_str);
 }
 
 } // namespace autoaim::detector
