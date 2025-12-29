@@ -67,22 +67,6 @@ private:
         const Eigen::Quaterniond& q_imu
     );
 
-    /**
-     * @brief 计算观测向量 [yaw, pitch, dist, armor_yaw] (世界系)
-     */
-    Eigen::Vector4d compute_observation(
-        const Eigen::Vector3d& pos_world,
-        const Eigen::Vector3d& normal_world
-    );
-
-    /**
-     * @brief 计算 z_to_v (装甲板朝向与视线夹角，相机系)
-     */
-    double compute_z_to_v(
-        const Eigen::Vector3d& pos_cam,
-        const Eigen::Vector3d& normal_cam
-    );
-
     // ==================== 三分法优化 z_to_v ====================
 
     /**

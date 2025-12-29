@@ -368,21 +368,29 @@ void draw_armor_rect(cv::Mat& img, const Eigen::Vector3d& center, double yaw,
     double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
     double h = 0.050;
 
-    // 计算四个角点 (装甲板坐标系: 中心在 center, 法向朝 yaw 方向)
-    // 角点相对于中心的偏移 (在装甲板平面内)
+    // 装甲板俯仰角: -15° 表示装甲板上沿向后倾斜
+    constexpr double pitch = -15.0 * M_PI / 180.0;
+
+    // 法向量在 XY 平面的投影 (用于计算 x_axis 和 y_axis)
     double cos_yaw = std::cos(yaw);
     double sin_yaw = std::sin(yaw);
 
-    // 左右方向 (垂直于法向)
-    Eigen::Vector3d right(-sin_yaw * w / 2, cos_yaw * w / 2, 0);
-    Eigen::Vector3d up(0, 0, h / 2);
+    // 装甲板 X 轴 (水平方向，垂直于法向量)
+    Eigen::Vector3d x_axis(-sin_yaw, cos_yaw, 0);
+
+    // 装甲板 Y 轴 (竖直方向，考虑俯仰角)
+    Eigen::Vector3d y_axis(
+        -cos_yaw * std::sin(pitch),
+        -sin_yaw * std::sin(pitch),
+        std::cos(pitch)
+    );
 
     // 四个角点: 左上、左下、右下、右上 (逆时针)
     std::array<Eigen::Vector3d, 4> corners = {
-        center - right + up,  // 左上
-        center - right - up,  // 左下
-        center + right - up,  // 右下
-        center + right + up   // 右上
+        center + x_axis * (w / 2) + y_axis * (h / 2),  // 左上
+        center + x_axis * (w / 2) - y_axis * (h / 2),  // 左下
+        center - x_axis * (w / 2) - y_axis * (h / 2),  // 右下
+        center - x_axis * (w / 2) + y_axis * (h / 2)   // 右上
     };
 
     // 投影到图像

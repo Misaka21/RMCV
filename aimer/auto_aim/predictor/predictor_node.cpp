@@ -25,13 +25,6 @@ namespace autoaim::predictor {
 
 using SteadyClock = std::chrono::steady_clock;
 
-// 装甲板俯仰角 (规则定义，索引=ArmorNumber)
-constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
-    0.0, 15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0,
-    15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0, -15.0 * M_PI / 180.0,
-    15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0
-};
-
 /**
  * @brief 绘制基于 z_to_v 优化的装甲板框
  */
@@ -49,10 +42,8 @@ void draw_armor_by_z_to_v(
     double w = (type == ArmorType::LARGE) ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
     double h = (type == ArmorType::LARGE) ? LARGE_ARMOR_HEIGHT : SMALL_ARMOR_HEIGHT;
 
-    // 装甲板俯仰角 (弧度)
-    // 负值表示装甲板上沿向后倾斜 (与 rm.cv.fans 一致)
-    double pitch = -15.0 * M_PI / 180.0;  // 比赛环境: -15 度
-    // double pitch = (target_id >= 0 && target_id < 9) ? ARMOR_PITCH_BY_RULE[target_id] : 0.0;
+    // 装甲板俯仰角 (弧度): -15° 表示装甲板上沿向后倾斜
+    double pitch = -15.0 * M_PI / 180.0;
 
     // 相机 Z 轴在世界 XY 平面的投影 (归一化)
     Eigen::Vector3d camera_z_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(
