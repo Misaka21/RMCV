@@ -524,19 +524,24 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 2. 绘制 ArmorMotion 滤波后的位置 (口字形)
+    // 2. 绘制 ArmorMotion 滤波后的位置 (空心圈，近大远小)
+    // ArmorMotion 没有 yaw 信息，侧向时画口字形不准，改用空心圈
     double draw_dt = get_draw_predict_dt();
     auto armor_states = armor_motion_.get_armor_states(timestamp);  // 用原始时间获取
     for (auto& as : armor_states) {
         // 手动外推位置
         Eigen::Vector3d predicted_pos = as.position + as.velocity * draw_dt;
-        draw_armor_rect(img, predicted_pos, as.yaw, as.type, q_imu, COLOR_FILTERED, 2);
-        // 标注 armor_id
         bool valid = false;
         cv::Point2f pt = tf::world_to_pixel(predicted_pos, q_imu, valid);
         if (valid) {
+            // 近大远小: 半径 = base_size / distance
+            double distance = predicted_pos.norm();
+            int radius = static_cast<int>(50.0 / std::max(distance, 0.5));  // 1m处50px，2m处25px
+            radius = std::clamp(radius, 5, 100);  // 限制范围
+            cv::circle(img, pt, radius, COLOR_FILTERED, 2);
+            // 标注 armor_id
             cv::putText(img, "A" + std::to_string(as.id),
-                        pt + cv::Point2f(15, 5),
+                        pt + cv::Point2f(radius + 5, 5),
                         cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_FILTERED, 1);
         }
     }
