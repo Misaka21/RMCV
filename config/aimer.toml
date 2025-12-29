@@ -28,6 +28,8 @@
     #@bool 是否显示预测可视化窗口
     show_window = true
 
+    use_lmtd = false
+
     # 面积过滤
     #@double 已存在装甲板的最小面积比例
     existing_armor_area_ratio = 0.30
@@ -86,14 +88,14 @@
     q_r = 1.0
 
     # 观测噪声 R (越大越不信任观测，滤波越平滑)
-    #@double yaw/pitch角度观测噪声 (rad²)
-    r_angle = 8.0
+    #@double yaw/pitch角度观测噪声 (调大减少位置抖动)
+    r_angle = 15.0
     #@double 距离观测噪声系数, R_dis = r_dis_k × distance²
-    r_dis_k = 50.0
-    #@double 装甲板朝向角观测噪声 - 单块时 (PnP姿态误差大)
-    r_armor_yaw_single = 100.0
-    #@double 装甲板朝向角观测噪声 - 双块时 (几何互相验证，更可信)
-    r_armor_yaw_double = 100.0
+    r_dis_k = 80.0
+    #@double 装甲板朝向角观测噪声 - 单块时 (调大减少朝向抖动)
+    r_armor_yaw_single = 150.0
+    #@double 装甲板朝向角观测噪声 - 双块时
+    r_armor_yaw_double = 80.0
 
     # 半径参数
     #@double 初始半径 (m)
@@ -114,27 +116,28 @@
     # 关键区别: x[4] = 装甲板 z (不是中心 z)，避免 PnP 累积误差
     # 角度约定: OUTWARD (θ 从中心指向装甲板)
 
-    # 过程噪声 Q (参考 rm.cv.fans: q.pos.x.in-1s 等)
-    #@double 旋转中心位置过程噪声
-    q_pos = 0.01
-    #@double 旋转中心速度过程噪声
-    q_vel = 10.0
-    #@double 朝向角θ过程噪声
-    q_theta = 0.01
-    #@double 角速度ω过程噪声
-    q_omega = 10.0
-    #@double 半径r过程噪声 (不乘 dt)
-    q_r = 0.001
+    # 过程噪声 Q (参考 rm.cv.fans: q.pos.x.in-1s = 2.8, q.pos.v.in-1s = 2800)
+    #@double 旋转中心位置过程噪声 (原 0.01 → 2.8)
+    q_pos = 2.8
+    #@double 旋转中心速度过程噪声 (原 10.0 → 2800.0)
+    q_vel = 2800.0
+    #@double 朝向角θ过程噪声 (原 0.01 → 2.8)
+    q_theta = 2.8
+    #@double 角速度ω过程噪声 (原 10.0 → 280.0)
+    q_omega = 280.0
+    #@double 半径r过程噪声 (不乘 dt, 原 0.001 → 1.0)
+    q_r = 1.0
 
-    # 观测噪声 R
-    #@double yaw/pitch角度观测噪声 (rad²)
-    r_angle = 0.0001
+    # 观测噪声 R (参考 rm.cv.fans: r.yaw = 8.0, r.orientation-yaw.single = 30.0)
+    # R 越大 = 越不信任观测 = 滤波越平滑
+    #@double yaw/pitch角度观测噪声 (调大减少位置抖动)
+    r_angle = 15.0
     #@double 1m处距离观测噪声，实际 R_dis = r_dis_1m * dis^4
-    r_dis_1m = 0.01
-    #@double 装甲板朝向角观测噪声 - 单块 (PnP姿态误差大)
-    r_orient_single = 0.05
-    #@double 装甲板朝向角观测噪声 - 双块 (几何互相验证)
-    r_orient_double = 0.01
+    r_dis_1m = 40.0
+    #@double 装甲板朝向角观测噪声 - 单块 (调大减少朝向抖动)
+    r_orient_single = 50.0
+    #@double 装甲板朝向角观测噪声 - 双块
+    r_orient_double = 25.0
 
     # 半径参数
     #@double 初始半径 (m)

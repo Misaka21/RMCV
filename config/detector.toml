@@ -8,7 +8,7 @@
 
 [Detector.traditional]
     #@bool 是否开启调试模式
-    debug = true
+    debug = false
     #@int 二值化阈值
     binary_thres = 100
     #@bool 是否开启灯条角点最小二乘校正
@@ -56,7 +56,7 @@
 
 [Detector.yolo]
     #@string 推理后端: "openvino" | "tensorrt" | "onnxruntime"
-    backend = "tensorrt"
+    backend = "openvino"
 
     #@string 模型文件 (相对于 asset 目录)
     model = "armor_0526.onnx"

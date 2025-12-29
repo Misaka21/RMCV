@@ -16,7 +16,7 @@
 # 枚举类型请使用字符串,参考MV_CC_SetEnumValueByString
 [Camera.config]
     #@float 曝光时间 (us)
-    ExposureTime = 3500.0
+    ExposureTime = 10000.0
     #@float 增益
     Gain = 16.9
     #@bool 水平翻转
@@ -73,4 +73,4 @@
     #@int 相机-IMU时间偏移 (微秒)
     # 正值: 图像比IMU数据晚到达，匹配过去的IMU
     # 负值: 图像比IMU数据早到达，匹配未来的IMU
-    delta_t_us = -3400
+    delta_t_us = -4886
