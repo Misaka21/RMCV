@@ -144,7 +144,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         return;
     }
 
-    // 多装甲板：利用几何关系
+    // 多装甲板：参考 rm.cv.fans，不做特殊的几何参数融合，只用主装甲板更新
     const auto& a0 = armors[0];
     const auto& a1 = armors[1];
 
@@ -195,7 +195,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         return;
     }
 
-    // 已初始化：先用主装甲板做 EKF 更新
+    // 已初始化：用主装甲板做 EKF 更新 (不做几何参数融合)
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
@@ -223,47 +223,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     MatrixZZ R = build_R(obs.z[obs::DIST], a0.z_to_v(), 2);  // 双块装甲板，噪声更小
     ekf_.update_forward(measure_func, z, R);
 
-    // ========== 利用两块装甲板直接更新中心和半径 ==========
-    Eigen::Vector3d p0 = a0.pos();
-    Eigen::Vector3d p1 = a1.pos();
-    double yaw0 = a0.observation.z[obs::ARMOR_YAW];
-    double yaw1 = a1.observation.z[obs::ARMOR_YAW];
-
-    Eigen::Vector2d n0(std::cos(yaw0), std::sin(yaw0));
-    Eigen::Vector2d n1(std::cos(yaw1), std::sin(yaw1));
-
-    Eigen::Vector2d dp_xy(p0.x() - p1.x(), p0.y() - p1.y());
-    Eigen::Vector2d dn = n1 - n0;
-    double dn_norm = dn.norm();
-
-    if (dn_norm > 0.1) {
-        // 两块装甲板夹角足够大，可以计算
-        double r_measured = dp_xy.norm() / dn_norm;
-        r_measured = std::clamp(r_measured,
-            runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min"),
-            runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_max"));
-
-        // 计算中心: center = armor + r * n (因为 n 指向中心)
-        double xc_measured = (p0.x() + r_measured * n0.x() + p1.x() + r_measured * n1.x()) / 2.0;
-        double yc_measured = (p0.y() + r_measured * n0.y() + p1.y() + r_measured * n1.y()) / 2.0;
-        double zc_measured = (p0.z() + p1.z()) / 2.0;
-
-        // 融合到 EKF 状态 (软更新，权重 0.3)
-        x = ekf_.get_x();
-        constexpr double ALPHA = 0.3;
-        x[spin_model::XC] = (1 - ALPHA) * x[spin_model::XC] + ALPHA * xc_measured;
-        x[spin_model::YC] = (1 - ALPHA) * x[spin_model::YC] + ALPHA * yc_measured;
-        x[spin_model::ZC] = (1 - ALPHA) * x[spin_model::ZC] + ALPHA * zc_measured;
-        x[spin_model::R] = (1 - ALPHA) * x[spin_model::R] + ALPHA * r_measured;
-
-        // 直接更新高度差
-        dz_ = p0.z() - x[spin_model::ZC];
-        another_dz_ = p1.z() - x[spin_model::ZC];
-
-        ekf_.set_x(x);
-    }
-
-    // 限制半径范围
+    // 后处理 (不做几何参数融合，让 EKF 自己收敛)
     x = ekf_.get_x();
     x[spin_model::R] = std::clamp(x[spin_model::R],
         runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min"),

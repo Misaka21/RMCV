@@ -283,9 +283,11 @@ private:
      * 通过比较 tracked_armor_id 和当前观测的 armor.id 判断是否跳变
      * 如果跳变，计算跳了几块装甲板，交换半径/高度差
      *
+     * @param armor 当前观测的装甲板
+     * @param out_tracked_id [输出] 新的 tracked_armor_id (EKF 更新后才真正更新成员)
      * @return 是否发生跳变
      */
-    bool detect_and_handle_jump(const ArmorData& armor);
+    bool detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id);
 
     /**
      * @brief 选择要追踪的装甲板 (多装甲板时)

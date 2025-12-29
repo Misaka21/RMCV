@@ -76,15 +76,17 @@ bool LmtdMotion::credit(double current_time) const {
     return current_time - update_t_ <= credit_dt;
 }
 
-bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor) {
+bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id) {
+    // 返回新的 tracked_id，但不在这里更新成员变量
+    // 参考 rm.cv.fans: tracked_armor_id 在 EKF 更新之后才更新
+    out_tracked_id = armor.id;
+
     // 如果 ID 相同，没有跳变
     if (armor.id == tracked_armor_id_) {
         return false;
     }
 
-    // ID 不同，发生跳变！
-    // 计算跳了几块装甲板
-
+    // ID 不同，可能发生跳变
     const auto& obs = armor.observation;
     double new_orient = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
     double new_za = obs.pos.z();
@@ -109,7 +111,6 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor) {
 
     if (most_like_index == 0) {
         // 没有实际跳变，只是 ID 变了
-        tracked_armor_id_ = armor.id;
         return false;
     }
 
@@ -137,7 +138,6 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor) {
     x[lmtd_model::THETA] = new_orient;
 
     ekf_.set_x(x);
-    tracked_armor_id_ = armor.id;
 
     return true;
 }
@@ -191,7 +191,9 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
     predict_t_ = timestamp;
 
     // 内部跳变检测 (LMTD 核心 trick)
-    detect_and_handle_jump(armor);
+    // 参考 rm.cv.fans: tracked_armor_id 在 EKF 更新后才更新
+    int new_tracked_id;
+    detect_and_handle_jump(armor, new_tracked_id);
 
     // 构建观测
     const auto& obs = armor.observation;
@@ -218,6 +220,9 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
     // 观测更新
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
     ekf_.update_forward(measure_func, z, R);
+
+    // 参考 rm.cv.fans: EKF 更新后才更新 tracked_armor_id
+    tracked_armor_id_ = new_tracked_id;
 
     // 后处理
     x = ekf_.get_x();
@@ -251,7 +256,7 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         return;
     }
 
-    // 多装甲板模式
+    // 多装甲板模式: 参考 rm.cv.fans，不做特殊处理，只用选中的装甲板更新 EKF
     if (!initialized_ || !credit(timestamp)) {
         // 用两块装甲板直接计算初始状态
         const auto& a0 = armors[0];
@@ -308,7 +313,9 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     predict_t_ = timestamp;
 
     // 跳变检测 (参考 rm.cv.fans: 双装甲板时也需要)
-    detect_and_handle_jump(primary);
+    // tracked_armor_id 在 EKF 更新后才更新
+    int new_tracked_id;
+    detect_and_handle_jump(primary, new_tracked_id);
 
     // 观测更新 (用主装甲板)
     const auto& obs = primary.observation;
@@ -333,41 +340,10 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);
     ekf_.update_forward(measure_func, z, R);
 
-    // 利用两块装甲板更新几何参数
-    const auto& a0 = armors[0];
-    const auto& a1 = armors[1];
-    Eigen::Vector3d p0 = a0.pos();
-    Eigen::Vector3d p1 = a1.pos();
-    double theta0 = a0.observation.z[obs::ARMOR_YAW] + M_PI;
-    double theta1 = a1.observation.z[obs::ARMOR_YAW] + M_PI;
+    // 参考 rm.cv.fans: EKF 更新后才更新 tracked_armor_id
+    tracked_armor_id_ = new_tracked_id;
 
-    Eigen::Vector2d n0(std::cos(theta0), std::sin(theta0));
-    Eigen::Vector2d n1(std::cos(theta1), std::sin(theta1));
-    Eigen::Vector2d dp_xy(p0.x() - p1.x(), p0.y() - p1.y());
-    Eigen::Vector2d dn = n0 - n1;
-    double dn_norm = dn.norm();
-
-    if (dn_norm > 0.1) {
-        double r_measured = dp_xy.norm() / dn_norm;
-        r_measured = std::clamp(r_measured,
-            runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_min"),
-            runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_max"));
-
-        x = ekf_.get_x();
-        constexpr double ALPHA = 0.3;
-        double xc_measured = (p0.x() - r_measured * n0.x() + p1.x() - r_measured * n1.x()) / 2.0;
-        double yc_measured = (p0.y() - r_measured * n0.y() + p1.y() - r_measured * n1.y()) / 2.0;
-
-        x[lmtd_model::XC] = (1 - ALPHA) * x[lmtd_model::XC] + ALPHA * xc_measured;
-        x[lmtd_model::YC] = (1 - ALPHA) * x[lmtd_model::YC] + ALPHA * yc_measured;
-        x[lmtd_model::R] = (1 - ALPHA) * x[lmtd_model::R] + ALPHA * r_measured;
-
-        dz_ = p0.z() - p1.z();
-
-        ekf_.set_x(x);
-    }
-
-    // 后处理
+    // 后处理 (不再做几何参数融合，让 EKF 自己收敛)
     x = ekf_.get_x();
     x[lmtd_model::R] = std::clamp(x[lmtd_model::R],
         runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_min"),
