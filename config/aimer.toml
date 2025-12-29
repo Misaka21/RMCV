@@ -73,24 +73,27 @@
 
 [AutoAim.Predictor.SpinEKF]
     # 过程噪声 Q (越大越信任观测，越小越信任预测)
+    # 参考 rm.cv.fans lmtd-top-model 参数
     #@double 旋转中心位置过程噪声 (xc, yc, zc)
-    q_pos = 0.1
+    q_pos = 2.8
     #@double 旋转中心速度过程噪声 (vx, vy, vz)，大值允许快速加减速
-    q_vel = 15.0
+    q_vel = 2800.0
     #@double 车体朝向角θ过程噪声
-    q_theta = 0.1
+    q_theta = 2.8
     #@double 角速度ω过程噪声，较大以适应陀螺加减速
-    q_omega = 10.0
+    q_omega = 280.0
     #@double 陀螺半径r过程噪声
     q_r = 1.0
 
-    # 观测噪声 R (越大越不信任观测)
+    # 观测噪声 R (越大越不信任观测，滤波越平滑)
     #@double yaw/pitch角度观测噪声 (rad²)
     r_angle = 8.0
     #@double 距离观测噪声系数, R_dis = r_dis_k × distance²
-    r_dis_k = 25.0
-    #@double 装甲板朝向角观测噪声 (rad²)
-    r_armor_yaw = 20.0
+    r_dis_k = 50.0
+    #@double 装甲板朝向角观测噪声 - 单块时 (PnP姿态误差大)
+    r_armor_yaw_single = 100.0
+    #@double 装甲板朝向角观测噪声 - 双块时 (几何互相验证，更可信)
+    r_armor_yaw_double = 100.0
 
     # 半径参数
     #@double 初始半径 (m)

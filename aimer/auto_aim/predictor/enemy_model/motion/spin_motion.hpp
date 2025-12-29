@@ -11,14 +11,18 @@
  *   [xc, vx, yc, vy, zc, vz, θ, ω, r]
  *   - xc, yc, zc: 旋转中心位置 (世界系)
  *   - vx, vy, vz: 旋转中心速度
- *   - θ: 车体朝向角 (rad)
+ *   - θ: 当前装甲板朝向角 (从装甲板指向中心的方向, INWARD, rad)
  *   - ω: 角速度 (rad/s)
  *   - r: 当前装甲板半径
  *
  * 观测向量 (4维):
  *   [yaw_a, pitch_a, dis_a, θ_a]
  *   - yaw_a, pitch_a, dis_a: 装甲板位置的球坐标
- *   - θ_a: 装甲板朝向角
+ *   - θ_a: 装甲板朝向角 (= θ, INWARD)
+ *
+ * 几何关系:
+ *   center = armor + r * (cos θ, sin θ)   (因为 θ 指向中心)
+ *   armor = center - r * (cos θ, sin θ)   (从中心反推装甲板位置)
  *
  * 外部维护 (跳变时交换):
  *   - another_r: 另一个半径 (4装甲板车辆长短轴)
@@ -121,16 +125,20 @@ struct SpinCVPredict {
  *
  * 从旋转中心和朝向角计算装甲板位置，再转换为 YPD 球坐标
  *
- * 装甲板位置:
+ * 约定: θ 是装甲板朝向角 (从装甲板指向中心的方向, INWARD)
+ *
+ * 装甲板位置 (从中心反推):
  *   xa = xc - r·cos(θ)
  *   ya = yc - r·sin(θ)
  *   za = zc + dz
+ *
+ * 解释: 因为 θ 指向中心，所以装甲板在中心的 -θ 方向
  *
  * YPD 观测:
  *   yaw = atan2(ya, xa)
  *   pitch = atan2(za, √(xa² + ya²))
  *   dis = √(xa² + ya² + za²)
- *   armor_yaw = θ  (当前追踪装甲板朝向 = 车体朝向)
+ *   armor_yaw = θ  (装甲板朝向角, INWARD)
  */
 struct SpinMeasure {
     double dz;  // 高度差 (外部维护)
@@ -147,6 +155,7 @@ struct SpinMeasure {
         T r = x[spin_model::R];
 
         // 计算装甲板位置 (世界系)
+        // θ 指向中心 (INWARD)，所以装甲板在 -θ 方向
         T xa = xc - r * ceres::cos(theta);
         T ya = yc - r * ceres::sin(theta);
         T za = zc + T(dz);
@@ -159,7 +168,7 @@ struct SpinMeasure {
         y[spin_model::YAW] = ceres::atan2(ya, xa);
         y[spin_model::PITCH] = ceres::atan2(za, rho);
         y[spin_model::DIS] = d;
-        y[spin_model::ARMOR_YAW] = theta;  // 装甲板朝向 = 车体朝向
+        y[spin_model::ARMOR_YAW] = theta;  // 装甲板朝向 = θ (INWARD)
     }
 };
 
@@ -261,6 +270,37 @@ public:
     double get_radius() const { return ekf_.get_x()[spin_model::R]; }
 
     /**
+     * @brief 获取另一个半径 (4装甲板时)
+     */
+    double get_another_radius() const { return another_r_; }
+
+    /**
+     * @brief 获取当前高度差
+     */
+    double get_dz() const { return dz_; }
+
+    /**
+     * @brief 获取另一个高度差
+     */
+    double get_another_dz() const { return another_dz_; }
+
+    /**
+     * @brief 从观测装甲板反推所有装甲板位置
+     *
+     * 用途: 绘制时避免 EKF 滤波滞后
+     * - 以观测装甲板为基准点 (位置无滞后)
+     * - 用 EKF 估计的几何参数 (r, another_r, dz)
+     * - 反推其他装甲板位置
+     *
+     * @param observed_pos 观测到的装甲板位置
+     * @param observed_theta 观测到的装甲板朝向 (INWARD)
+     * @return 所有装甲板位置 (idx=0 是观测装甲板)
+     */
+    std::vector<Eigen::Vector3d> compute_all_armors_from_observation(
+        const Eigen::Vector3d& observed_pos,
+        double observed_theta) const;
+
+    /**
      * @brief 是否有效
      */
     bool valid() const { return initialized_; }
@@ -275,14 +315,17 @@ public:
      */
     VectorX get_state() const { return ekf_.get_x(); }
 
-private:
     /**
-     * @brief 检测并处理装甲板跳变 (用 ID 判断)
-     * @param armor 当前装甲板数据
-     * @return true 如果发生跳变 (换了装甲板)
+     * @brief 通知发生装甲板跳变 (由上层 VehicleModel 调用)
+     *
+     * 职责: 只做状态转移 (交换半径/高度差)，不做跳变检测
+     *
+     * @param jump_index 跳变索引 (相对当前装甲板偏移几块, 1~armor_num-1)
+     * @param new_armor 新装甲板数据 (用于更新朝向角和位置)
      */
-    bool handle_armor_jump(const ArmorData& armor);
+    void notify_jump(int jump_index, const ArmorData& new_armor);
 
+private:
     /**
      * @brief 更新陀螺等级 (带迟滞)
      */
@@ -297,8 +340,9 @@ private:
      * @brief 构建观测噪声矩阵
      * @param distance 装甲板距离
      * @param z_to_v 装甲板朝向与视线夹角 (越大越侧面)
+     * @param observed_armor_count 本次观测到的装甲板数量 (1或2，影响朝向噪声)
      */
-    MatrixZZ build_R(double distance, double z_to_v) const;
+    MatrixZZ build_R(double distance, double z_to_v, int observed_armor_count = 1) const;
 
     // ==================== EKF ====================
     Ekf ekf_;
@@ -314,9 +358,6 @@ private:
     // ==================== 陀螺状态 ====================
     SpinLevel spin_level_ = SpinLevel::NONE;
     double last_yaw_ = 0;       // 上一帧观测的 armor_yaw (用于连续化)
-
-    // ==================== 跳变检测 (用 ID) ====================
-    int tracking_armor_id_ = -1;  // 当前追踪的装甲板 ID
 };
 
 }  // namespace autoaim::predictor

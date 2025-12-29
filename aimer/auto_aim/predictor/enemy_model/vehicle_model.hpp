@@ -84,6 +84,9 @@ private:
     // 陀螺状态
     SpinState spin_;
 
+    // 跳变检测 (上层负责检测，通知 SpinMotion)
+    int last_tracking_id_ = -1;
+
     // 敌方颜色 (用于绘图)
     EnemyColor enemy_color_ = EnemyColor::GRAY;
 };

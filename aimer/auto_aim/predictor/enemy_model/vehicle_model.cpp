@@ -106,8 +106,43 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
     armor_motion_.update(armors_with_id, timestamp);
 
-    // 4. SpinMotion: 整车 EKF 滤波 (传所有装甲板，利用几何关系)
+    // 4. SpinMotion: 整车 EKF 滤波
     if (!armors_with_id.empty()) {
+        // 获取当前最佳装甲板 (按 z_to_v 排序后的第一个)
+        const auto& best_armor = armors_with_id[0];
+        int current_id = best_armor.id;
+
+        // 检测跳变: ID 变化 + 角度匹配验证
+        if (last_tracking_id_ >= 0 && current_id != last_tracking_id_ && spin_motion_.valid()) {
+            // 计算跳变索引 (用角度匹配)
+            double theta_pred = spin_motion_.get_theta();
+            double armor_yaw = best_armor.observation.z[obs::ARMOR_YAW];
+
+            int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
+            double angle_step = 2.0 * M_PI / armor_num;
+
+            int best_index = 0;
+            double min_diff = std::abs(math::angle_diff(theta_pred, armor_yaw));
+
+            for (int i = 1; i < armor_num; ++i) {
+                double possible_theta = theta_pred + i * angle_step;
+                double diff = std::abs(math::angle_diff(possible_theta, armor_yaw));
+                if (diff < min_diff) {
+                    min_diff = diff;
+                    best_index = i;
+                }
+            }
+
+            // 通知 SpinMotion 发生跳变
+            if (best_index > 0) {
+                spin_motion_.notify_jump(best_index, best_armor);
+            }
+        }
+
+        // 更新追踪 ID
+        last_tracking_id_ = current_id;
+
+        // 更新 SpinMotion
         spin_motion_.update(armors_with_id, timestamp);
     }
 
@@ -352,6 +387,7 @@ void VehicleModel::reset() {
     prev_armors_.clear();
     spin_.reset();
     frame_count_ = 0;
+    last_tracking_id_ = -1;
 }
 
 // ============================================================================
@@ -466,7 +502,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 3. 绘制 SpinMotion 预测 (口字形)
+    // 3. 绘制 SpinMotion 预测 (口字形) - EKF 滤波后的
     // 即使未激活也绘制，方便调试
     if (spin_motion_.valid()) {
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
@@ -504,6 +540,65 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             cv::putText(img, fmt::format("w={:.1f} {}", spin_motion_.get_omega(), state_str),
                         pt + cv::Point2f(20, 0),
                         cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_CENTER, 1);
+        }
+    }
+
+    // 4. 绘制从观测反推的装甲板 (洋红色) - 无滤波滞后
+    // 用途: 直观验证几何参数 (r, another_r, dz) 估计是否准确
+    if (spin_motion_.valid() && !prev_armors_.empty()) {
+        const cv::Scalar COLOR_GEOMETRY(255, 0, 255);  // 洋红色: 几何反推
+
+        // 取最正对的观测装甲板
+        const auto& best_obs = prev_armors_[0];  // prev_armors_ 已按 z_to_v 排序
+        double obs_armor_yaw = best_obs.z[obs::ARMOR_YAW];
+
+        // 从观测反推所有装甲板
+        auto all_armors = spin_motion_.compute_all_armors_from_observation(best_obs.pos, obs_armor_yaw);
+
+        int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
+        for (int i = 0; i < armor_num && i < static_cast<int>(all_armors.size()); ++i) {
+            double armor_yaw = obs_armor_yaw + i * (2.0 * M_PI / armor_num);
+
+            // idx=0 是观测装甲板本身，用虚线; 其他用实线
+            int thickness = (i == 0) ? 1 : 2;
+            draw_armor_rect(img, all_armors[i], armor_yaw, ArmorType::SMALL, q_imu, COLOR_GEOMETRY, thickness);
+
+            // 标注序号 (带 G 前缀表示 Geometry)
+            bool valid = false;
+            cv::Point2f pt = tf::world_to_pixel(all_armors[i], q_imu, valid);
+            if (valid) {
+                cv::putText(img, "G" + std::to_string(i), pt + cv::Point2f(10, -10),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
+            }
+        }
+
+        // 绘制从观测反推的中心
+        double r0 = spin_motion_.get_radius();
+        Eigen::Vector3d obs_center(
+            best_obs.pos.x() + r0 * std::cos(obs_armor_yaw),
+            best_obs.pos.y() + r0 * std::sin(obs_armor_yaw),
+            best_obs.pos.z() - spin_motion_.get_dz()
+        );
+        bool valid = false;
+        cv::Point2f pt = tf::world_to_pixel(obs_center, q_imu, valid);
+        if (valid) {
+            // 菱形标记
+            int s = 10;
+            std::vector<cv::Point> diamond = {
+                cv::Point(pt.x, pt.y - s),
+                cv::Point(pt.x + s, pt.y),
+                cv::Point(pt.x, pt.y + s),
+                cv::Point(pt.x - s, pt.y)
+            };
+            cv::polylines(img, diamond, true, COLOR_GEOMETRY, 2);
+
+            // 标注几何参数
+            cv::putText(img, fmt::format("r={:.2f}/{:.2f}", r0, spin_motion_.get_another_radius()),
+                        pt + cv::Point2f(15, -5),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
+            cv::putText(img, fmt::format("dz={:.2f}/{:.2f}", spin_motion_.get_dz(), spin_motion_.get_another_dz()),
+                        pt + cv::Point2f(15, 10),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
         }
     }
 }
