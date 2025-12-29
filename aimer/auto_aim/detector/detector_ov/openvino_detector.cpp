@@ -30,10 +30,10 @@ namespace output_idx {
     constexpr int CLASS_END = 22;
 }
 
-// 模型颜色索引
+// 模型颜色索引 (模型输出顺序: blue, red, gray, purple)
 namespace model_color {
-    constexpr int RED = 0;
-    constexpr int BLUE = 1;
+    constexpr int BLUE = 0;
+    constexpr int RED = 1;
     constexpr int GRAY = 2;
     constexpr int PURPLE = 3;
 }
@@ -94,13 +94,17 @@ OpenvinoDetector::OpenvinoDetector(const OpenvinoConfig& config, EnemyColor colo
     // 构建模型
     model_ = ppp.build();
 
-    // 编译模型
-    compiled_model_ = core_.compile_model(model_, config_.device);
+    // 编译模型 (使用 THROUGHPUT 模式优化并行推理)
+    compiled_model_ = core_.compile_model(
+        model_,
+        config_.device,
+        ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT)
+    );
 
-    // 创建推理请求
+    // 创建推理请求 (用于同步模式)
     infer_request_ = compiled_model_.create_infer_request();
 
-    debug::print("info", "OpenVINO", "Detector initialized on device: {}", config_.device);
+    debug::print("info", "OpenVINO", "Detector initialized on device: {} (THROUGHPUT mode)", config_.device);
 }
 
 std::unique_ptr<OpenvinoDetector> OpenvinoDetector::from_config(
@@ -148,59 +152,99 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 
     // 后处理
     const ov::Tensor& output = infer_request_.get_output_tensor();
-
-    // DEBUG: 打印 OpenVINO 原始输出
-    static int ov_debug = 0;
-    if (++ov_debug <= 3) {
-        const float* data = output.data<float>();
-        ov::Shape shape = output.get_shape();
-        int num_det = shape[1];
-        int feat_size = shape[2];
-
-        // 找置信度最高的检测
-        int best_idx = 0;
-        float best_conf = data[8];
-        for (int i = 1; i < num_det; ++i) {
-            float conf = data[i * feat_size + 8];
-            if (conf > best_conf) {
-                best_conf = conf;
-                best_idx = i;
-            }
-        }
-        const float* best = data + best_idx * feat_size;
-        debug::print("info", "OpenVINO",
-            "Best detection [{}]: landmarks=[{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f}], conf_raw={:.2f}, sigmoid={:.4f}",
-            best_idx,
-            best[0], best[1], best[2], best[3], best[4], best[5], best[6], best[7],
-            best[8], 1.0f / (1.0f + std::exp(-best[8])));
-    }
-
     auto detections = postprocess(output, scale, dx, dy);
 
-    // 保存调试信息
+    // 保存调试信息 (仅在需要时)
     last_detections_ = detections;
-    debug_img_ = image.clone();
-    for (const auto& det : detections) {
-        // 画关键点
-        for (size_t i = 0; i < det.landmarks.size(); ++i) {
-            cv::circle(debug_img_, det.landmarks[i], 3, cv::Scalar(0, 255, 0), -1);
-            if (i > 0) {
-                cv::line(debug_img_, det.landmarks[i-1], det.landmarks[i],
-                         cv::Scalar(0, 255, 0), 1);
-            }
-        }
-        if (det.landmarks.size() == 4) {
-            cv::line(debug_img_, det.landmarks[3], det.landmarks[0],
-                     cv::Scalar(0, 255, 0), 1);
-        }
-        // 标注类别和置信度
-        std::string label = armor_number_to_string(det.number) +
-                           " " + std::to_string(static_cast<int>(det.confidence * 100)) + "%";
-        cv::putText(debug_img_, label, det.center + cv::Point2f(10, -10),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 255), 1);
-    }
 
     return detections;
+}
+
+// ============================================================================
+// 异步接口实现 (参考 sp_vision_25)
+// ============================================================================
+
+void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
+                            const serial::SerialReceiveData& serial_data)
+{
+    // 队列过长时直接丢弃新帧 (不阻塞)
+    {
+        std::lock_guard lock(task_mutex_);
+        constexpr size_t MAX_QUEUE_SIZE = 2;  // 低延迟模式：最多2帧
+        if (task_queue_.size() >= MAX_QUEUE_SIZE) {
+            return;  // 丢弃当前帧
+        }
+    }
+
+    // 预处理
+    auto [resized, scale, dx, dy] = preprocess(image);
+
+    // 创建新的 InferRequest (每帧一个，支持并行)
+    auto infer_request = compiled_model_.create_infer_request();
+
+    // 创建输入张量
+    ov::Tensor input_tensor = ov::Tensor(
+        compiled_model_.input().get_element_type(),
+        compiled_model_.input().get_shape(),
+        resized.data
+    );
+
+    // 设置输入并异步启动推理
+    infer_request.set_input_tensor(input_tensor);
+    infer_request.start_async();
+
+    // 入队
+    {
+        std::lock_guard lock(task_mutex_);
+        task_queue_.push(InferenceTask{
+            std::move(infer_request),
+            image.clone(),  // 保存原始图像用于可视化
+            scale, dx, dy,
+            frame_id, timestamp_us,
+            serial_data,
+            std::chrono::steady_clock::now()
+        });
+    }
+    task_cv_.notify_one();
+}
+
+AsyncDetectionResult OpenvinoDetector::pop()
+{
+    InferenceTask task;
+
+    // 出队
+    {
+        std::unique_lock lock(task_mutex_);
+        task_cv_.wait(lock, [this] { return !task_queue_.empty(); });
+        task = std::move(task_queue_.front());
+        task_queue_.pop();
+    }
+
+    // 等待推理完成
+    task.request.wait();
+
+    // 计算延迟
+    auto now = std::chrono::steady_clock::now();
+    float latency_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+        now - task.submit_time).count() / 1000.0f;
+
+    // 后处理
+    const ov::Tensor& output = task.request.get_output_tensor();
+    auto armors = postprocess(output, task.scale, task.dx, task.dy);
+
+    return AsyncDetectionResult{
+        std::move(armors),
+        std::move(task.image),
+        task.frame_id,
+        task.timestamp_us,
+        task.serial_data,
+        latency_ms
+    };
+}
+
+size_t OpenvinoDetector::queue_size() const {
+    std::lock_guard lock(task_mutex_);
+    return task_queue_.size();
 }
 
 // ============================================================================
@@ -252,11 +296,12 @@ std::vector<DetectedArmor> OpenvinoDetector::postprocess(
     std::vector<cv::Rect> boxes;
     std::vector<float> scores;
 
-    // 解析目标颜色用于过滤
-    // 注意: detect_color_ 是我方颜色，需要反转得到敌方颜色
-    int target_color_idx = (detect_color_ == EnemyColor::BLUE)
-                           ? model_color::RED    // 我方蓝 → 敌方红
-                           : model_color::BLUE;  // 我方红 → 敌方蓝
+    // detect_color_ 是串口传来的 enemy_color (敌方颜色)
+    // enemy_color=1(敌方红) → 检测红色装甲板
+    // enemy_color=2(敌方蓝) → 检测蓝色装甲板
+    int target_color_idx = (detect_color_ == EnemyColor::RED)
+                           ? model_color::RED
+                           : model_color::BLUE;
 
     for (int i = 0; i < num_detections; ++i) {
         // 置信度过滤
@@ -269,15 +314,19 @@ std::vector<DetectedArmor> OpenvinoDetector::postprocess(
         cv::Mat color_scores = output_mat.row(i).colRange(
             output_idx::COLOR_START, output_idx::COLOR_END);
         cv::Point color_idx;
-        cv::minMaxLoc(color_scores, nullptr, nullptr, nullptr, &color_idx);
+        double color_score;
+        cv::minMaxLoc(color_scores, nullptr, &color_score, nullptr, &color_idx);
         int color = color_idx.x;
 
-        // 颜色过滤 (gray/purple 丢弃，敌方颜色过滤)
-        if (color == model_color::GRAY || color == model_color::PURPLE) {
+        // 颜色过滤
+        // - purple 丢弃 (无意义)
+        // - gray 保留 (灯条闪烁时会短暂变灰，传给 predictor 做消抖)
+        // - 敌方颜色保留
+        if (color == model_color::PURPLE) {
             continue;
         }
-        if (color != target_color_idx) {
-            continue;
+        if (color != target_color_idx && color != model_color::GRAY) {
+            continue;  // 既不是敌方颜色，也不是灰色
         }
 
         // 解析类别
@@ -329,7 +378,12 @@ std::vector<DetectedArmor> OpenvinoDetector::postprocess(
         det.confidence = conf;
         det.number = label_to_armor_number(label);
         det.type = get_armor_type(label, ratio);
-        det.color = (color == model_color::RED) ? EnemyColor::RED : EnemyColor::BLUE;
+        // 设置颜色 (灰色用 GRAY 表示，供 predictor 消抖)
+        if (color == model_color::GRAY) {
+            det.color = EnemyColor::GRAY;
+        } else {
+            det.color = (color == model_color::RED) ? EnemyColor::RED : EnemyColor::BLUE;
+        }
 
         candidates.push_back(det);
         boxes.push_back(box);

@@ -1,9 +1,14 @@
 //
 // Detector Node - 检测节点
-// 订阅sync_frame，运行装甲板检测，发布检测结果
+//
+// 根据检测器类型自动选择模式:
+//   - is_async() = false: 单线程同步模式 (传统检测器)
+//   - is_async() = true:  双线程异步模式 (YOLO检测器)
 //
 
+#include <atomic>
 #include <memory>
+#include <thread>
 
 #include "detector_factory.hpp"
 #include "detector_node.hpp"
@@ -15,98 +20,189 @@ namespace autoaim {
 
 using SteadyClock = std::chrono::steady_clock;
 
-void start_detector_node() {
-    std::unique_ptr<detector::DetectorInterface> g_detector = nullptr;
-    debug::print(debug::PrintMode::INFO, "DetectorNode", "Starting detector node...");
+// ============================================================================
+// 同步模式 (传统检测器)
+// ============================================================================
 
-    try {
-        // 1. Create detector (初始颜色会从串口获取)
-        g_detector = detector::create_detector_from_config(detector::EnemyColor::RED);
-        debug::print(debug::PrintMode::INFO, "DetectorNode", "Detector created from config");
+void run_sync_loop(detector::DetectorInterface* detector) {
+    umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
+    umt::Publisher<aimer::DetectionResult> pub("detections");
+    auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
 
-        // 2. Setup UMT
-        umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
-        umt::Publisher<aimer::DetectionResult> pub("detections");
-        auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
+    auto config = static_param::parse_file("detector.toml");
+    bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");
 
-        // 从配置文件读取 debug 模式
-        auto config = static_param::parse_file("detector.toml");
-        bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");
+    stats::FpsStats stats("DetectorNode", "detected", 5000);
 
-        debug::print(debug::PrintMode::INFO, "DetectorNode", "Detector node started");
+    debug::print(debug::PrintMode::INFO, "DetectorNode", "Running in sync mode");
 
-        stats::FpsStats stats("DetectorNode", "detected");
+    while (running->get()) {
+        try {
+            auto frame = sub.pop_for(1000);
+            if (frame.image.empty()) continue;
+            if (!frame.serial_valid) continue;
 
-        // 3. Main loop
+            // 更新颜色
+            if (frame.serial_data.enemy_color != 0) {
+                auto color = (frame.serial_data.enemy_color == 1)
+                    ? detector::EnemyColor::RED
+                    : detector::EnemyColor::BLUE;
+                detector->set_enemy_color(color);
+            }
+
+            // 同步检测
+            auto detect_start = SteadyClock::now();
+            auto armors = detector->detect(frame.image);
+            auto detect_end = SteadyClock::now();
+
+            float latency_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                detect_end - detect_start).count() / 1000.0f;
+
+            // 构建 DetectionResult
+            aimer::DetectionResult result;
+            result.frame_id = frame.frame_id;
+            result.armors = std::move(armors);
+            result.latency_ms = latency_ms;
+            if (debug_mode) {
+                result.img = frame.image;  // 只在 debug 模式拷贝
+            }
+
+            const auto& s = frame.serial_data;
+            result.state.set_euler(s.yaw, s.pitch, s.roll);
+            result.state.bullet_speed = s.bullet_speed;
+            result.state.enemy_color = s.enemy_color;
+            result.state.aim_mode = s.aim_mode;
+            result.state.allow_fire = s.allow_fire;
+            result.state.timestamp_us = frame.timestamp_us;
+
+            pub.push(result);
+            stats.update(latency_ms, !result.armors.empty());
+
+            if (debug_mode) {
+                draw_debug_visualization(frame.image, result, frame);
+            }
+
+        } catch (const umt::MessageError_Timeout&) {
+            // 超时，继续
+        }
+    }
+
+    if (debug_mode) {
+        cv::destroyWindow("Detector Debug");
+    }
+}
+
+// ============================================================================
+// 异步模式 (YOLO 检测器)
+// ============================================================================
+
+void run_async_loop(detector::DetectorInterface* detector) {
+    umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
+    umt::Publisher<aimer::DetectionResult> pub("detections");
+    auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
+
+    auto config = static_param::parse_file("detector.toml");
+    bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");
+
+    stats::FpsStats push_stats("DetectorNode-Push", "", 5000);
+    stats::FpsStats pop_stats("DetectorNode", "detected", 5000);
+
+    std::atomic<detector::EnemyColor> current_color{detector::EnemyColor::RED};
+
+    // Push 线程
+    std::thread push_thread([&]() {
+        debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread started");
+
         while (running->get()) {
             try {
                 auto frame = sub.pop_for(1000);
-                if (frame.image.empty()) {
-                    continue;
+                if (frame.image.empty()) continue;
+                if (!frame.serial_valid) continue;
+
+                if (frame.serial_data.enemy_color != 0) {
+                    auto color = (frame.serial_data.enemy_color == 1)
+                        ? detector::EnemyColor::RED
+                        : detector::EnemyColor::BLUE;
+                    if (current_color.load() != color) {
+                        current_color.store(color);
+                        detector->set_enemy_color(color);
+                    }
                 }
 
-                // 必须有有效串口数据才处理
-                if (!frame.serial_valid) {
-                    debug::print(
-                        debug::PrintMode::WARNING,
-                        "DetectorNode",
-                        "No valid serial data, skipping frame"
-                    );
-                    continue;
-                }
-
-                // 颜色必须从串口获取
-                if (frame.serial_data.enemy_color == 0) {
-                    frame.serial_data.enemy_color = 1;
-                    //continue;
-                }
-                detector::EnemyColor current_color = (frame.serial_data.enemy_color == 1)
-                    ? detector::EnemyColor::RED
-                    : detector::EnemyColor::BLUE;
-
-                if (g_detector->get_enemy_color() != current_color) {
-                    g_detector->set_enemy_color(current_color);
-                }
-
-                // 运行检测
-                auto detect_start = SteadyClock::now();
-                auto armors = g_detector->detect(frame.image);
-                auto detect_end = SteadyClock::now();
-                float latency =
-                    std::chrono::duration_cast<std::chrono::microseconds>(detect_end - detect_start)
-                        .count()
-                    / 1000.0f;
-
-                // 构建结果
-                aimer::DetectionResult result;
-                result.frame_id = frame.frame_id;
-                result.state = aimer::RobotState::from_sync_frame(frame);
-                result.armors = std::move(armors);
-                result.latency_ms = latency;
-                result.img = frame.image;  // 传递图像给后续节点
-
-                pub.push(result);
-
-                // 更新统计
-                stats.update(latency, !result.armors.empty());
-
-                // Debug可视化
-                if (debug_mode) {
-                    draw_debug_visualization(frame.image, result, frame);
-                }
+                detector->push(frame.image, frame.frame_id, frame.timestamp_us, frame.serial_data);
+                push_stats.update();
 
             } catch (const umt::MessageError_Timeout&) {
-                debug::print(
-                    debug::PrintMode::WARNING,
-                    "DetectorNode",
-                    "Timeout waiting for frame"
-                );
+                // 超时，继续
             }
         }
 
-        // Cleanup
-        if (debug_mode) {
-            cv::destroyWindow("Detector Debug");
+        debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread stopped");
+    });
+
+    debug::print(debug::PrintMode::INFO, "DetectorNode", "Running in async mode");
+
+    // Pop 主循环
+    while (running->get()) {
+        if (detector->queue_size() == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+
+        auto async_result = detector->pop();
+
+        aimer::DetectionResult result;
+        result.frame_id = async_result.frame_id;
+        result.armors = std::move(async_result.armors);
+        result.latency_ms = async_result.latency_ms;
+        result.img = async_result.image;
+
+        const auto& s = async_result.serial_data;
+        result.state.set_euler(s.yaw, s.pitch, s.roll);
+        result.state.bullet_speed = s.bullet_speed;
+        result.state.enemy_color = s.enemy_color;
+        result.state.aim_mode = s.aim_mode;
+        result.state.allow_fire = s.allow_fire;
+        result.state.timestamp_us = async_result.timestamp_us;
+
+        pub.push(result);
+        pop_stats.update(async_result.latency_ms, !result.armors.empty());
+
+        if (debug_mode && !async_result.image.empty()) {
+            hardware::SyncFrame frame;
+            frame.image = async_result.image;
+            frame.frame_id = async_result.frame_id;
+            frame.timestamp_us = async_result.timestamp_us;
+            frame.serial_data = async_result.serial_data;
+            frame.serial_valid = true;
+            draw_debug_visualization(async_result.image, result, frame);
+        }
+    }
+
+    if (push_thread.joinable()) {
+        push_thread.join();
+    }
+
+    if (debug_mode) {
+        cv::destroyWindow("Detector Debug");
+    }
+}
+
+// ============================================================================
+// 入口
+// ============================================================================
+
+void start_detector_node() {
+    debug::print(debug::PrintMode::INFO, "DetectorNode", "Starting detector node...");
+
+    try {
+        auto detector = detector::create_detector_from_config(detector::EnemyColor::RED);
+        debug::print(debug::PrintMode::INFO, "DetectorNode", "Detector created");
+
+        if (detector->is_async()) {
+            run_async_loop(detector.get());
+        } else {
+            run_sync_loop(detector.get());
         }
 
     } catch (const std::exception& e) {

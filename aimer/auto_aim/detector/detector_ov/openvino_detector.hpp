@@ -15,7 +15,9 @@
 #ifndef AIMER_AUTOAIM_DETECTOR_OPENVINO_DETECTOR_HPP
 #define AIMER_AUTOAIM_DETECTOR_OPENVINO_DETECTOR_HPP
 
+#include <chrono>
 #include <memory>
+#include <queue>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -24,7 +26,6 @@
 #include <openvino/openvino.hpp>
 
 #include "detector_interface.hpp"
-#include "types.hpp"
 
 namespace autoaim::detector {
 
@@ -40,27 +41,32 @@ struct OpenvinoConfig {
 };
 
 /**
+ * @brief 异步推理任务 (内部使用)
+ */
+struct InferenceTask {
+    ov::InferRequest request;
+    cv::Mat image;
+    float scale;
+    int dx, dy;
+    int frame_id;
+    int64_t timestamp_us;
+    serial::SerialReceiveData serial_data;
+    std::chrono::steady_clock::time_point submit_time;
+};
+
+/**
  * @brief 基于 OpenVINO 的 YOLO 检测器
  *
  * 特点:
  *   - 使用 Intel OpenVINO 推理引擎
  *   - 支持 CPU 和 GPU (Intel 核显) 推理
+ *   - 覆盖 push/pop 为真正的异步推理
  *   - 直接输出关键点，无需后处理角点
  */
 class OpenvinoDetector : public DetectorInterface {
 public:
-    /**
-     * @brief 构造函数
-     * @param config 检测器配置
-     * @param color 敌方颜色
-     */
     OpenvinoDetector(const OpenvinoConfig& config, EnemyColor color);
 
-    /**
-     * @brief 从配置文件创建检测器
-     * @param color 敌方颜色
-     * @param config_file 配置文件名
-     */
     static std::unique_ptr<OpenvinoDetector> from_config(
         EnemyColor color,
         const std::string& config_file = "detector.toml"
@@ -68,58 +74,36 @@ public:
 
     ~OpenvinoDetector() override;
 
-    // ============================================================================
-    // DetectorInterface 接口实现
-    // ============================================================================
-
+    // ========== 同步接口 ==========
     std::vector<DetectedArmor> detect(const cv::Mat& image) override;
     void set_enemy_color(EnemyColor color) override { detect_color_ = color; }
     EnemyColor get_enemy_color() const override { return detect_color_; }
     cv::Mat debug_image() const override { return debug_img_; }
+    bool is_async() const override { return true; }  // 真正异步
+
+    // ========== 异步接口 (覆盖基类，真正异步) ==========
+    void push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
+              const serial::SerialReceiveData& serial_data) override;
+    AsyncDetectionResult pop() override;
+    size_t queue_size() const override;
 
 private:
-    /**
-     * @brief 预处理图像
-     * @param image 输入图像 (BGR)
-     * @return {缩放后图像, scale, dx, dy}
-     */
     std::tuple<cv::Mat, float, int, int> preprocess(const cv::Mat& image);
-
-    /**
-     * @brief 后处理推理结果
-     * @param output 网络输出张量
-     * @param scale 缩放比例
-     * @param dx letterbox x 偏移
-     * @param dy letterbox y 偏移
-     * @return 检测到的装甲板列表
-     */
-    std::vector<DetectedArmor> postprocess(
-        const ov::Tensor& output,
-        float scale,
-        int dx,
-        int dy
-    );
-
-    /**
-     * @brief Sigmoid 函数
-     */
+    std::vector<DetectedArmor> postprocess(const ov::Tensor& output, float scale, int dx, int dy);
     static float sigmoid(float x);
-
-    /**
-     * @brief 模型类别索引转 ArmorNumber
-     */
     static ArmorNumber label_to_armor_number(int label);
-
-    /**
-     * @brief 判断装甲板类型 (大/小)
-     */
     static ArmorType get_armor_type(int label, float ratio);
 
     // OpenVINO 组件
     ov::Core core_;
     std::shared_ptr<ov::Model> model_;
     ov::CompiledModel compiled_model_;
-    ov::InferRequest infer_request_;
+    ov::InferRequest infer_request_;  // 同步模式
+
+    // 异步任务队列 (与基类 result_queue_ 分开)
+    mutable std::mutex task_mutex_;
+    std::condition_variable task_cv_;
+    std::queue<InferenceTask> task_queue_;
 
     // 配置
     OpenvinoConfig config_;

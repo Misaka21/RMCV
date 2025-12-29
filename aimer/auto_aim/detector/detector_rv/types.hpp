@@ -45,7 +45,7 @@ constexpr double FIFTEEN_DEGREE_RAD = 15 * CV_PI / 180;
 struct Light : public cv::RotatedRect {
     Light() = default;
     explicit Light(const std::vector<cv::Point>& contour)
-        : cv::RotatedRect(cv::minAreaRect(contour)), color(EnemyColor::WHITE) {
+        : cv::RotatedRect(cv::minAreaRect(contour)), color(EnemyColor::GRAY) {
         assert(!contour.empty());
 
         center = std::accumulate(
