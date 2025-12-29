@@ -63,9 +63,7 @@ void run_sync_loop(detector::DetectorInterface* detector) {
             result.frame_id = frame.frame_id;
             result.armors = std::move(armors);
             result.latency_ms = latency_ms;
-            if (debug_mode) {
-                result.img = frame.image;  // 只在 debug 模式拷贝
-            }
+            result.img = frame.image;  // 始终传递图片给 predictor
 
             const auto& s = frame.serial_data;
             result.state.set_euler(s.yaw, s.pitch, s.roll);

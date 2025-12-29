@@ -29,7 +29,7 @@ constexpr int MAX_ENEMY_NUMBER = 8;
 // ============================================================================
 
 // 敌方颜色
-enum class EnemyColor { RED, BLUE, WHITE };
+enum class EnemyColor { RED, BLUE, GRAY };
 
 // 装甲板类型
 enum class ArmorType { SMALL, LARGE, INVALID };
@@ -141,7 +141,7 @@ struct DetectedArmor {
     ArmorType type = ArmorType::INVALID;
 
     // 装甲板颜色
-    EnemyColor color = EnemyColor::WHITE;
+    EnemyColor color = EnemyColor::GRAY;
 
     // 数字识别结果
     ArmorNumber number = ArmorNumber::UNKNOWN;

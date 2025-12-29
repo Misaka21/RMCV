@@ -110,8 +110,9 @@ ArmorObservation ArmorObserver::solve_pnp(
 
     // ========== 坐标变换: 相机系 → 世界系 ==========
     Eigen::Vector3d pos_world = tf::cam_to_world(pos_cam, q_imu);
-    // 装甲板"背面"法向量 (指向远离相机的方向)
+    // 装甲板"背面"法向量 (指向远离相机的方向, 即从装甲板指向车体中心)
     // 注: 这里取负号是为了让 z_to_v = 0 表示正对
+    // armor_yaw 是从装甲板指向中心的方向 (INWARD)
     Eigen::Vector3d normal_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(-normal_cam, q_imu);
 
     // 畸变矫正四角点

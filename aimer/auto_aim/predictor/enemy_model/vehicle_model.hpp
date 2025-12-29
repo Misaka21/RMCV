@@ -19,6 +19,7 @@
 #include "motion/armor_motion.hpp"
 #include "motion/spin_motion.hpp"
 #include "motion/lmtd_motion.hpp"
+#include "param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
 
@@ -80,7 +81,7 @@ private:
 
     // LMTD 整车旋转模型 (替代 SpinMotion, 内部处理跳变)
     LmtdMotion lmtd_motion_;
-    bool use_lmtd_ = true;  // 是否使用 LMTD 模型
+    bool use_lmtd_ = runtime_param::get_param<bool>("AutoAim.Predictor.use_lmtd");  // 是否使用 LMTD 模型
 
     // 上一帧观测 (用于消抖)
     std::vector<ArmorObservation> prev_armors_;
