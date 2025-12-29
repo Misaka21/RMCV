@@ -2,13 +2,13 @@
 
 [Detector]
     #@string 检测器类型: "traditional" 或 "yolo"
-    type = "traditional"
+    type = "yolo"
 
 # ==================== 传统检测器配置 ====================
 
 [Detector.traditional]
     #@bool 是否开启调试模式
-    debug = false
+    debug = true
     #@int 二值化阈值
     binary_thres = 100
     #@bool 是否开启灯条角点最小二乘校正
@@ -56,7 +56,7 @@
 
 [Detector.yolo]
     #@string 推理后端: "openvino" | "tensorrt" | "onnxruntime"
-    backend = "openvino"
+    backend = "tensorrt"
 
     #@string 模型文件 (相对于 asset 目录)
     model = "armor_0526.onnx"
@@ -65,7 +65,7 @@
     input_size = 640
 
     #@double 置信度阈值
-    conf_threshold = 0.65
+    conf_threshold = 0.4
 
     #@double NMS 阈值
     nms_threshold = 0.45
@@ -78,7 +78,7 @@
 # TensorRT 后端配置 (预留)
 [Detector.yolo.tensorrt]
     #@bool 使用 FP16 推理
-    fp16 = true
+    fp16 = false
     #@bool 使用 INT8 量化
     int8 = false
     #@int 工作空间大小 (MB)
