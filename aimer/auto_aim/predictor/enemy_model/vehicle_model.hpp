@@ -18,6 +18,7 @@
 #include "enemy_model.hpp"
 #include "motion/armor_motion.hpp"
 #include "motion/spin_motion.hpp"
+#include "motion/lmtd_motion.hpp"
 
 namespace autoaim::predictor {
 
@@ -76,6 +77,10 @@ private:
 
     // 整车旋转模型 (职责: 陀螺 EKF 滤波)
     SpinMotion spin_motion_;
+
+    // LMTD 整车旋转模型 (替代 SpinMotion, 内部处理跳变)
+    LmtdMotion lmtd_motion_;
+    bool use_lmtd_ = true;  // 是否使用 LMTD 模型
 
     // 上一帧观测 (用于消抖)
     std::vector<ArmorObservation> prev_armors_;

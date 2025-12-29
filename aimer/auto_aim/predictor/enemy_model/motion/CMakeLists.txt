@@ -3,6 +3,7 @@
 add_library(motion STATIC
     armor_motion.cpp
     spin_motion.cpp
+    lmtd_motion.cpp
     outpost_motion.cpp
 )
 
