@@ -25,6 +25,91 @@ namespace autoaim::predictor {
 
 using SteadyClock = std::chrono::steady_clock;
 
+// 装甲板俯仰角 (规则定义，索引=ArmorNumber)
+constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
+    0.0, 15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0,
+    15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0, -15.0 * M_PI / 180.0,
+    15.0 * M_PI / 180.0, 15.0 * M_PI / 180.0
+};
+
+/**
+ * @brief 绘制基于 z_to_v 优化的装甲板框
+ */
+void draw_armor_by_z_to_v(
+    cv::Mat& img,
+    const Eigen::Vector3d& pos_world,
+    double z_to_v,  // 优化后的朝向角
+    ArmorType type,
+    int target_id,
+    const Eigen::Quaterniond& q_imu,
+    const cv::Scalar& color,
+    int thickness = 2
+) {
+    // 装甲板尺寸
+    double w = (type == ArmorType::LARGE) ? LARGE_ARMOR_WIDTH : SMALL_ARMOR_WIDTH;
+    double h = (type == ArmorType::LARGE) ? LARGE_ARMOR_HEIGHT : SMALL_ARMOR_HEIGHT;
+
+    // 装甲板俯仰角 (弧度)
+    // 负值表示装甲板上沿向后倾斜 (与 rm.cv.fans 一致)
+    double pitch = -15.0 * M_PI / 180.0;  // 比赛环境: -15 度
+    // double pitch = (target_id >= 0 && target_id < 9) ? ARMOR_PITCH_BY_RULE[target_id] : 0.0;
+
+    // 相机 Z 轴在世界 XY 平面的投影 (归一化)
+    Eigen::Vector3d camera_z_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(
+        Eigen::Vector3d(0, 0, 1), q_imu
+    );
+    Eigen::Vector2d camera_z_i2(camera_z_world.x(), camera_z_world.y());
+    double norm = camera_z_i2.norm();
+    if (norm > 1e-6) camera_z_i2 /= norm;
+    else camera_z_i2 = Eigen::Vector2d(1.0, 0.0);
+
+    // 装甲板法向量在世界 XY 平面的方向 = 相机前向旋转 z_to_v
+    Eigen::Vector2d radius_norm = math::rotate(camera_z_i2, z_to_v);
+
+    // 装甲板 X 轴 (水平方向，垂直于法向量)
+    Eigen::Vector2d x_2d = math::rotate(radius_norm, M_PI / 2);
+    Eigen::Vector3d x_axis(x_2d.x(), x_2d.y(), 0.0);
+
+    // 装甲板 Y 轴 (竖直方向，考虑俯仰角)
+    // 与 rm.cv.fans 的 radial_armor_corners 一致
+    Eigen::Vector3d y_axis(
+        -radius_norm.x() * std::sin(pitch),
+        -radius_norm.y() * std::sin(pitch),
+        std::cos(pitch)
+    );
+
+    // 四角点 (世界坐标系): 左上、左下、右下、右上 (逆时针)
+    std::array<Eigen::Vector3d, 4> corners = {
+        pos_world + x_axis * (w / 2) + y_axis * (h / 2),  // LT
+        pos_world + x_axis * (w / 2) - y_axis * (h / 2),  // LB
+        pos_world - x_axis * (w / 2) - y_axis * (h / 2),  // RB
+        pos_world - x_axis * (w / 2) + y_axis * (h / 2)   // RT
+    };
+
+    // 投影到图像
+    std::array<cv::Point2f, 4> pts;
+    bool all_valid = true;
+    for (int i = 0; i < 4; ++i) {
+        bool valid = false;
+        pts[i] = tf::world_to_pixel(corners[i], q_imu, valid);
+        if (!valid) all_valid = false;
+    }
+
+    if (!all_valid) return;
+
+    // 画矩形框
+    for (int i = 0; i < 4; ++i) {
+        cv::line(img, pts[i], pts[(i + 1) % 4], color, thickness, cv::LINE_AA);
+    }
+
+    // DEBUG: 标记角点编号
+    const char* labels[] = {"0:LT", "1:LB", "2:RB", "3:RT"};
+    for (int i = 0; i < 4; ++i) {
+        cv::putText(img, labels[i], pts[i] + cv::Point2f(3, -3),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(0, 0, 255), 1);
+    }
+}
+
 /**
  * @brief 打印观测调试信息
  */
@@ -49,6 +134,9 @@ void print_observations(const ArmorObservationTable& table) {
             double pitch_deg = obs.z[1] * 180.0 / M_PI;
             double dist = obs.z[2];
 
+            // 装甲板朝向 (armor_yaw)
+            double armor_yaw_deg = obs.z[3] * 180.0 / M_PI;
+
             // 装甲板类型
             const char* type_str = (obs.type == ArmorType::LARGE) ? "L" : "S";
 
@@ -56,11 +144,13 @@ void print_observations(const ArmorObservationTable& table) {
                 "number: {} type: {} area: {:.1f}k\n"
                 "ypd: {:.1f}|{:.1f}|{:.3f}\n"
                 "xyz: {:.3f}|{:.3f}|{:.3f}\n"
-                "z_to_v: {:.3f} rad ({:.1f} deg)\n\n",
+                "armor_yaw: {:.1f} deg\n"
+                "z_to_v: {:.1f} → {:.1f} deg (raw → fit)\n\n",
                 target_id, type_str, area / 1000.0,
                 yaw_deg, pitch_deg, dist,
                 obs.pos.x(), obs.pos.y(), obs.pos.z(),
-                obs.z_to_v, obs.z_to_v * 180.0 / M_PI
+                armor_yaw_deg,
+                obs.z_to_v_raw * 180.0 / M_PI, obs.z_to_v * 180.0 / M_PI
             );
         }
     }
@@ -93,9 +183,10 @@ void draw_prediction(
     const ArmorObservationTable& table,
     const Eigen::Quaterniond& q_imu
 ) {
-    // ========== 1. 绘制原始观测 (蓝色小圆圈，不显示文字) ==========
+    // ========== 1. 绘制原始观测 + 优化后装甲板框 ==========
     for (int target_id : table.get_target_ids()) {
         const auto& obs_list = table.get(target_id);
+        int obs_idx = 0;
         for (const auto& obs : obs_list) {
             if (!obs.valid) continue;
 
@@ -105,6 +196,39 @@ void draw_prediction(
 
             // 蓝色小圆圈标记观测位置
             cv::circle(img, obs_px, 5, cv::Scalar(255, 100, 0), 2, cv::LINE_AA);
+
+            // 绘制优化后的装甲板框 (黄色)
+            draw_armor_by_z_to_v(img, obs.pos, obs.z_to_v, obs.type, target_id,
+                                 q_imu, cv::Scalar(0, 255, 255), 2);
+
+            // 显示 armor_yaw 和 z_to_v 信息
+            // 根据位置决定文字放在左侧还是右侧，避免重叠
+            bool on_left = obs_px.x > img.cols / 2;
+            float x_offset = on_left ? -150 : 10;
+            float y_offset = -20 + obs_idx * 50;  // 每个装甲板往下偏移
+
+            cv::Point2f text_pos = obs_px + cv::Point2f(x_offset, y_offset);
+
+            // 边界检查
+            if (text_pos.x < 5) text_pos.x = 5;
+            if (text_pos.x > img.cols - 150) text_pos.x = img.cols - 150;
+            if (text_pos.y < 15) text_pos.y = 15;
+            if (text_pos.y > img.rows - 35) text_pos.y = img.rows - 35;
+
+            double armor_yaw_deg = obs.z[3] * 180.0 / M_PI;
+            double z_to_v_raw_deg = obs.z_to_v_raw * 180.0 / M_PI;
+            double z_to_v_deg = obs.z_to_v * 180.0 / M_PI;
+
+            // 背景框
+            cv::rectangle(img, text_pos + cv::Point2f(-2, -12),
+                          text_pos + cv::Point2f(145, 30), cv::Scalar(0, 0, 0, 180), -1);
+
+            cv::putText(img, fmt::format("T{} armor_yaw: {:.1f}", target_id, armor_yaw_deg),
+                        text_pos, cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 255, 255), 1);
+            cv::putText(img, fmt::format("z_to_v: {:.1f} -> {:.1f}", z_to_v_raw_deg, z_to_v_deg),
+                        text_pos + cv::Point2f(0, 14), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255, 200, 0), 1);
+
+            ++obs_idx;
         }
     }
 
@@ -269,22 +393,68 @@ void start_predictor_node() {
             }
             stats.update(latency, tracked > 0);  // tick + print_if_needed
 
-            // 可视化 (如果有图像)
-            if (!detection.img.empty()) {
+            // 可视化 (只在需要时执行)
+            bool show_window = runtime_param::get_param<bool>("AutoAim.Predictor.show_window");
+            if (show_window && !detection.img.empty()) {
                 cv::Mat vis = detection.img.clone();
                 draw_prediction(vis, snapshot, table, detection.state.q_imu);
-                // 调用各模型的 draw 方法 (绘制 X 和 □)
                 predictor.draw(vis, detection.state.q_imu, timestamp);
 
-                // 发布可视化帧供录制
-                vis_pub.push(vis);
+                // 左下角延迟信息面板
+                auto now = SteadyClock::now();
+                auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                    now.time_since_epoch()).count();
+                int64_t exposure_us = detection.state.timestamp_us;
+                float total_latency_ms = (now_us - exposure_us) / 1000.0f;
+                float detect_latency_ms = detection.latency_ms;
+                float predict_latency_ms = latency;
 
-                // 根据配置决定是否显示窗口
-                bool show_window = runtime_param::get_param<bool>("AutoAim.Predictor.show_window");
-                if (show_window) {
-                    cv::imshow("Predictor", vis);
-                    cv::waitKey(1);
-                }
+                int panel_x = 10;
+                int panel_y = vis.rows - 90;
+                int panel_w = 200;
+                int panel_h = 80;
+                cv::Mat roi = vis(cv::Rect(panel_x, panel_y, panel_w, panel_h));
+                roi = roi * 0.4;
+
+                int text_x = panel_x + 8;
+                int text_y = panel_y + 18;
+                int line_h = 16;
+                auto draw_latency_line = [&](const std::string& label, float ms, cv::Scalar color) {
+                    std::string text = fmt::format("{}: {:.1f}ms", label, ms);
+                    cv::putText(vis, text, cv::Point(text_x, text_y),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv::LINE_AA);
+                    text_y += line_h;
+                };
+
+                draw_latency_line("Detect", detect_latency_ms, cv::Scalar(100, 200, 255));
+                draw_latency_line("Predict", predict_latency_ms, cv::Scalar(100, 255, 200));
+                draw_latency_line("Total", total_latency_ms, cv::Scalar(0, 255, 255));
+
+                int bar_y = text_y + 5;
+                int bar_h = 10;
+                float max_ms = std::max(50.0f, total_latency_ms);
+                float scale = (panel_w - 20) / max_ms;
+
+                cv::rectangle(vis,
+                    cv::Point(text_x, bar_y),
+                    cv::Point(text_x + static_cast<int>(max_ms * scale), bar_y + bar_h),
+                    cv::Scalar(50, 50, 50), -1);
+
+                int detect_w = static_cast<int>(detect_latency_ms * scale);
+                cv::rectangle(vis,
+                    cv::Point(text_x, bar_y),
+                    cv::Point(text_x + detect_w, bar_y + bar_h),
+                    cv::Scalar(100, 150, 255), -1);
+
+                int predict_w = static_cast<int>(predict_latency_ms * scale);
+                cv::rectangle(vis,
+                    cv::Point(text_x + detect_w, bar_y),
+                    cv::Point(text_x + detect_w + predict_w, bar_y + bar_h),
+                    cv::Scalar(100, 255, 150), -1);
+
+                vis_pub.push(vis);
+                cv::imshow("Predictor", vis);
+                cv::waitKey(1);
             }
 
         } catch (const umt::MessageError_Timeout&) {

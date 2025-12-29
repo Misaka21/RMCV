@@ -146,9 +146,10 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
  * @brief 过滤无效观测 (参考 rm.cv.fans EnemyState::screened_armors)
  *
  * 过滤规则:
- * 1. 面积过小: 已存在装甲板 < max_area * 0.30, 新装甲板 < max_area * 0.40
- * 2. 距离过远: 新装甲板 > 10.0m
- * 3. 跳变过大: 相邻帧位置跳变 > 1.2m
+ * 1. 颜色消抖: 新目标灰色丢弃，已跟踪目标灰色保留（灯条闪烁）
+ * 2. 面积过小: 已存在装甲板 < max_area * 0.30, 新装甲板 < max_area * 0.40
+ * 3. 距离过远: 新装甲板 > 10.0m
+ * 4. 跳变过大: 相邻帧位置跳变 > 1.2m
  *
  * 注意: 不检查 MIN_DIST 和 z_to_v (与 rm.cv.fans 保持一致)
  */
@@ -176,6 +177,13 @@ std::vector<ArmorObservation> VehicleModel::filter(
 
     for (const auto& a : raw) {
         if (!a.valid) continue;
+
+        // 规则0: 颜色消抖
+        // - 灰色 (GRAY) + 新目标 → 丢弃（防止误跟踪）
+        // - 灰色 (GRAY) + 已跟踪目标 → 保留（灯条闪烁消抖）
+        if (a.color == EnemyColor::GRAY && !initialized_) {
+            continue;
+        }
 
         double area = math::get_area(a.pts);
 

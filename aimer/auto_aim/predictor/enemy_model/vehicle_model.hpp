@@ -85,7 +85,7 @@ private:
     SpinState spin_;
 
     // 敌方颜色 (用于绘图)
-    EnemyColor enemy_color_ = EnemyColor::WHITE;
+    EnemyColor enemy_color_ = EnemyColor::GRAY;
 };
 
 }  // namespace autoaim::predictor

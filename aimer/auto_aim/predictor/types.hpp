@@ -88,11 +88,12 @@ struct ArmorObservation {
     int armor_num = 4;      // 该目标装甲板总数 (3 或 4)
     // 注意: 装甲板 ID (0-3) 由 ArmorIdentifier 分配，不在此处
     ArmorType type = ArmorType::SMALL;
-    EnemyColor color = EnemyColor::WHITE;  // 敌方颜色
+    EnemyColor color = EnemyColor::GRAY;  // 敌方颜色
 
     // 时间和角度
     double timestamp = 0;   // 时间戳 (s)
-    double z_to_v = 0;      // 装甲板法向与视线夹角余弦，越小越正对
+    double z_to_v = 0;      // 装甲板法向与视线夹角 (三分法优化后)
+    double z_to_v_raw = 0;  // 装甲板法向与视线夹角 (三分法优化前)
 
     // 图像信息 (可选，调试用)
     std::vector<cv::Point2f> pts;  // 四角点 (原始像素坐标)
@@ -113,6 +114,7 @@ struct ArmorObservation {
         const Eigen::Vector3d& position,
         const Eigen::Vector4d& obs_z,
         double z_to_v_value,
+        double z_to_v_raw_value,
         double timestamp,
         const std::array<cv::Point2f, 4>& pus_in = {}
     ) {
@@ -123,6 +125,7 @@ struct ArmorObservation {
         obs.type = det.type;
         obs.color = det.color;
         obs.z_to_v = z_to_v_value;
+        obs.z_to_v_raw = z_to_v_raw_value;
         obs.timestamp = timestamp;
         obs.pts = det.landmarks;
         obs.pus = pus_in;

@@ -18,16 +18,17 @@ constexpr double DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
 
 // 比赛规则: 各车型装甲板俯仰角 (弧度)
 // 索引对应 ArmorNumber 枚举值 (0-8)
+// 注意: 负值表示装甲板上沿向后倾斜 (与 rm.cv.fans 一致)
 constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
     0.0, // 0: UNKNOWN
-    15.0 * M_PI / 180.0, // 1: HERO (装甲板朝上15度)
-    15.0 * M_PI / 180.0, // 2: ENGINEER
-    15.0 * M_PI / 180.0, // 3: INFANTRY_3
-    15.0 * M_PI / 180.0, // 4: INFANTRY_4
-    15.0 * M_PI / 180.0, // 5: INFANTRY_5
-    -15.0 * M_PI / 180.0, // 6: OUTPOST(装甲板朝下15度)
-    15.0 * M_PI / 180.0, // 7: SENTRY
-    15.0 * M_PI / 180.0 // 8: BASE
+    -15.0 * M_PI / 180.0, // 1: HERO
+    -15.0 * M_PI / 180.0, // 2: ENGINEER
+    -15.0 * M_PI / 180.0, // 3: INFANTRY_3
+    -15.0 * M_PI / 180.0, // 4: INFANTRY_4
+    -15.0 * M_PI / 180.0, // 5: INFANTRY_5
+    15.0 * M_PI / 180.0, // 6: OUTPOST (前哨站相反)
+    -15.0 * M_PI / 180.0, // 7: SENTRY
+    -15.0 * M_PI / 180.0 // 8: BASE
 };
 
 // PnP 解算的俯仰角超过此阈值时，不使用三分法优化
@@ -109,7 +110,8 @@ ArmorObservation ArmorObserver::solve_pnp(
 
     // ========== 坐标变换: 相机系 → 世界系 ==========
     Eigen::Vector3d pos_world = tf::cam_to_world(pos_cam, q_imu);
-    // 装甲板朝外的法向量 (用于 armor_yaw 和 z_to_v)
+    // 装甲板"背面"法向量 (指向远离相机的方向)
+    // 注: 这里取负号是为了让 z_to_v = 0 表示正对
     Eigen::Vector3d normal_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(-normal_cam, q_imu);
 
     // 畸变矫正四角点
@@ -161,12 +163,21 @@ ArmorObservation ArmorObserver::solve_pnp(
         "[z_to_v] raw: {:.1f}° → fit: {:.1f}° (pnp_pitch: {:.1f}°)\n",
         z_to_v_raw * 180.0 / M_PI, z_to_v * 180.0 / M_PI, pnp_pitch * 180.0 / M_PI);
 
+    // 使用稳定的 z_to_v 计算 armor_yaw
+    // 参考 rm.cv.fans: armor_yaw = z_to_v + camera_z_i_yaw
+    double camera_yaw = std::atan2(camera_z_i2.y(), camera_z_i2.x());
+    double armor_yaw = z_to_v + camera_yaw;
+
     // 计算观测向量 (世界系)
-    Eigen::Vector4d z = compute_observation(pos_world, normal_world);
+    double dist = pos_world.norm();
+    double pos_yaw = std::atan2(pos_world.y(), pos_world.x());
+    double pos_pitch = std::atan2(pos_world.z(), pos_world.head<2>().norm());
+    Eigen::Vector4d z;
+    z << pos_yaw, pos_pitch, dist, armor_yaw;
 
     // 构建观测结果 (世界系)
-    // 注意: 这里 z_to_v 是世界坐标系下的角度 (相对于相机前向)
-    obs = ArmorObservation::from_detection(armor, pos_world, z, z_to_v, timestamp, pus);
+    // 注意: z_to_v 是世界坐标系下的角度 (相对于相机前向)
+    obs = ArmorObservation::from_detection(armor, pos_world, z, z_to_v, z_to_v_raw, timestamp, pus);
 
     return obs;
 }
@@ -283,8 +294,7 @@ std::array<cv::Point2f, 4> ArmorObserver::project_armor_corners(
     x_axis << x_2d.x(), x_2d.y(), 0.0;
 
     // 装甲板 Y 轴 (竖直方向，考虑俯仰角)
-    // 世界 Z 轴是垂直向上的
-    Eigen::Vector3d w_z_norm(0, 0, 1);
+    // 与 rm.cv.fans 的 radial_armor_corners 一致
     Eigen::Vector3d y_axis;
     y_axis << -radius_norm.x() * std::sin(pitch),
               -radius_norm.y() * std::sin(pitch),
@@ -294,9 +304,9 @@ std::array<cv::Point2f, 4> ArmorObserver::project_armor_corners(
     // 顺序: 左上、左下、右下、右上 (逆时针，从相机看)
     std::array<Eigen::Vector3d, 4> corners_world;
     corners_world[0] = pos_world + x_axis * (w / 2) + y_axis * (h / 2);    // 左上
-    corners_world[1] = pos_world + x_axis * (w / 2) + y_axis * (-h / 2);   // 左下
-    corners_world[2] = pos_world + x_axis * (-w / 2) + y_axis * (-h / 2);  // 右下
-    corners_world[3] = pos_world + x_axis * (-w / 2) + y_axis * (h / 2);   // 右上
+    corners_world[1] = pos_world + x_axis * (w / 2) - y_axis * (h / 2);    // 左下
+    corners_world[2] = pos_world - x_axis * (w / 2) - y_axis * (h / 2);    // 右下
+    corners_world[3] = pos_world - x_axis * (w / 2) + y_axis * (h / 2);    // 右上
 
     // 变换到相机坐标系并投影
     const cv::Mat& camera_matrix = tf::get_camera_matrix();
