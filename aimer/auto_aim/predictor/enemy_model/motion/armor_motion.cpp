@@ -12,30 +12,6 @@
 namespace autoaim::predictor {
 
 // ============================================================================
-// EKF 参数 (运行时读取)
-// ============================================================================
-
-namespace {
-
-double get_q_pos() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.EKF.q_pos");
-}
-
-double get_q_vel() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.EKF.q_vel");
-}
-
-double get_r_angle() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.EKF.r_angle");
-}
-
-double get_r_dis_1m() {
-    return runtime_param::get_param<double>("AutoAim.Predictor.EKF.r_dis_1m");
-}
-
-}  // namespace
-
-// ============================================================================
 // FilterThread
 // ============================================================================
 
@@ -57,11 +33,11 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
     // XYZ → YPD
     math::YpdCoord ypd = math::xyz_to_ypd(armor.pos());
 
-    // 读取运行时参数
-    double q_pos = get_q_pos();
-    double q_vel = get_q_vel();
-    double r_angle = get_r_angle();
-    double r_dis_1m = get_r_dis_1m();
+    // 直接读取运行时参数
+    double q_pos = runtime_param::get_param<double>("AutoAim.Predictor.EKF.q_pos");
+    double q_vel = runtime_param::get_param<double>("AutoAim.Predictor.EKF.q_vel");
+    double r_angle = runtime_param::get_param<double>("AutoAim.Predictor.EKF.r_angle");
+    double r_dis_1m = runtime_param::get_param<double>("AutoAim.Predictor.EKF.r_dis_1m");
 
     // 构建噪声矩阵
     MatrixXX Q = MatrixXX::Zero();
