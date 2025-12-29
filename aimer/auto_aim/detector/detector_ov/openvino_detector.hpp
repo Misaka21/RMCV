@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -80,17 +81,24 @@ private:
     /**
      * @brief 预处理图像
      * @param image 输入图像 (BGR)
-     * @return 缩放后的图像和缩放比例
+     * @return {缩放后图像, scale, dx, dy}
      */
-    std::pair<cv::Mat, float> preprocess(const cv::Mat& image);
+    std::tuple<cv::Mat, float, int, int> preprocess(const cv::Mat& image);
 
     /**
      * @brief 后处理推理结果
      * @param output 网络输出张量
-     * @param scale 缩放比例 (用于还原坐标)
+     * @param scale 缩放比例
+     * @param dx letterbox x 偏移
+     * @param dy letterbox y 偏移
      * @return 检测到的装甲板列表
      */
-    std::vector<DetectedArmor> postprocess(const ov::Tensor& output, float scale);
+    std::vector<DetectedArmor> postprocess(
+        const ov::Tensor& output,
+        float scale,
+        int dx,
+        int dy
+    );
 
     /**
      * @brief Sigmoid 函数

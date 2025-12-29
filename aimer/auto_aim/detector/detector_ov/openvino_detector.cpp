@@ -12,6 +12,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "plugin/param/static_config.hpp"
+#include "plugin/debug/logger.hpp"
 
 namespace autoaim::detector {
 
@@ -57,6 +58,13 @@ namespace model_class {
 OpenvinoDetector::OpenvinoDetector(const OpenvinoConfig& config, EnemyColor color)
     : config_(config), detect_color_(color)
 {
+    debug::print("info", "OpenVINO", "Loading model: {}", config_.model_path);
+
+    // 启用模型缓存 (加速后续启动)
+    std::string cache_dir = std::string(ASSET_DIR) + "/ov_cache";
+    core_.set_property(ov::cache_dir(cache_dir));
+    debug::print("info", "OpenVINO", "Cache directory: {}", cache_dir);
+
     // 读取模型
     model_ = core_.read_model(config_.model_path);
 
@@ -91,6 +99,8 @@ OpenvinoDetector::OpenvinoDetector(const OpenvinoConfig& config, EnemyColor colo
 
     // 创建推理请求
     infer_request_ = compiled_model_.create_infer_request();
+
+    debug::print("info", "OpenVINO", "Detector initialized on device: {}", config_.device);
 }
 
 std::unique_ptr<OpenvinoDetector> OpenvinoDetector::from_config(
@@ -100,16 +110,16 @@ std::unique_ptr<OpenvinoDetector> OpenvinoDetector::from_config(
     auto param = static_param::parse_file(config_file);
 
     OpenvinoConfig config;
-    config.model_path = ASSET_DIR + static_param::get_param<std::string>(
-        param, "Detector", "yolo", "model");
+    config.model_path = std::string(ASSET_DIR) + "/" + static_param::get_param<std::string>(
+        param, "Detector.yolo", "model");
     config.input_size = static_cast<int>(static_param::get_param<int64_t>(
-        param, "Detector", "yolo", "input_size"));
+        param, "Detector.yolo", "input_size"));
     config.conf_threshold = static_cast<float>(static_param::get_param<double>(
-        param, "Detector", "yolo", "conf_threshold"));
+        param, "Detector.yolo", "conf_threshold"));
     config.nms_threshold = static_cast<float>(static_param::get_param<double>(
-        param, "Detector", "yolo", "nms_threshold"));
+        param, "Detector.yolo", "nms_threshold"));
     config.device = static_param::get_param<std::string>(
-        param, "Detector", "yolo", "openvino", "device");
+        param, "Detector.yolo.openvino", "device");
 
     return std::make_unique<OpenvinoDetector>(config, color);
 }
@@ -123,7 +133,7 @@ OpenvinoDetector::~OpenvinoDetector() = default;
 std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 {
     // 预处理
-    auto [resized, scale] = preprocess(image);
+    auto [resized, scale, dx, dy] = preprocess(image);
 
     // 创建输入张量
     ov::Tensor input_tensor = ov::Tensor(
@@ -138,7 +148,34 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 
     // 后处理
     const ov::Tensor& output = infer_request_.get_output_tensor();
-    auto detections = postprocess(output, scale);
+
+    // DEBUG: 打印 OpenVINO 原始输出
+    static int ov_debug = 0;
+    if (++ov_debug <= 3) {
+        const float* data = output.data<float>();
+        ov::Shape shape = output.get_shape();
+        int num_det = shape[1];
+        int feat_size = shape[2];
+
+        // 找置信度最高的检测
+        int best_idx = 0;
+        float best_conf = data[8];
+        for (int i = 1; i < num_det; ++i) {
+            float conf = data[i * feat_size + 8];
+            if (conf > best_conf) {
+                best_conf = conf;
+                best_idx = i;
+            }
+        }
+        const float* best = data + best_idx * feat_size;
+        debug::print("info", "OpenVINO",
+            "Best detection [{}]: landmarks=[{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f}], conf_raw={:.2f}, sigmoid={:.4f}",
+            best_idx,
+            best[0], best[1], best[2], best[3], best[4], best[5], best[6], best[7],
+            best[8], 1.0f / (1.0f + std::exp(-best[8])));
+    }
+
+    auto detections = postprocess(output, scale, dx, dy);
 
     // 保存调试信息
     last_detections_ = detections;
@@ -170,7 +207,7 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 // 内部方法
 // ============================================================================
 
-std::pair<cv::Mat, float> OpenvinoDetector::preprocess(const cv::Mat& image)
+std::tuple<cv::Mat, float, int, int> OpenvinoDetector::preprocess(const cv::Mat& image)
 {
     int target_size = config_.input_size;
 
@@ -194,12 +231,14 @@ std::pair<cv::Mat, float> OpenvinoDetector::preprocess(const cv::Mat& image)
     int dy = (target_size - new_h) / 2;
     resized.copyTo(padded(cv::Rect(dx, dy, new_w, new_h)));
 
-    return {padded, scale};
+    return {padded, scale, dx, dy};
 }
 
 std::vector<DetectedArmor> OpenvinoDetector::postprocess(
     const ov::Tensor& output,
-    float scale)
+    float scale,
+    int dx,
+    int dy)
 {
     ov::Shape shape = output.get_shape();
     // shape: [1, num_detections, 22]
@@ -214,9 +253,10 @@ std::vector<DetectedArmor> OpenvinoDetector::postprocess(
     std::vector<float> scores;
 
     // 解析目标颜色用于过滤
+    // 注意: detect_color_ 是我方颜色，需要反转得到敌方颜色
     int target_color_idx = (detect_color_ == EnemyColor::BLUE)
-                           ? model_color::BLUE
-                           : model_color::RED;
+                           ? model_color::RED    // 我方蓝 → 敌方红
+                           : model_color::BLUE;  // 我方红 → 敌方蓝
 
     for (int i = 0; i < num_detections; ++i) {
         // 置信度过滤
@@ -249,12 +289,13 @@ std::vector<DetectedArmor> OpenvinoDetector::postprocess(
         int label = class_idx.x;
 
         // 解析关键点 (模型输出是左上角逆时针，与我们的约定一致)
+        // 需要减去 letterbox 偏移再除以缩放比例
         std::vector<cv::Point2f> landmarks(4);
         for (int j = 0; j < 4; ++j) {
             float x = output_mat.at<float>(i, output_idx::LANDMARKS_START + j * 2);
             float y = output_mat.at<float>(i, output_idx::LANDMARKS_START + j * 2 + 1);
-            // 还原到原图坐标
-            landmarks[j] = cv::Point2f(x / scale, y / scale);
+            // 还原到原图坐标: (x - dx) / scale
+            landmarks[j] = cv::Point2f((x - dx) / scale, (y - dy) / scale);
         }
 
         // 计算包围盒 (用于 NMS)
