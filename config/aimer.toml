@@ -28,7 +28,7 @@
     #@bool 是否显示预测可视化窗口
     show_window = true
 
-    use_lmtd = false
+    use_lmtd = true
 
     # 面积过滤
     #@double 已存在装甲板的最小面积比例
