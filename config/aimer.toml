@@ -45,9 +45,9 @@
     #@double 最小有效距离 (m)，过近可能是误识别
     min_distance = 0.1
     #@double 最大有效距离 (m)
-    max_distance = 15.0
+    max_distance = 8.0
     #@double 新装甲板最大距离 (m)，防止远处误识别
-    new_armor_max_distance = 10.0
+    new_armor_max_distance = 8.0
 
     # 跳变过滤
     #@double 相邻帧最大位置跳变 (m)

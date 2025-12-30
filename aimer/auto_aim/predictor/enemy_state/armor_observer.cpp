@@ -60,93 +60,118 @@ const ArmorObservationTable& ArmorObserver::observe(
         }
     }
 
-    // 第二步：位置相近性合并
-    // 如果两块装甲板位置很近但 target_id 不同，说明分类器可能误判
-    // 将它们合并到同一个 target_id（使用距离更近的那个的编号）
+    // 第二步：双装甲板联合三分法优化 + 智能合并
+    // 对于可能是同一车的装甲板对，先做联合优化，再检查几何约束决定是否合并
+    bool use_double_fit = runtime_param::get_param<bool>("AutoAim.Predictor.use_double_z_fit");
     if (observations.size() >= 2) {
-        // 按距离排序，优先使用距离近的编号
-        std::vector<size_t> sorted_indices(observations.size());
-        std::iota(sorted_indices.begin(), sorted_indices.end(), 0);
-        std::sort(sorted_indices.begin(), sorted_indices.end(),
-            [&observations](size_t a, size_t b) {
-                return observations[a].distance() < observations[b].distance();
-            });
-
-        // 合并：如果两块装甲板位置很近，统一使用距离近的那个的编号
-        for (size_t i = 0; i < sorted_indices.size(); ++i) {
-            auto& obs_i = observations[sorted_indices[i]];
-            for (size_t j = i + 1; j < sorted_indices.size(); ++j) {
-                auto& obs_j = observations[sorted_indices[j]];
-
-                // 计算两块装甲板的距离
-                double dist = (obs_i.pos - obs_j.pos).norm();
-
-                if (dist < SAME_VEHICLE_DISTANCE_THRESHOLD && obs_i.target_id != obs_j.target_id) {
-                    // 位置相近但编号不同，说明可能是同一辆车
-                    // 使用距离更近的那个的编号
-                    fmt::print(fmt::fg(fmt::color::yellow),
-                        "[ArmorObserver] 合并相近装甲板: T{} + T{} (dist={:.2f}m) → T{}\n",
-                        obs_i.target_id, obs_j.target_id, dist, obs_i.target_id);
-                    obs_j.target_id = obs_i.target_id;
+        // 收集所有可能的装甲板对 (距离在合理范围内)
+        std::vector<std::pair<size_t, size_t>> candidate_pairs;
+        for (size_t i = 0; i < observations.size(); ++i) {
+            for (size_t j = i + 1; j < observations.size(); ++j) {
+                double dist = (observations[i].pos - observations[j].pos).norm();
+                // 同一车的两块装甲板距离通常在 0.25m ~ 1.2m
+                if (dist >= 0.25 && dist <= 1.2) {
+                    candidate_pairs.emplace_back(i, j);
                 }
             }
         }
-    }
 
-    // 第三步：双装甲板联合三分法优化
-    // 如果同一辆车有两块装甲板，使用 fit_double_z_to_l 联合优化朝向角
-    // 利用"两块装甲板相差 90°"的几何约束，比单独优化更准确
-    bool use_double_fit = runtime_param::get_param<bool>("AutoAim.Predictor.use_double_z_fit");
-    if (use_double_fit && observations.size() >= 2) {
-        // 按 target_id 分组
-        std::map<int, std::vector<size_t>> groups;
-        for (size_t i = 0; i < observations.size(); ++i) {
-            groups[observations[i].target_id].push_back(i);
-        }
+        // 对每个候选对进行处理
+        for (auto [idx_i, idx_j] : candidate_pairs) {
+            auto& obs_i = observations[idx_i];
+            auto& obs_j = observations[idx_j];
 
-        // 对每组进行联合优化
-        for (auto& [target_id, indices] : groups) {
-            if (indices.size() == 2) {
-                // 两块装甲板，使用联合三分法
-                size_t i0 = indices[0];
-                size_t i1 = indices[1];
-                auto& obs0 = observations[i0];
-                auto& obs1 = observations[i1];
+            // 判断左右 (根据 z_to_v，更负的是左边)
+            bool swap = obs_i.z_to_v > obs_j.z_to_v;
+            auto& obs_l = swap ? obs_j : obs_i;
+            auto& obs_r = swap ? obs_i : obs_j;
 
-                // 判断左右 (根据 z_to_v，更负的是左边)
-                bool swap = obs0.z_to_v > obs1.z_to_v;
-                auto& obs_l = swap ? obs1 : obs0;
-                auto& obs_r = swap ? obs0 : obs1;
+            // 保存原始值用于比较
+            double z_to_l_before = obs_l.z_to_v;
+            double z_to_r_before = obs_r.z_to_v;
 
-                // 初始 z_to_l
-                double z_to_l_init = obs_l.z_to_v;
-
-                // 联合三分法优化
-                double z_to_l = fit_double_z_to_l(obs_l, obs_r, z_to_l_init, q_imu);
+            // 联合三分法优化 (利用 90° 约束)
+            if (use_double_fit) {
+                double z_to_l = fit_double_z_to_l(obs_l, obs_r, obs_l.z_to_v, q_imu);
                 double z_to_r = z_to_l + M_PI / 2;
 
-                // 更新观测的 z_to_v
-                double delta_l = z_to_l - obs_l.z_to_v;
-                double delta_r = z_to_r - obs_r.z_to_v;
-
+                // 更新 z_to_v
                 obs_l.z_to_v = z_to_l;
                 obs_r.z_to_v = z_to_r;
 
                 // 更新 armor_yaw (z[3])
-                // armor_yaw = z_to_v + camera_yaw (INWARD)
-                obs_l.z[obs::ARMOR_YAW] += delta_l;
-                obs_r.z[obs::ARMOR_YAW] += delta_r;
+                double camera_yaw = std::atan2(
+                    get_camera_z_i2(q_imu).y(),
+                    get_camera_z_i2(q_imu).x()
+                );
+                obs_l.z[3] = z_to_l + camera_yaw;
+                obs_r.z[3] = z_to_r + camera_yaw;
+            }
 
+            // 用优化后的值检查几何约束
+            double yaw_i = obs_i.z[3];
+            double yaw_j = obs_j.z[3];
+            double yaw_diff = std::abs(math::angle_diff(yaw_i, yaw_j));
+
+            // 检查1: 朝向角差是否接近 90°
+            bool angle_ok = (yaw_diff > 70.0 * M_PI / 180.0 && yaw_diff < 110.0 * M_PI / 180.0);
+
+            // 检查2: 估算旋转中心是否一致
+            double r_est = 0.26;
+            Eigen::Vector3d center_i = obs_i.pos + r_est * Eigen::Vector3d(
+                std::cos(yaw_i), std::sin(yaw_i), 0);
+            Eigen::Vector3d center_j = obs_j.pos + r_est * Eigen::Vector3d(
+                std::cos(yaw_j), std::sin(yaw_j), 0);
+            double center_dist = (center_i - center_j).head<2>().norm();
+
+            bool center_ok = (center_dist < 0.25);
+
+            double dist = (obs_i.pos - obs_j.pos).norm();
+
+            // 如果通过几何检查且 target_id 不同，合并
+            if (angle_ok && center_ok && obs_i.target_id != obs_j.target_id) {
+                // 使用距离近的那个的 target_id
+                int merged_id = (obs_i.distance() < obs_j.distance())
+                    ? obs_i.target_id : obs_j.target_id;
+
+                fmt::print(fmt::fg(fmt::color::yellow),
+                    "[ArmorObserver] 合并同车装甲板: T{} + T{} → T{} "
+                    "(dist={:.2f}m, yaw_diff={:.1f}°, center_dist={:.2f}m)\n",
+                    obs_i.target_id, obs_j.target_id, merged_id,
+                    dist, yaw_diff * 180.0 / M_PI, center_dist);
+
+                obs_i.target_id = merged_id;
+                obs_j.target_id = merged_id;
+
+                // DEBUG: 打印优化结果
                 fmt::print(fmt::fg(fmt::color::green),
                     "[DoubleZ] T{}: z_to_l {:.1f}° → {:.1f}°, z_to_r {:.1f}° → {:.1f}°\n",
-                    target_id,
-                    z_to_l_init * 180.0 / M_PI, z_to_l * 180.0 / M_PI,
-                    (z_to_l_init + M_PI / 2) * 180.0 / M_PI, z_to_r * 180.0 / M_PI);
+                    merged_id,
+                    z_to_l_before * 180.0 / M_PI, obs_l.z_to_v * 180.0 / M_PI,
+                    z_to_r_before * 180.0 / M_PI, obs_r.z_to_v * 180.0 / M_PI);
+            } else if (obs_i.target_id == obs_j.target_id && use_double_fit) {
+                // 同一 target_id，保留优化结果
+                fmt::print(fmt::fg(fmt::color::green),
+                    "[DoubleZ] T{}: z_to_l {:.1f}° → {:.1f}°, z_to_r {:.1f}° → {:.1f}°\n",
+                    obs_i.target_id,
+                    z_to_l_before * 180.0 / M_PI, obs_l.z_to_v * 180.0 / M_PI,
+                    z_to_r_before * 180.0 / M_PI, obs_r.z_to_v * 180.0 / M_PI);
+            } else if (use_double_fit) {
+                // 几何不匹配，恢复原始值
+                obs_l.z_to_v = z_to_l_before;
+                obs_r.z_to_v = z_to_r_before;
+                // 恢复 armor_yaw
+                double camera_yaw = std::atan2(
+                    get_camera_z_i2(q_imu).y(),
+                    get_camera_z_i2(q_imu).x()
+                );
+                obs_l.z[3] = z_to_l_before + camera_yaw;
+                obs_r.z[3] = z_to_r_before + camera_yaw;
             }
         }
     }
 
-    // 第四步：添加到表
+    // 第三步：添加到表
     for (const auto& obs : observations) {
         table_.add(obs);
     }
