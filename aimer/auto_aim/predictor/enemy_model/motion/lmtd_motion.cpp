@@ -145,10 +145,23 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
             most_like_index, x[lmtd_model::R], another_r_);
     }
 
-    // rm.cv.fans 原版: theta 设为观测角度
-    // 注意: 不更新中心位置! 让 EKF 通过观测来修正
-    // 中心是连续的，只是切换了追踪的装甲板
+    // 切板时必须同时更新 theta 和中心位置，保证几何一致性
+    // 否则 predict_armor_pos 会产生跳变（冲过去再缓慢回来）
+    //
+    // 几何关系 (OUTWARD): armor = center + r * (cos θ, sin θ)
+    // 反推中心: center = armor - r * (cos θ, sin θ)
+    double new_xa = obs.pos.x();
+    double new_ya = obs.pos.y();
+    double new_r = x[lmtd_model::R];  // 使用交换后的 r
+
+    x[lmtd_model::XC] = new_xa - new_r * std::cos(new_orient);
+    x[lmtd_model::YC] = new_ya - new_r * std::sin(new_orient);
     x[lmtd_model::THETA] = new_orient;
+
+    debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
+        "Jump: center=({:.3f}, {:.3f}), theta={:.1f}°, r={:.3f}",
+        x[lmtd_model::XC], x[lmtd_model::YC],
+        new_orient * 180.0 / M_PI, new_r);
 
     ekf_.set_x(x);
 
