@@ -7,11 +7,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <numeric>
 #include <opencv2/imgproc.hpp>
 
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
 
@@ -91,7 +93,60 @@ const ArmorObservationTable& ArmorObserver::observe(
         }
     }
 
-    // 第三步：添加到表
+    // 第三步：双装甲板联合三分法优化
+    // 如果同一辆车有两块装甲板，使用 fit_double_z_to_l 联合优化朝向角
+    // 利用"两块装甲板相差 90°"的几何约束，比单独优化更准确
+    bool use_double_fit = runtime_param::get_param<bool>("AutoAim.Predictor.use_double_z_fit");
+    if (use_double_fit && observations.size() >= 2) {
+        // 按 target_id 分组
+        std::map<int, std::vector<size_t>> groups;
+        for (size_t i = 0; i < observations.size(); ++i) {
+            groups[observations[i].target_id].push_back(i);
+        }
+
+        // 对每组进行联合优化
+        for (auto& [target_id, indices] : groups) {
+            if (indices.size() == 2) {
+                // 两块装甲板，使用联合三分法
+                size_t i0 = indices[0];
+                size_t i1 = indices[1];
+                auto& obs0 = observations[i0];
+                auto& obs1 = observations[i1];
+
+                // 判断左右 (根据 z_to_v，更负的是左边)
+                bool swap = obs0.z_to_v > obs1.z_to_v;
+                auto& obs_l = swap ? obs1 : obs0;
+                auto& obs_r = swap ? obs0 : obs1;
+
+                // 初始 z_to_l
+                double z_to_l_init = obs_l.z_to_v;
+
+                // 联合三分法优化
+                double z_to_l = fit_double_z_to_l(obs_l, obs_r, z_to_l_init, q_imu);
+                double z_to_r = z_to_l + M_PI / 2;
+
+                // 更新观测的 z_to_v
+                double delta_l = z_to_l - obs_l.z_to_v;
+                double delta_r = z_to_r - obs_r.z_to_v;
+
+                obs_l.z_to_v = z_to_l;
+                obs_r.z_to_v = z_to_r;
+
+                // 更新 armor_yaw (z[3])
+                // armor_yaw = z_to_v + camera_yaw (INWARD)
+                obs_l.z[obs::ARMOR_YAW] += delta_l;
+                obs_r.z[obs::ARMOR_YAW] += delta_r;
+
+                fmt::print(fmt::fg(fmt::color::green),
+                    "[DoubleZ] T{}: z_to_l {:.1f}° → {:.1f}°, z_to_r {:.1f}° → {:.1f}°\n",
+                    target_id,
+                    z_to_l_init * 180.0 / M_PI, z_to_l * 180.0 / M_PI,
+                    (z_to_l_init + M_PI / 2) * 180.0 / M_PI, z_to_r * 180.0 / M_PI);
+            }
+        }
+    }
+
+    // 第四步：添加到表
     for (const auto& obs : observations) {
         table_.add(obs);
     }
@@ -428,6 +483,89 @@ double ArmorObserver::fit_z_to_v(
     // 黄金分割搜索
     constexpr double PHI = 0.6180339887498949;
     constexpr double MIN_INTERVAL = 0.01;  // 约 0.5度
+
+    double left = z_min, right = z_max;
+    double ml_cost = 0, mr_cost = 0;
+    int reserved = -1;
+
+    for (int i = 0; i < FIT_Z_TO_V_ITERATIONS; ++i) {
+        if (right - left < MIN_INTERVAL) break;
+
+        double ml = left + (right - left) * (1.0 - PHI);
+        double mr = left + (right - left) * PHI;
+
+        if (reserved != 0) ml_cost = cost_func(ml);
+        if (reserved != 1) mr_cost = cost_func(mr);
+
+        if (ml_cost < mr_cost) {
+            right = mr;
+            mr_cost = ml_cost;
+            reserved = 1;
+        } else {
+            left = ml;
+            ml_cost = mr_cost;
+            reserved = 0;
+        }
+    }
+
+    return (left + right) / 2.0;
+}
+
+/**
+ * @brief 双装甲板联合三分法
+ *
+ * 参考 rm.cv.fans: fit_double_z_to_l / DoubleCost
+ * 利用"两块装甲板相差 90°"的几何约束，联合优化角度
+ *
+ * 核心思想:
+ * - 左边装甲板 z_to_v = z_to_l
+ * - 右边装甲板 z_to_v = z_to_l + π/2
+ * - 找到使两块装甲板总重投影误差最小的 z_to_l
+ */
+double ArmorObserver::fit_double_z_to_l(
+    const ArmorObservation& obs0,
+    const ArmorObservation& obs1,
+    double z_to_l_init,
+    const Eigen::Quaterniond& q_imu
+) {
+    // 搜索范围 (rm.cv.fans: M_PI - must_not_see_angle 到 M_PI + must_not_see_angle - angle_between_armors)
+    // 简化: ±60度范围
+    constexpr double SEARCH_MARGIN = M_PI / 3;  // 60度
+    double z_min = z_to_l_init - SEARCH_MARGIN;
+    double z_max = z_to_l_init + SEARCH_MARGIN;
+
+    // 限制在合理范围
+    z_min = std::max(-M_PI / 2, z_min);
+    z_max = std::min(M_PI / 2, z_max);
+
+    if (z_max <= z_min + 0.02) {
+        return z_to_l_init;
+    }
+
+    // 获取装甲板参数
+    ArmorType type0 = obs0.type;
+    ArmorType type1 = obs1.type;
+
+    // 假设两块装甲板俯仰角相同 (同一辆车)
+    double pitch = -15.0 * M_PI / 180.0;  // 默认俯仰角
+
+    // 代价函数: 两块装甲板的总重投影误差
+    auto cost_func = [&](double z_to_l) {
+        // 左边装甲板
+        auto projected0 = project_armor_corners(obs0.pos, type0, pitch, z_to_l, q_imu);
+        double cost0 = compute_reprojection_cost(projected0, obs0.pus, std::abs(z_to_l_init));
+
+        // 右边装甲板 (相差 90°)
+        double z_to_r = z_to_l + M_PI / 2;
+        auto projected1 = project_armor_corners(obs1.pos, type1, pitch, z_to_r, q_imu);
+        double cost1 = compute_reprojection_cost(projected1, obs1.pus, std::abs(z_to_l_init + M_PI / 2));
+
+        return cost0 + cost1;
+    };
+
+    // 黄金分割搜索
+    constexpr double PHI = 0.6180339887498949;
+    constexpr double MIN_INTERVAL = 0.01;
 
     double left = z_min, right = z_max;
     double ml_cost = 0, mr_cost = 0;

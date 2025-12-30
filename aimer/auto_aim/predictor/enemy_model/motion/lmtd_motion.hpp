@@ -257,10 +257,14 @@ public:
 
     /**
      * @brief 从观测装甲板反推所有装甲板位置
+     * @param observed_pos 观测装甲板位置
+     * @param observed_theta 观测装甲板朝向 (OUTWARD)
+     * @param observed_id 观测装甲板 ID (用于确定半径)
      */
     std::vector<Eigen::Vector3d> compute_all_armors_from_observation(
         const Eigen::Vector3d& observed_pos,
-        double observed_theta) const;
+        double observed_theta,
+        int observed_id) const;
 
     /**
      * @brief 检查是否可信 (超时则不可信)

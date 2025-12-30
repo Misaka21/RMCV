@@ -86,7 +86,7 @@ struct ArmorObservation {
     // 目标信息
     int target_id = 0;      // 目标编号 (机器人编号 1-8)
     int armor_num = 4;      // 该目标装甲板总数 (3 或 4)
-    // 注意: 装甲板 ID (0-3) 由 ArmorIdentifier 分配，不在此处
+    // 注意: 装甲板 ID (0-3) 由 ArmorIdentifier 分配，存储在 ArmorData 中
     ArmorType type = ArmorType::SMALL;
     EnemyColor color = EnemyColor::GRAY;  // 敌方颜色
 

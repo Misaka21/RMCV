@@ -30,6 +30,11 @@
 
     use_lmtd = true
 
+    #@bool 是否使用双装甲板联合三分法优化 (fit_double_z_to_l)
+    # true: 利用 90° 几何约束联合优化两块装甲板朝向角
+    # false: 各自独立优化
+    use_double_z_fit = true
+
     # 面积过滤
     #@double 已存在装甲板的最小面积比例
     existing_armor_area_ratio = 0.30
@@ -131,21 +136,21 @@
     # 观测噪声 R (参考 rm.cv.fans: r.yaw = 8.0, r.orientation-yaw.single = 30.0)
     # R 越大 = 越不信任观测 = 滤波越平滑
     #@double yaw/pitch角度观测噪声 (调大减少位置抖动)
-    r_angle = 15.0
+    r_angle = 8.0
     #@double 1m处距离观测噪声，实际 R_dis = r_dis_1m * dis^4
-    r_dis_1m = 40.0
-    #@double 装甲板朝向角观测噪声 - 单块 (调大减少朝向抖动)
-    r_orient_single = 50.0
-    #@double 装甲板朝向角观测噪声 - 双块
-    r_orient_double = 25.0
+    r_dis_1m = 26.0
+    #@double 装甲板朝向角观测噪声 - 单块 (rm.cv.fans: 30.0)
+    r_orient_single = 30.0
+    #@double 装甲板朝向角观测噪声 - 双块 (rm.cv.fans: 15.0)
+    r_orient_double = 15.0
 
-    # 半径参数
+    # 半径参数 (根据实际车型调整)
     #@double 初始半径 (m)
     init_r = 0.26
-    #@double 最小半径限制 (m)
-    r_min = 0.12
-    #@double 最大半径限制 (m)
-    r_max = 0.4
+    #@double 最小半径限制 (m)，rm.cv.fans 用 0.19
+    r_min = 0.19
+    #@double 最大半径限制 (m)，rm.cv.fans 用 0.30
+    r_max = 0.30
 
     # Z轴约束
     #@bool 强制Z轴速度为0
@@ -158,8 +163,9 @@
     credit_dt = 0.5
 
     # 装甲板选择 (防止反复横跳)
+    # rm.cv.fans 用 0.9，非常保守，减少跳变让半径有时间收敛
     #@double 保持追踪的面积比例，当前追踪装甲板面积 >= 最大面积 * 此比例时保持追踪
-    keep_tracking_area_ratio = 0.5
+    keep_tracking_area_ratio = 0.9
 
     # 陀螺等级阈值 (rad/s, 参考 rm.cv.fans)
     #@double top_level 1 激活阈值 (约 70°/s)

@@ -116,25 +116,38 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
 
     // 真的跳变了
     debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
-        "Jump detected: {} -> {}, index={}", tracked_armor_id_, armor.id, most_like_index);
+        "Jump detected: {} -> {}, index={}, state_theta={:.1f}°, new_orient={:.1f}°",
+        tracked_armor_id_, armor.id, most_like_index,
+        state_theta * 180.0 / M_PI, new_orient * 180.0 / M_PI);
 
     // 4装甲板: 奇数跳变交换半径和高度差
     if (armor_num_ == 4 && most_like_index % 2 == 1) {
+        debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
+            "Before swap: r={:.3f}, another_r={:.3f}, old_za={:.3f}, new_za={:.3f}, dz={:.3f}",
+            x[lmtd_model::R], another_r_, old_za, new_za, dz_);
+
         std::swap(x[lmtd_model::R], another_r_);
 
-        // LMTD 关键: dz = old_za - new_za
+        // LMTD 关键: dz = old_za - new_za (和 rm.cv.fans 一致，只 clamp 不平滑)
         dz_ = old_za - new_za;
-
-        // 限制高度差
         double dz_max = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.dz_abs_max");
         dz_ = std::clamp(dz_, -dz_max, dz_max);
 
         // 直接设为新装甲板的 z (避免累积误差)
         x[lmtd_model::ZA] = new_za;
+
+        debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
+            "After swap: r={:.3f}, another_r={:.3f}, za={:.3f}, dz={:.3f}",
+            x[lmtd_model::R], another_r_, x[lmtd_model::ZA], dz_);
+    } else {
+        debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
+            "Even jump (index={}): no swap, r={:.3f}, another_r={:.3f}",
+            most_like_index, x[lmtd_model::R], another_r_);
     }
 
-    // 直接用观测的朝向角 (不用 possible_theta，因为角速度慢时不准)
-    // 参考 rm.cv.fans: 只更新 theta，不更新 xc, yc，让 EKF 自己收敛
+    // rm.cv.fans 原版: theta 设为观测角度
+    // 注意: 不更新中心位置! 让 EKF 通过观测来修正
+    // 中心是连续的，只是切换了追踪的装甲板
     x[lmtd_model::THETA] = new_orient;
 
     ekf_.set_x(x);
@@ -209,13 +222,12 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
     for (int i = 0; i < lmtd_model::N_Z; ++i) inner_z[i] = z_arr[i];
 
     // 连续化 (LMTD trick: 位置 yaw 也要连续化!)
+    // 把观测角度调整到离内部预测最近，避免 ±π 跳变
     VectorZ z;
-    z[lmtd_model::YAW] = inner_z[lmtd_model::YAW] +
-        math::angle_diff(inner_z[lmtd_model::YAW], obs.z[obs::YAW]);
+    z[lmtd_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[lmtd_model::YAW]);
     z[lmtd_model::PITCH] = obs.z[obs::PITCH];
     z[lmtd_model::DIS] = obs.z[obs::DIST];
-    z[lmtd_model::ORIENT_YAW] = inner_z[lmtd_model::ORIENT_YAW] +
-        math::angle_diff(inner_z[lmtd_model::ORIENT_YAW], orient_yaw);
+    z[lmtd_model::ORIENT_YAW] = math::get_closest_angle(orient_yaw, inner_z[lmtd_model::ORIENT_YAW]);
 
     // 观测更新
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
@@ -227,10 +239,11 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
     // 后处理
     x = ekf_.get_x();
 
-    // 限制半径范围
+    // 限制半径范围 (两个半径都要 clamp，防止 swap 时越界)
     double r_min = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_min");
     double r_max = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_max");
     x[lmtd_model::R] = std::clamp(x[lmtd_model::R], r_min, r_max);
+    another_r_ = std::clamp(another_r_, r_min, r_max);
 
     // 强制 Z 轴速度为 0
     if (runtime_param::get_param<bool>("AutoAim.Predictor.LmtdEKF.force_zero_vz")) {
@@ -256,45 +269,41 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         return;
     }
 
-    // 多装甲板模式: 参考 rm.cv.fans，不做特殊处理，只用选中的装甲板更新 EKF
+    // ==================== 双装甲板处理 ====================
+    // rm.cv.fans 原版设计：不用射线交点法计算半径
+    // 半径让 EKF 自己通过观测慢慢收敛
+    // 双装甲板时只用 fit_double_z_to_l 优化朝向角，提高观测精度
+
+    // ==================== 初始化或更新 ====================
     if (!initialized_ || !credit(timestamp)) {
-        // 用两块装甲板直接计算初始状态
-        const auto& a0 = armors[0];
-        const auto& a1 = armors[1];
+        // 使用默认半径初始化
+        double init_r = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.init_r");
 
-        Eigen::Vector3d p0 = a0.pos();
-        Eigen::Vector3d p1 = a1.pos();
-        double theta0 = a0.observation.z[obs::ARMOR_YAW] + M_PI;
-        double theta1 = a1.observation.z[obs::ARMOR_YAW] + M_PI;
+        // primary 的朝向角 (OUTWARD)
+        double primary_theta = primary.observation.z[obs::ARMOR_YAW] + M_PI;
 
-        Eigen::Vector2d n0(std::cos(theta0), std::sin(theta0));
-        Eigen::Vector2d n1(std::cos(theta1), std::sin(theta1));
-
-        Eigen::Vector2d dp_xy(p0.x() - p1.x(), p0.y() - p1.y());
-        Eigen::Vector2d dn = n0 - n1;
-        double dn_norm = dn.norm();
-        double r = (dn_norm > 0.1)
-            ? dp_xy.norm() / dn_norm
-            : runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.init_r");
-        r = std::clamp(r,
-            runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_min"),
-            runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_max"));
-
-        double xc = p0.x() - r * n0.x();
-        double yc = p0.y() - r * n0.y();
+        // 从 primary 装甲板反推中心
+        double xc = primary.pos().x() - init_r * std::cos(primary_theta);
+        double yc = primary.pos().y() - init_r * std::sin(primary_theta);
 
         VectorX x0 = VectorX::Zero();
         x0[lmtd_model::XC] = xc;
         x0[lmtd_model::YC] = yc;
         x0[lmtd_model::ZA] = primary.pos().z();
-        x0[lmtd_model::THETA] = primary.observation.z[obs::ARMOR_YAW] + M_PI;
-        x0[lmtd_model::R] = r;
+        x0[lmtd_model::THETA] = primary_theta;
+        x0[lmtd_model::R] = init_r;
+        another_r_ = init_r;  // rm.cv.fans: 两个半径都初始化为默认值
+
+        // rm.cv.fans: 初始化时 dz = 0，通过跳变时学习高度差
+        dz_ = 0;
 
         ekf_.init(x0);
 
-        dz_ = p0.z() - p1.z();
-        another_r_ = r;
         tracked_armor_id_ = primary.id;
+
+        debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
+            "Init with dual armors: r={:.3f}, another_r={:.3f}, dz={:.3f}",
+            init_r, another_r_, dz_);
 
         last_update_time_ = timestamp;
         predict_t_ = timestamp;
@@ -312,8 +321,7 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     ekf_.predict_forward(predict_func, Q);
     predict_t_ = timestamp;
 
-    // 跳变检测 (参考 rm.cv.fans: 双装甲板时也需要)
-    // tracked_armor_id 在 EKF 更新后才更新
+    // 跳变检测
     int new_tracked_id;
     detect_and_handle_jump(primary, new_tracked_id);
 
@@ -329,25 +337,28 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     measure_func(x_arr, z_arr);
     for (int i = 0; i < lmtd_model::N_Z; ++i) inner_z[i] = z_arr[i];
 
+    // 连续化 (把观测调整到离预测最近)
     VectorZ z;
-    z[lmtd_model::YAW] = inner_z[lmtd_model::YAW] +
-        math::angle_diff(inner_z[lmtd_model::YAW], obs.z[obs::YAW]);
+    z[lmtd_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[lmtd_model::YAW]);
     z[lmtd_model::PITCH] = obs.z[obs::PITCH];
     z[lmtd_model::DIS] = obs.z[obs::DIST];
-    z[lmtd_model::ORIENT_YAW] = inner_z[lmtd_model::ORIENT_YAW] +
-        math::angle_diff(inner_z[lmtd_model::ORIENT_YAW], orient_yaw);
+    z[lmtd_model::ORIENT_YAW] = math::get_closest_angle(orient_yaw, inner_z[lmtd_model::ORIENT_YAW]);
 
     MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);
     ekf_.update_forward(measure_func, z, R);
 
-    // 参考 rm.cv.fans: EKF 更新后才更新 tracked_armor_id
+    // EKF 更新后才更新 tracked_armor_id
     tracked_armor_id_ = new_tracked_id;
 
-    // 后处理 (不再做几何参数融合，让 EKF 自己收敛)
+    // rm.cv.fans 原版设计：不做几何融合，让 EKF 自己收敛半径
+    // 半径通过 EKF 观测模型自然收敛
+
+    // 后处理 (两个半径都要 clamp)
     x = ekf_.get_x();
-    x[lmtd_model::R] = std::clamp(x[lmtd_model::R],
-        runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_min"),
-        runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_max"));
+    double r_min = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_min");
+    double r_max = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.r_max");
+    x[lmtd_model::R] = std::clamp(x[lmtd_model::R], r_min, r_max);
+    another_r_ = std::clamp(another_r_, r_min, r_max);
 
     if (runtime_param::get_param<bool>("AutoAim.Predictor.LmtdEKF.force_zero_vz")) {
         x[lmtd_model::VZ] = 0;
@@ -479,38 +490,19 @@ Eigen::Vector3d LmtdMotion::get_center_velocity() const {
 }
 
 std::vector<Eigen::Vector3d> LmtdMotion::compute_all_armors_from_observation(
-    const Eigen::Vector3d& observed_pos,
-    double observed_theta) const {
+    const Eigen::Vector3d& /* observed_pos */,
+    double /* observed_theta */,
+    int /* observed_id */) const {
+    // rm.cv.fans 原版设计: 直接从 EKF 状态生成所有装甲板
+    // 不需要从观测反推！
+    // 参考 lmtd_top_model.cpp 的 predict_armors (第 461-490 行)
 
     std::vector<Eigen::Vector3d> result;
     result.reserve(armor_num_);
 
-    VectorX x = ekf_.get_x();
-    double r0 = x[lmtd_model::R];
-    double r1 = another_r_;
-
-    // OUTWARD: center = armor - r * (cos θ, sin θ)
-    double xc = observed_pos.x() - r0 * std::cos(observed_theta);
-    double yc = observed_pos.y() - r0 * std::sin(observed_theta);
-
-    double angle_step = 2.0 * M_PI / armor_num_;
-    double current_r = r0;
-    double current_z = observed_pos.z();
-    double current_dz = dz_;
-
+    // 直接用 predict_armor_pos，和 rm.cv.fans 的 predict_armors 一样
     for (int i = 0; i < armor_num_; ++i) {
-        double theta_i = observed_theta + i * angle_step;
-
-        double xa = xc + current_r * std::cos(theta_i);
-        double ya = yc + current_r * std::sin(theta_i);
-
-        result.emplace_back(xa, ya, current_z);
-
-        if (armor_num_ == 4) {
-            std::swap(current_r, r1);
-            current_z += current_dz;
-            current_dz = -current_dz;
-        }
+        result.push_back(predict_armor_pos(i, 0));  // dt=0，当前时刻
     }
 
     return result;

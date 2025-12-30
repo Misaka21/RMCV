@@ -119,7 +119,7 @@ private:
     );
 
     /**
-     * @brief 三分搜索找到最优的 z_to_v (世界坐标系方法)
+     * @brief 三分搜索找到最优的 z_to_v (单装甲板)
      *
      * z_to_v 是装甲板法向量相对于相机前向的旋转角 (绕世界 Z 轴)
      * - z_to_v = 0: 装甲板正对相机
@@ -140,6 +140,25 @@ private:
         double pitch,
         const std::array<cv::Point2f, 4>& pus,
         double z_to_v_init,
+        const Eigen::Quaterniond& q_imu
+    );
+
+    /**
+     * @brief 双装甲板联合三分法
+     *
+     * 参考 rm.cv.fans: fit_double_z_to_l
+     * 利用"两块装甲板相差 90°"的几何约束，联合优化角度
+     *
+     * @param obs0 第一块装甲板观测
+     * @param obs1 第二块装甲板观测
+     * @param z_to_l_init 左边装甲板的初始 z_to_v
+     * @param q_imu IMU 四元数
+     * @return 优化后的 z_to_l (左边装甲板的 z_to_v)
+     */
+    double fit_double_z_to_l(
+        const ArmorObservation& obs0,
+        const ArmorObservation& obs1,
+        double z_to_l_init,
         const Eigen::Quaterniond& q_imu
     );
 

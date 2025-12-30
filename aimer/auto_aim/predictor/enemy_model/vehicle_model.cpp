@@ -521,16 +521,45 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     // 1. 绘制检测到的装甲板 (X 形状: 对角线连接)
     // 只有数据新鲜时才绘制，避免绘制过时的观测
     if (data_fresh) {
-        for (const auto& obs : prev_armors_) {
+        for (size_t idx = 0; idx < prev_armors_.size(); ++idx) {
+            const auto& obs = prev_armors_[idx];
             if (obs.pts.size() >= 4) {
                 // X 形状: 连接对角线
                 cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左上-右下
                 cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左下-右上
-                // 标注 target_id
+
+                // 标注 target_id 和 z_to_v
+                // z_to_v: 装甲板相对相机的夹角 (三分法优化后)
                 cv::putText(img, std::to_string(target_id_),
                             obs.center_2d + cv::Point2f(10, -10),
                             cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_DETECTED, 2);
+
+                // 显示 z_to_v (优化后的朝向角)
+                // 如果是双装甲板，显示会标记 "D" (double)
+                std::string z_str = fmt::format("z:{:.0f}", obs.z_to_v * 180.0 / M_PI);
+                if (prev_armors_.size() == 2) {
+                    z_str += (idx == 0) ? "L" : "R";  // L=左, R=右
+                }
+                cv::putText(img, z_str,
+                            obs.center_2d + cv::Point2f(-30, 20),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_DETECTED, 1);
             }
+        }
+
+        // 如果是双装甲板，显示两者夹角差 (应该接近 90°)
+        if (prev_armors_.size() == 2) {
+            double z0 = prev_armors_[0].z_to_v;
+            double z1 = prev_armors_[1].z_to_v;
+            double angle_diff = std::abs(math::angle_diff(z0, z1)) * 180.0 / M_PI;
+
+            // 在两块装甲板中间显示夹角差
+            cv::Point2f mid = (prev_armors_[0].center_2d + prev_armors_[1].center_2d) * 0.5f;
+            cv::Scalar color = (std::abs(angle_diff - 90.0) < 10.0)
+                ? cv::Scalar(0, 255, 0)    // 绿色: 接近 90°
+                : cv::Scalar(0, 165, 255); // 橙色: 偏离 90°
+            cv::putText(img, fmt::format("D:{:.0f}", angle_diff),
+                        mid + cv::Point2f(0, -20),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.5, color, 2);
         }
     }
 
@@ -612,32 +641,46 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 4. 绘制从观测反推的装甲板 (洋红色) - 无滤波滞后
-    // 用途: 直观验证几何参数 (r, another_r, dz) 估计是否准确
-    // 必须数据新鲜才绘制，因为依赖 prev_armors_
-    if (spin_valid && data_fresh && !prev_armors_.empty()) {
-        const cv::Scalar COLOR_GEOMETRY(255, 0, 255);  // 洋红色: 几何反推
+    // 4. 绘制从 EKF 状态生成的装甲板 (洋红色)
+    // rm.cv.fans 原版设计: 直接从 EKF 状态生成，不需要从观测反推
+    // 参考 lmtd_top_model.cpp 的 draw_armors (第 492-514 行)
+    auto active_armors = identifier_.get_active_armors(frame_count_);
+    if (spin_valid && data_fresh && !active_armors.empty()) {
+        const cv::Scalar COLOR_GEOMETRY(255, 0, 255);  // 洋红色
 
-        // 取最正对的观测装甲板
-        const auto& best_obs = prev_armors_[0];  // prev_armors_ 已按 z_to_v 排序
-        double obs_armor_yaw = best_obs.z[obs::ARMOR_YAW];  // 装甲板朝向 (INWARD)
-        double obs_theta_outward = obs_armor_yaw + M_PI;     // 转为 OUTWARD
-
-        // 从观测反推所有装甲板 (两个模型都用 OUTWARD)
-        std::vector<Eigen::Vector3d> all_armors = use_lmtd_
-            ? lmtd_motion_.compute_all_armors_from_observation(best_obs.pos, obs_theta_outward)
-            : spin_motion_.compute_all_armors_from_observation(best_obs.pos, obs_theta_outward);
+        // rm.cv.fans 原版: 直接从 EKF 状态生成所有装甲板
+        std::vector<Eigen::Vector3d> all_armors;
+        if (use_lmtd_) {
+            for (int i = 0; i < ((enemy_type_ == EnemyType::OUTPOST) ? 3 : 4); ++i) {
+                all_armors.push_back(lmtd_motion_.predict_armor_pos(i, 0));
+            }
+        } else {
+            const auto& best_armor = active_armors[0];
+            double obs_theta_outward = best_armor.observation.z[obs::ARMOR_YAW] + M_PI;
+            all_armors = spin_motion_.compute_all_armors_from_observation(best_armor.pos(), obs_theta_outward);
+        }
 
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
+
+        // rm.cv.fans 原版: 用 EKF 的 theta 来画装甲板朝向
+        double state_theta_outward = use_lmtd_ ? lmtd_motion_.get_theta() : 0;
+        double obs_armor_yaw = active_armors[0].observation.z[obs::ARMOR_YAW];
+
         for (int i = 0; i < armor_num && i < static_cast<int>(all_armors.size()); ++i) {
             // draw_armor_rect 需要装甲板朝向 (INWARD)
-            double armor_yaw = obs_armor_yaw + i * (2.0 * M_PI / armor_num);
+            // LMTD: OUTWARD + M_PI = INWARD
+            double armor_yaw;
+            if (use_lmtd_) {
+                armor_yaw = state_theta_outward + i * (2.0 * M_PI / armor_num) + M_PI;
+            } else {
+                armor_yaw = obs_armor_yaw + i * (2.0 * M_PI / armor_num);
+            }
 
-            // idx=0 是观测装甲板本身，用虚线; 其他用实线
+            // idx=0 是当前追踪的装甲板
             int thickness = (i == 0) ? 1 : 2;
             draw_armor_rect(img, all_armors[i], armor_yaw, ArmorType::SMALL, q_imu, COLOR_GEOMETRY, thickness);
 
-            // 标注序号 (带 G 前缀表示 Geometry)
+            // 标注序号
             bool valid = false;
             cv::Point2f pt = tf::world_to_pixel(all_armors[i], q_imu, valid);
             if (valid) {
@@ -646,18 +689,17 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             }
         }
 
-        // 绘制从观测反推的中心 (OUTWARD: center = armor - r * (cos θ, sin θ))
+        // 绘制中心和参数
         double r0 = use_lmtd_ ? lmtd_motion_.get_radius() : spin_motion_.get_radius();
         double dz = use_lmtd_ ? lmtd_motion_.get_dz() : spin_motion_.get_dz();
         double another_r = use_lmtd_ ? lmtd_motion_.get_another_radius() : spin_motion_.get_another_radius();
 
-        Eigen::Vector3d obs_center(
-            best_obs.pos.x() - r0 * std::cos(obs_theta_outward),
-            best_obs.pos.y() - r0 * std::sin(obs_theta_outward),
-            best_obs.pos.z() - dz
-        );
+        Eigen::Vector3d center = use_lmtd_
+            ? lmtd_motion_.predict_center(0)
+            : spin_motion_.predict_center(0);
+
         bool valid = false;
-        cv::Point2f pt = tf::world_to_pixel(obs_center, q_imu, valid);
+        cv::Point2f pt = tf::world_to_pixel(center, q_imu, valid);
         if (valid) {
             // 菱形标记
             int s = 10;
@@ -673,9 +715,14 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             cv::putText(img, fmt::format("r={:.2f}/{:.2f}", r0, another_r),
                         pt + cv::Point2f(15, -5),
                         cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
-            // LMTD 只有一个 dz; SpinMotion 有两个
+
+            // dz 和双装甲板标记
+            std::string dz_str = fmt::format("dz={:.2f}", dz);
+            if (prev_armors_.size() == 2) {
+                dz_str += " [2]";  // 标记双装甲板
+            }
             if (use_lmtd_) {
-                cv::putText(img, fmt::format("dz={:.2f}", dz),
+                cv::putText(img, dz_str,
                             pt + cv::Point2f(15, 10),
                             cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
             } else {
