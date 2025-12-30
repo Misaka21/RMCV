@@ -7,13 +7,14 @@
  * - 观测用 YPD 球坐标: 噪声建模准确 (角度/距离解耦)
  * - 自动微分计算雅可比: 无需手动推导
  *
- * 状态向量 (9维):
- *   [xc, vx, yc, vy, zc, vz, θ, ω, r]
+ * 状态向量 (10维, 参考 FYT2024):
+ *   [xc, vx, yc, vy, zc, vz, θ, ω, r, dz]
  *   - xc, yc, zc: 旋转中心位置 (世界系)
  *   - vx, vy, vz: 旋转中心速度
  *   - θ: 当前装甲板朝向角 (从中心指向装甲板的方向, OUTWARD, rad)
  *   - ω: 角速度 (rad/s)
  *   - r: 当前装甲板半径
+ *   - dz: 当前装甲板高度差 (za = zc + dz)
  *
  * 观测向量 (4维):
  *   [yaw_a, pitch_a, dis_a, θ_a]
@@ -26,7 +27,7 @@
  *
  * 外部维护 (跳变时交换):
  *   - another_r: 另一个半径 (4装甲板车辆长短轴)
- *   - dz: 高度差
+ *   - another_dz: 另一个高度差
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_MOTION_SPIN_MOTION_HPP__
@@ -49,10 +50,10 @@ namespace autoaim::predictor {
 
 namespace spin_model {
 
-constexpr int N_X = 9;  // 状态维度
-constexpr int N_Z = 4;  // 观测维度
+constexpr int N_X = 10;  // 状态维度 (参考 FYT2024)
+constexpr int N_Z = 4;   // 观测维度
 
-// 状态索引
+// 状态索引 (参考 FYT2024: xc, vxc, yc, vyc, zc, vzc, yaw, vyaw, r, d_zc)
 enum StateIdx {
     XC = 0,     // 旋转中心 X
     VX = 1,     // X 速度
@@ -62,7 +63,8 @@ enum StateIdx {
     VZ = 5,     // Z 速度
     THETA = 6,  // 车体朝向角
     OMEGA = 7,  // 角速度
-    R = 8       // 当前半径
+    R = 8,      // 当前半径
+    DZ = 9      // 当前高度差 (za = zc + dz)
 };
 
 // 观测索引
@@ -89,6 +91,7 @@ enum ObsIdx {
  *   θ' = θ + ω·dt
  *   ω' = ω
  *   r' = r
+ *   dz' = dz  (高度差不变)
  */
 struct SpinCVPredict {
     double dt;
@@ -111,8 +114,9 @@ struct SpinCVPredict {
         x_out[spin_model::THETA] = x_in[spin_model::THETA] + T(dt) * x_in[spin_model::OMEGA];
         x_out[spin_model::OMEGA] = x_in[spin_model::OMEGA];
 
-        // 半径不变
+        // 半径和高度差不变
         x_out[spin_model::R] = x_in[spin_model::R];
+        x_out[spin_model::DZ] = x_in[spin_model::DZ];
     }
 };
 
@@ -130,7 +134,7 @@ struct SpinCVPredict {
  * 装甲板位置 (OUTWARD):
  *   xa = xc + r·cos(θ)
  *   ya = yc + r·sin(θ)
- *   za = zc + dz
+ *   za = zc + dz  (dz 现在来自状态向量)
  *
  * YPD 观测:
  *   yaw = atan2(ya, xa)
@@ -139,10 +143,6 @@ struct SpinCVPredict {
  *   armor_yaw = θ  (装甲板朝向角, OUTWARD)
  */
 struct SpinMeasure {
-    double dz;  // 高度差 (外部维护)
-
-    explicit SpinMeasure(double height_diff = 0) : dz(height_diff) {}
-
     template<typename T>
     void operator()(const T x[spin_model::N_X], T y[spin_model::N_Z]) const {
         // 从状态提取
@@ -151,11 +151,12 @@ struct SpinMeasure {
         T zc = x[spin_model::ZC];
         T theta = x[spin_model::THETA];
         T r = x[spin_model::R];
+        T dz = x[spin_model::DZ];  // 从状态中获取 dz
 
         // 计算装甲板位置 (世界系, OUTWARD)
         T xa = xc + r * ceres::cos(theta);
         T ya = yc + r * ceres::sin(theta);
-        T za = zc + T(dz);
+        T za = zc + dz;
 
         // 计算 YPD 观测
         T rho_sq = xa * xa + ya * ya;
@@ -177,7 +178,7 @@ struct SpinMeasure {
  * @brief 整车旋转模型
  *
  * 功能:
- * - 9维 EKF 滤波
+ * - 10维 EKF 滤波 (含 dz 在状态中)
  * - 装甲板跳变处理 (半径/高度交换)
  * - 陀螺等级判断
  * - 多装甲板位置预测
@@ -272,12 +273,12 @@ public:
     double get_another_radius() const { return another_r_; }
 
     /**
-     * @brief 获取当前高度差
+     * @brief 获取当前高度差 (从状态向量)
      */
-    double get_dz() const { return dz_; }
+    double get_dz() const { return ekf_.get_x()[spin_model::DZ]; }
 
     /**
-     * @brief 获取另一个高度差
+     * @brief 获取另一个高度差 (外部维护)
      */
     double get_another_dz() const { return another_dz_; }
 
@@ -349,8 +350,7 @@ private:
     // ==================== 装甲板配置 ====================
     int armor_num_ = 4;         // 装甲板数量 (3 或 4)
     double another_r_ = 0.26;   // 另一个半径 (4装甲板时)
-    double dz_ = 0;             // 当前高度差
-    double another_dz_ = 0;     // 另一个高度差
+    double another_dz_ = 0;     // 另一个高度差 (dz 现在在状态向量中)
 
     // ==================== 陀螺状态 ====================
     SpinLevel spin_level_ = SpinLevel::NONE;

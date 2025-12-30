@@ -28,7 +28,7 @@
     #@bool 是否显示预测可视化窗口
     show_window = true
 
-    use_lmtd = true
+    use_lmtd = false
 
     #@bool 是否使用双装甲板联合三分法优化 (fit_double_z_to_l)
     # true: 利用 90° 几何约束联合优化两块装甲板朝向角
@@ -90,7 +90,9 @@
     #@double 角速度ω过程噪声，较大以适应陀螺加减速
     q_omega = 280.0
     #@double 陀螺半径r过程噪声
-    q_r = 1.0
+    q_r = 0.005
+    #@double 高度差dz过程噪声 (dz 现在在状态向量中滤波)
+    q_dz = 1.0
 
     # 观测噪声 R (越大越不信任观测，滤波越平滑)
     #@double yaw/pitch角度观测噪声 (调大减少位置抖动)
@@ -105,10 +107,10 @@
     # 半径参数
     #@double 初始半径 (m)
     init_r = 0.26
-    #@double 最小半径限制 (m)
-    r_min = 0.12
-    #@double 最大半径限制 (m)
-    r_max = 0.4
+    #@double 最小半径限制 (m)，长短轴差不多的车用 0.23
+    r_min = 0.23
+    #@double 最大半径限制 (m)，长短轴差不多的车用 0.29
+    r_max = 0.29
 
     # Z轴约束 (PnP在Z方向误差大)
     #@bool 强制Z轴速度为0

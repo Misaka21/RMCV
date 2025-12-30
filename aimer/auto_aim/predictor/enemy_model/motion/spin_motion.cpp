@@ -42,21 +42,21 @@ void SpinMotion::init(const ArmorData& armor, double timestamp) {
     // OUTWARD: center = armor - r * (cos θ, sin θ)
     double xc = xa - r * std::cos(theta);
     double yc = ya - r * std::sin(theta);
-    double zc = za;
+    double zc = za;  // 初始时 dz = 0，所以 zc = za
 
-    // 初始化状态
+    // 初始化状态 (10维)
     VectorX x0 = VectorX::Zero();
     x0[spin_model::XC] = xc;
     x0[spin_model::YC] = yc;
     x0[spin_model::ZC] = zc;
     x0[spin_model::THETA] = theta;  // OUTWARD
     x0[spin_model::R] = r;
+    x0[spin_model::DZ] = 0;  // 初始高度差为 0
     // 速度初始为 0
 
     ekf_.init(x0);
 
     // 重置状态
-    dz_ = 0;
     another_dz_ = 0;
     last_yaw_ = theta;  // 保存 OUTWARD 角度
     spin_level_ = SpinLevel::NONE;
@@ -82,56 +82,48 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     ekf_.predict_forward(predict_func, Q);
 
     // 观测的装甲板朝向 (INWARD → OUTWARD)
-    double armor_yaw_inward = obs.z[obs::ARMOR_YAW];
-    double armor_yaw_outward = armor_yaw_inward + M_PI;  // 转为 OUTWARD
+    double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
 
-    // 连续化 theta (避免 ±π 跳变)
+    // 获取 EKF 内部预测的观测值 (用于连续化)
+    SpinMeasure measure_func;
+    VectorZ inner_z;
     VectorX x = ekf_.get_x();
-    double theta_pred = x[spin_model::THETA];
-    double theta_continuous = theta_pred + math::angle_diff(theta_pred, armor_yaw_outward);
+    double x_arr[spin_model::N_X], z_arr[spin_model::N_Z];
+    for (int i = 0; i < spin_model::N_X; ++i) x_arr[i] = x[i];
+    measure_func(x_arr, z_arr);
+    for (int i = 0; i < spin_model::N_Z; ++i) inner_z[i] = z_arr[i];
 
-    // 构建观测向量 (YPD)
+    // 连续化 (把观测调整到离 EKF 预测最近，避免 ±π 跳变)
     VectorZ z;
-    z[spin_model::YAW] = obs.z[obs::YAW];
+    z[spin_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
     z[spin_model::PITCH] = obs.z[obs::PITCH];
     z[spin_model::DIS] = obs.z[obs::DIST];
-    z[spin_model::ARMOR_YAW] = theta_continuous;  // OUTWARD
+    z[spin_model::ARMOR_YAW] = math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
 
     // 观测更新
-    SpinMeasure measure_func(dz_);
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
     ekf_.update_forward(measure_func, z, R);
 
-    // 限制半径范围
+    // 后处理：限制半径和高度差范围
     x = ekf_.get_x();
     double r_min = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min");
     double r_max = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_max");
-    if (x[spin_model::R] < r_min) {
-        x[spin_model::R] = r_min;
-        ekf_.set_x(x);
-    } else if (x[spin_model::R] > r_max) {
-        x[spin_model::R] = r_max;
-        ekf_.set_x(x);
-    }
-
-    // 更新高度差 (当前装甲板相对于中心)
-    x = ekf_.get_x();
-    dz_ = obs.pos.z() - x[spin_model::ZC];
-    // 限制高度差范围
     double dz_max = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.dz_abs_max");
-    dz_ = std::clamp(dz_, -dz_max, dz_max);
+
+    x[spin_model::R] = std::clamp(x[spin_model::R], r_min, r_max);
+    x[spin_model::DZ] = std::clamp(x[spin_model::DZ], -dz_max, dz_max);
+    another_r_ = std::clamp(another_r_, r_min, r_max);  // 同时约束 another_r_
+
+    // 强制 Z 轴速度为 0 (PnP 在 Z 方向误差大)
+    if (runtime_param::get_param<bool>("AutoAim.Predictor.SpinEKF.force_zero_vz")) {
+        x[spin_model::VZ] = 0;
+    }
+    ekf_.set_x(x);
 
     // 更新陀螺等级
     update_spin_level();
 
-    // 强制 Z 轴速度为 0 (PnP 在 Z 方向误差大)
-    if (runtime_param::get_param<bool>("AutoAim.Predictor.SpinEKF.force_zero_vz")) {
-        x = ekf_.get_x();
-        x[spin_model::VZ] = 0;
-        ekf_.set_x(x);
-    }
-
-    last_yaw_ = armor_yaw_outward;
+    last_yaw_ = orient_yaw;
     last_update_time_ = timestamp;
 }
 
@@ -144,85 +136,42 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         return;
     }
 
-    // ==================== 双装甲板几何计算 (射线交点法) ====================
-    // 使用 OUTWARD 方向：center = armor - r * n_outward
-    const auto& a0 = armors[0];
-    const auto& a1 = armors[1];
+    // ==================== 双装甲板处理 ====================
+    // 参考 rm.cv.fans/LmtdMotion 设计：
+    // - 不用射线交点法计算半径（对 PnP 误差敏感，会抖）
+    // - 半径让 EKF 自己通过观测慢慢收敛
+    // - 双装甲板时只是降低观测噪声（朝向角更可信）
 
-    Eigen::Vector3d p0 = a0.pos();
-    Eigen::Vector3d p1 = a1.pos();
+    const auto& primary = armors[0];  // 用第一个装甲板（z_to_v 更小，更正对）
 
-    // OUTWARD 方向
-    double yaw0 = a0.observation.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
-    double yaw1 = a1.observation.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
-    Eigen::Vector2d n0(std::cos(yaw0), std::sin(yaw0));
-    Eigen::Vector2d n1(std::cos(yaw1), std::sin(yaw1));
-
-    // 解方程: p0 - r0 * n0 = p1 - r1 * n1
-    Eigen::Vector2d dp(p0.x() - p1.x(), p0.y() - p1.y());
-    double det = n0.x() * (-n1.y()) - (-n1.x()) * n0.y();
-
-    double r0, r1, xc, yc, zc;
-    bool geometry_valid = false;
-
-    if (std::abs(det) > 0.1) {
-        r0 = (dp.x() * (-n1.y()) - (-n1.x()) * dp.y()) / det;
-        r1 = (n0.x() * dp.y() - dp.x() * n0.y()) / det;
-
-        double r_min = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min");
-        double r_max = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_max");
-
-        if (r0 > r_min && r0 < r_max && r1 > r_min && r1 < r_max) {
-            xc = p0.x() - r0 * n0.x();
-            yc = p0.y() - r0 * n0.y();
-            zc = (p0.z() + p1.z()) / 2.0;
-            geometry_valid = true;
-        }
-    }
-
-    // 回退方法
-    if (!geometry_valid) {
-        // 使用 INWARD 方向计算
-        double yaw0_in = a0.observation.z[obs::ARMOR_YAW];
-        double yaw1_in = a1.observation.z[obs::ARMOR_YAW];
-        Eigen::Vector2d n0_in(std::cos(yaw0_in), std::sin(yaw0_in));
-        Eigen::Vector2d n1_in(std::cos(yaw1_in), std::sin(yaw1_in));
-
-        Eigen::Vector2d dn = n1_in - n0_in;
-        double dn_norm = dn.norm();
-        r0 = (dn_norm > 0.1)
-            ? dp.norm() / dn_norm
-            : runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
-        r0 = std::clamp(r0,
-            runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min"),
-            runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_max"));
-        r1 = r0;
-        xc = p0.x() + r0 * n0_in.x();  // center = armor + r * n_inward
-        yc = p0.y() + r0 * n0_in.y();
-        zc = (p0.z() + p1.z()) / 2.0;
-    }
-
-    // ==================== 初始化或更新 ====================
+    // ==================== 初始化 ====================
     if (!initialized_) {
+        double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
+        double primary_theta = primary.observation.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
+
+        // 从装甲板反推中心
+        double xc = primary.pos().x() - init_r * std::cos(primary_theta);
+        double yc = primary.pos().y() - init_r * std::sin(primary_theta);
+
         VectorX x0 = VectorX::Zero();
         x0[spin_model::XC] = xc;
         x0[spin_model::YC] = yc;
-        x0[spin_model::ZC] = zc;
-        x0[spin_model::THETA] = yaw0;  // OUTWARD
-        x0[spin_model::R] = r0;
+        x0[spin_model::ZC] = primary.pos().z();  // 初始 dz=0
+        x0[spin_model::THETA] = primary_theta;
+        x0[spin_model::R] = init_r;
+        x0[spin_model::DZ] = 0;
 
         ekf_.init(x0);
 
-        dz_ = p0.z() - zc;
-        another_dz_ = p1.z() - zc;
-        another_r_ = r1;
+        another_r_ = init_r;  // 两个半径初始相同
+        another_dz_ = 0;
 
         last_update_time_ = timestamp;
         initialized_ = true;
         return;
     }
 
-    // 已初始化：EKF 更新
+    // ==================== EKF 更新 ====================
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
@@ -231,41 +180,38 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     ekf_.predict_forward(predict_func, Q);
 
     // 用主装甲板做观测更新
-    const auto& obs = a0.observation;
-    double armor_yaw_outward = obs.z[obs::ARMOR_YAW] + M_PI;
+    const auto& obs = primary.observation;
+    double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
 
+    // 获取 EKF 内部预测的观测值 (用于连续化)
+    SpinMeasure measure_func;
+    VectorZ inner_z;
     VectorX x = ekf_.get_x();
-    double theta_pred = x[spin_model::THETA];
-    double yaw_continuous = theta_pred + math::angle_diff(theta_pred, armor_yaw_outward);
+    double x_arr[spin_model::N_X], z_arr[spin_model::N_Z];
+    for (int i = 0; i < spin_model::N_X; ++i) x_arr[i] = x[i];
+    measure_func(x_arr, z_arr);
+    for (int i = 0; i < spin_model::N_Z; ++i) inner_z[i] = z_arr[i];
 
+    // 连续化 (把观测调整到离 EKF 预测最近，避免 ±π 跳变)
     VectorZ z;
-    z[spin_model::YAW] = obs.z[obs::YAW];
+    z[spin_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
     z[spin_model::PITCH] = obs.z[obs::PITCH];
     z[spin_model::DIS] = obs.z[obs::DIST];
-    z[spin_model::ARMOR_YAW] = yaw_continuous;
+    z[spin_model::ARMOR_YAW] = math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
 
-    SpinMeasure measure_func(dz_);
-    MatrixZZ R = build_R(obs.z[obs::DIST], a0.z_to_v(), 2);
+    // 双装甲板时观测噪声更小（朝向角更可信）
+    MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);
     ekf_.update_forward(measure_func, z, R);
-
-    // ==================== 几何参数融合 ====================
-    if (geometry_valid) {
-        x = ekf_.get_x();
-        x[spin_model::XC] = xc;
-        x[spin_model::YC] = yc;
-        x[spin_model::ZC] = zc;
-        x[spin_model::R] = r0;
-        another_r_ = r1;
-        dz_ = p0.z() - zc;
-        another_dz_ = p1.z() - zc;
-        ekf_.set_x(x);
-    }
 
     // 后处理
     x = ekf_.get_x();
-    x[spin_model::R] = std::clamp(x[spin_model::R],
-        runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min"),
-        runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_max"));
+    double r_min = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_min");
+    double r_max = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_max");
+    double dz_max = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.dz_abs_max");
+
+    x[spin_model::R] = std::clamp(x[spin_model::R], r_min, r_max);
+    x[spin_model::DZ] = std::clamp(x[spin_model::DZ], -dz_max, dz_max);
+    another_r_ = std::clamp(another_r_, r_min, r_max);  // 同时约束 another_r_
 
     if (runtime_param::get_param<bool>("AutoAim.Predictor.SpinEKF.force_zero_vz")) {
         x[spin_model::VZ] = 0;
@@ -273,7 +219,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     ekf_.set_x(x);
 
     update_spin_level();
-    last_yaw_ = armor_yaw_outward;
+    last_yaw_ = orient_yaw;
     last_update_time_ = timestamp;
 }
 
@@ -283,46 +229,42 @@ void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
     const auto& obs = new_armor.observation;
     // 转换为 OUTWARD
     double armor_yaw_inward = obs.z[obs::ARMOR_YAW];
-    double armor_yaw_outward = armor_yaw_inward + M_PI;
+    double new_theta = armor_yaw_inward + M_PI;  // OUTWARD
 
     VectorX x = ekf_.get_x();
-    double theta_pred = x[spin_model::THETA];
+    double old_theta = x[spin_model::THETA];
+
+    debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+        "Jump: index={}, theta={:.1f}° -> {:.1f}°",
+        jump_index, old_theta * 180.0 / M_PI, new_theta * 180.0 / M_PI);
 
     // 4装甲板: 奇数索引需要交换半径和高度差
     if (armor_num_ == 4 && jump_index % 2 == 1) {
+        debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+            "Before swap: r={:.3f}, another_r={:.3f}, dz={:.3f}, another_dz={:.3f}",
+            x[spin_model::R], another_r_, x[spin_model::DZ], another_dz_);
+
         std::swap(x[spin_model::R], another_r_);
-        std::swap(dz_, another_dz_);
+        std::swap(x[spin_model::DZ], another_dz_);
+
+        debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+            "After swap: r={:.3f}, another_r={:.3f}, dz={:.3f}, another_dz={:.3f}",
+            x[spin_model::R], another_r_, x[spin_model::DZ], another_dz_);
     }
     // 3装甲板 (前哨站): 半径固定，不需要交换
 
-    // 更新朝向角为观测值 (连续化, OUTWARD)
-    x[spin_model::THETA] = theta_pred + math::angle_diff(theta_pred, armor_yaw_outward);
+    // 跳变时必须同时更新 theta 和中心位置，保证几何一致性
+    // 注意: 跳变时不做角度连续化! 直接用新装甲板的朝向
+    double new_xa = obs.pos.x();
+    double new_ya = obs.pos.y();
+    double new_za = obs.pos.z();
+    double new_r = x[spin_model::R];
+    double new_dz = x[spin_model::DZ];
 
-    // 从新装甲板位置推算中心
-    double xa = obs.pos.x();
-    double ya = obs.pos.y();
-    double za = obs.pos.z();
-    double r = x[spin_model::R];
-    double theta = x[spin_model::THETA];
-
-    // OUTWARD: center = armor - r * (cos θ, sin θ)
-    double xc_obs = xa - r * std::cos(theta);
-    double yc_obs = ya - r * std::sin(theta);
-
-    double xc_pred = x[spin_model::XC];
-    double yc_pred = x[spin_model::YC];
-
-    double center_diff = std::sqrt(math::sq(xc_obs - xc_pred) + math::sq(yc_obs - yc_pred));
-
-    // 如果中心偏差过大，重置位置和速度
-    if (center_diff > 0.5) {
-        x[spin_model::XC] = xc_obs;
-        x[spin_model::VX] = 0;
-        x[spin_model::YC] = yc_obs;
-        x[spin_model::VY] = 0;
-        x[spin_model::ZC] = za - dz_;
-        x[spin_model::VZ] = 0;
-    }
+    x[spin_model::XC] = new_xa - new_r * std::cos(new_theta);
+    x[spin_model::YC] = new_ya - new_r * std::sin(new_theta);
+    x[spin_model::ZC] = new_za - new_dz;
+    x[spin_model::THETA] = new_theta;
 
     ekf_.set_x(x);
 }
@@ -366,6 +308,7 @@ SpinMotion::MatrixXX SpinMotion::build_Q(double dt) const {
     double q_theta = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_theta");
     double q_omega = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_omega");
     double q_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_r");
+    double q_dz = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.q_dz");
 
     // 位置-速度块 (x, y, z)
     Q(spin_model::XC, spin_model::XC) = q_pos * dt;
@@ -379,8 +322,9 @@ SpinMotion::MatrixXX SpinMotion::build_Q(double dt) const {
     Q(spin_model::THETA, spin_model::THETA) = q_theta * dt;
     Q(spin_model::OMEGA, spin_model::OMEGA) = q_omega * dt;
 
-    // 半径
+    // 半径和高度差
     Q(spin_model::R, spin_model::R) = q_r * dt;
+    Q(spin_model::DZ, spin_model::DZ) = q_dz * dt;
 
     return Q;
 }
@@ -446,7 +390,7 @@ Eigen::Vector3d SpinMotion::predict_armor_pos(int armor_idx, double dt) const {
         height_diff = another_dz_;
     } else {
         r = x[spin_model::R];
-        height_diff = dz_;
+        height_diff = x[spin_model::DZ];  // 从状态向量获取
     }
 
     // 计算装甲板位置 (OUTWARD): armor = center + r * (cos θ, sin θ)
@@ -467,45 +411,17 @@ Eigen::Vector3d SpinMotion::get_velocity() const {
 }
 
 std::vector<Eigen::Vector3d> SpinMotion::compute_all_armors_from_observation(
-    const Eigen::Vector3d& observed_pos,
-    double observed_theta) const {
+    const Eigen::Vector3d& /* observed_pos */,
+    double /* observed_theta */) const {
+    // rm.cv.fans 原版设计: 直接从 EKF 状态生成所有装甲板
+    // 不需要从观测反推！更稳定，避免飘走
 
     std::vector<Eigen::Vector3d> result;
     result.reserve(armor_num_);
 
-    // 获取几何参数
-    VectorX x = ekf_.get_x();
-    double r0 = x[spin_model::R];     // 当前装甲板半径
-    double r1 = another_r_;           // 另一个半径
-    double z0_diff = dz_;             // 当前高度差
-    double z1_diff = another_dz_;     // 另一个高度差
-
-    // 从观测装甲板反推中心 (OUTWARD): center = armor - r * (cos θ, sin θ)
-    double xc = observed_pos.x() - r0 * std::cos(observed_theta);
-    double yc = observed_pos.y() - r0 * std::sin(observed_theta);
-    double zc = observed_pos.z() - z0_diff;  // 中心 z = 装甲板 z - 高度差
-
-    // 计算所有装甲板位置
-    double angle_step = 2.0 * M_PI / armor_num_;
-    double current_r = r0;
-    double current_dz = z0_diff;
-
+    // 直接用 predict_armor_pos，和 rm.cv.fans 的 predict_armors 一样
     for (int i = 0; i < armor_num_; ++i) {
-        double theta_i = observed_theta + i * angle_step;
-
-        // 装甲板位置 (OUTWARD): armor = center + r * (cos θ, sin θ)
-        double xa = xc + current_r * std::cos(theta_i);
-        double ya = yc + current_r * std::sin(theta_i);
-        double za = zc + current_dz;
-
-        result.emplace_back(xa, ya, za);
-
-        // 4装甲板时交替切换半径和高度差
-        if (armor_num_ == 4) {
-            std::swap(current_r, r1);
-            current_dz = -current_dz;  // 高度差取反
-            std::swap(current_dz, z1_diff);
-        }
+        result.push_back(predict_armor_pos(i, 0));  // dt=0，当前时刻
     }
 
     return result;
@@ -514,7 +430,6 @@ std::vector<Eigen::Vector3d> SpinMotion::compute_all_armors_from_observation(
 void SpinMotion::reset() {
     initialized_ = false;
     spin_level_ = SpinLevel::NONE;
-    dz_ = 0;
     another_dz_ = 0;
     another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
 }
