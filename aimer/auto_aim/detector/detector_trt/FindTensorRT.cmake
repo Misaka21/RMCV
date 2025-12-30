@@ -13,8 +13,12 @@
 
 include(FindPackageHandleStandardArgs)
 
-# 查找 CUDA
-find_package(CUDA REQUIRED)
+# 查找 CUDA (不 REQUIRED，找不到则 TensorRT 也找不到)
+find_package(CUDA QUIET)
+if(NOT CUDA_FOUND)
+    set(TensorRT_FOUND FALSE)
+    return()
+endif()
 
 # 确定搜索路径
 set(_TensorRT_SEARCH_PATHS)
