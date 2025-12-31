@@ -145,23 +145,13 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
             most_like_index, x[lmtd_model::R], another_r_);
     }
 
-    // 切板时必须同时更新 theta 和中心位置，保证几何一致性
-    // 否则 predict_armor_pos 会产生跳变（冲过去再缓慢回来）
-    //
-    // 几何关系 (OUTWARD): armor = center + r * (cos θ, sin θ)
-    // 反推中心: center = armor - r * (cos θ, sin θ)
-    double new_xa = obs.pos.x();
-    double new_ya = obs.pos.y();
-    double new_r = x[lmtd_model::R];  // 使用交换后的 r
-
-    x[lmtd_model::XC] = new_xa - new_r * std::cos(new_orient);
-    x[lmtd_model::YC] = new_ya - new_r * std::sin(new_orient);
+    // rm.cv.fans 关键设计：跳变时只更新 theta，不更新中心位置 xc, yc
+    // 让 EKF 通过后续观测自己收敛中心位置，避免 PnP 误差直接影响中心
     x[lmtd_model::THETA] = new_orient;
 
     debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
-        "Jump: center=({:.3f}, {:.3f}), theta={:.1f}°, r={:.3f}",
-        x[lmtd_model::XC], x[lmtd_model::YC],
-        new_orient * 180.0 / M_PI, new_r);
+        "Jump: theta={:.1f}°, r={:.3f} (center unchanged, let EKF converge)",
+        new_orient * 180.0 / M_PI, x[lmtd_model::R]);
 
     ekf_.set_x(x);
 
@@ -386,10 +376,12 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 void LmtdMotion::update_spin_level() {
     double omega = std::abs(get_omega());
 
-    double activate_1 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top1_activate_w");
-    double deactivate_1 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top1_deactivate_w");
-    double activate_2 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top2_activate_w");
-    double deactivate_2 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top2_deactivate_w");
+    // 参数单位是度/秒，需要转换成弧度/秒 (与 rm.cv.fans 一致)
+    constexpr double DEG_TO_RAD = M_PI / 180.0;
+    double activate_1 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top1_activate_w") * DEG_TO_RAD;
+    double deactivate_1 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top1_deactivate_w") * DEG_TO_RAD;
+    double activate_2 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top2_activate_w") * DEG_TO_RAD;
+    double deactivate_2 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top2_deactivate_w") * DEG_TO_RAD;
 
     if (top_level_ == 0) {
         if (omega >= activate_1) top_level_ = 1;

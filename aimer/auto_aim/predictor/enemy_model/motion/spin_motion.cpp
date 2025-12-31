@@ -253,18 +253,13 @@ void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
     }
     // 3装甲板 (前哨站): 半径固定，不需要交换
 
-    // 跳变时必须同时更新 theta 和中心位置，保证几何一致性
-    // 注意: 跳变时不做角度连续化! 直接用新装甲板的朝向
-    double new_xa = obs.pos.x();
-    double new_ya = obs.pos.y();
-    double new_za = obs.pos.z();
-    double new_r = x[spin_model::R];
-    double new_dz = x[spin_model::DZ];
-
-    x[spin_model::XC] = new_xa - new_r * std::cos(new_theta);
-    x[spin_model::YC] = new_ya - new_r * std::sin(new_theta);
-    x[spin_model::ZC] = new_za - new_dz;
+    // rm.cv.fans 关键设计：跳变时只更新 theta，不更新中心位置 xc, yc, zc
+    // 让 EKF 通过后续观测自己收敛中心位置，避免 PnP 误差直接影响中心
     x[spin_model::THETA] = new_theta;
+
+    debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+        "Jump: theta={:.1f}°, r={:.3f} (center unchanged, let EKF converge)",
+        new_theta * 180.0 / M_PI, x[spin_model::R]);
 
     ekf_.set_x(x);
 }
@@ -322,9 +317,9 @@ SpinMotion::MatrixXX SpinMotion::build_Q(double dt) const {
     Q(spin_model::THETA, spin_model::THETA) = q_theta * dt;
     Q(spin_model::OMEGA, spin_model::OMEGA) = q_omega * dt;
 
-    // 半径和高度差
-    Q(spin_model::R, spin_model::R) = q_r * dt;
-    Q(spin_model::DZ, spin_model::DZ) = q_dz * dt;
+    // 半径和高度差 (rm.cv.fans: q_r 不乘 dt)
+    Q(spin_model::R, spin_model::R) = q_r;
+    Q(spin_model::DZ, spin_model::DZ) = q_dz;
 
     return Q;
 }
@@ -342,16 +337,12 @@ SpinMotion::MatrixZZ SpinMotion::build_R(double distance, double z_to_v, int obs
         ? runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_armor_yaw_double")
         : runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.r_armor_yaw_single");
 
-    // 侧面观看时距离噪声更大 (陀螺模式尤其重要)
-    // z_to_v 越大越侧面，log(|z_to_v| + 1) + 1 作为缩放因子
-    double side_factor = std::log(std::abs(z_to_v) + 1) + 1;
-
     // 角度噪声: 与距离无关
     R(spin_model::YAW, spin_model::YAW) = r_angle;
     R(spin_model::PITCH, spin_model::PITCH) = r_angle;
 
-    // 距离噪声: ∝ d² × side_factor
-    R(spin_model::DIS, spin_model::DIS) = r_dis_k * distance * distance * side_factor;
+    // 距离噪声: ∝ dis^4 (与 rm.cv.fans 一致)
+    R(spin_model::DIS, spin_model::DIS) = r_dis_k * std::pow(distance, 4.0);
 
     // 装甲板朝向噪声
     R(spin_model::ARMOR_YAW, spin_model::ARMOR_YAW) = r_armor_yaw;
