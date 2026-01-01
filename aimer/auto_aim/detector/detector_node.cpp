@@ -14,6 +14,7 @@
 #include "detector_node.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
+#include "plugin/watchdog/watchdog.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim {
@@ -37,6 +38,7 @@ void run_sync_loop(detector::DetectorInterface* detector) {
     debug::print(debug::PrintMode::INFO, "DetectorNode", "Running in sync mode");
 
     while (running->get()) {
+        rmcv::heartbeat("detector");
         try {
             auto frame = sub.pop_for(1000);
             if (frame.image.empty()) continue;
@@ -112,6 +114,7 @@ void run_async_loop(detector::DetectorInterface* detector) {
         debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread started");
 
         while (running->get()) {
+        rmcv::heartbeat("detector");
             try {
                 auto frame = sub.pop_for(1000);
                 if (frame.image.empty()) continue;
@@ -142,6 +145,7 @@ void run_async_loop(detector::DetectorInterface* detector) {
 
     // Pop 主循环
     while (running->get()) {
+        rmcv::heartbeat("detector");
         if (detector->queue_size() == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;

@@ -20,6 +20,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
+#include "plugin/watchdog/watchdog.hpp"
 #include "hik_cam/hik_camera.hpp"
 #include "serial/serial_thread.hpp"
 #include "umt/umt.hpp"
@@ -284,6 +285,7 @@ void start_hardware_node() {
         const int MAX_CONSECUTIVE_ERRORS = 3;  // 连续失败3次后退出
 
         while (true) {
+            rmcv::heartbeat("hardware");
             try {
                 // Capture image
                 cv::Mat& img = cam.capture();
