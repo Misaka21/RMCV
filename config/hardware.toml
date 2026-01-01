@@ -68,6 +68,8 @@
     aim_mode = 1
     #@bool 是否允许射击
     allow_fire = true
+    #@bool 预瞄锁定 (模拟右键按下)
+    aiming_lock = false
 
 [TimeSync]
     #@int 相机-IMU时间偏移 (微秒)

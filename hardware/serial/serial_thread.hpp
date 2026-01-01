@@ -46,6 +46,7 @@ struct SerialReceiveData {
     // 模式控制
     uint8_t aim_mode;     // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
     bool allow_fire;      // 是否允许射击
+    bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 
     // 时间戳 (上位机接收时刻，微秒)
     int64_t recv_time_us = 0;
@@ -54,7 +55,7 @@ struct SerialReceiveData {
         : yaw(0.0f), pitch(0.0f), roll(0.0f)
         , robot_id(0), enemy_color(0)
         , bullet_speed(15.0f)
-        , aim_mode(0), allow_fire(false)
+        , aim_mode(0), allow_fire(false), aiming_lock(false)
         , recv_time_us(0) {}
 };
 

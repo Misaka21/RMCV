@@ -187,6 +187,7 @@ std::optional<serial::SerialReceiveData> interpolate_serial_data(
     result.bullet_speed = nearest.bullet_speed;
     result.aim_mode = nearest.aim_mode;
     result.allow_fire = nearest.allow_fire;
+    result.aiming_lock = nearest.aiming_lock;
 
     // 时间戳设为目标时间
     result.recv_time_us = target_time_us;
@@ -238,6 +239,7 @@ void start_hardware_node() {
             fake_data.aim_mode = static_cast<uint8_t>(
                 static_param::get_param<int64_t>(config, "Serial.fake_data", "aim_mode"));
             fake_data.allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
+            fake_data.aiming_lock = static_param::get_param<bool>(config, "Serial.fake_data", "aiming_lock");
         }
 
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Serial: {} @ {}", port_name, baudrate);

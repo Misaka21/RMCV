@@ -47,9 +47,22 @@ FireCommand FireController::control(
     gimbal_state_.update(snapshot.self_state.q_imu, dt);
     last_time_ = current_time;
 
+    // 1.5 处理预瞄锁定 (右键控制)
+    if (snapshot.self_state.aiming_lock) {
+        // 右键按下：锁定当前目标
+        if (last_selection_.has_target && !target_selector_.is_locked()) {
+            target_selector_.force_lock(last_selection_.target_id);
+        }
+    } else {
+        // 右键释放：解除锁定
+        if (target_selector_.is_locked()) {
+            target_selector_.unlock();
+        }
+    }
+
     // 2. 目标选择 (用初始延迟估计)
     double prediction_dt = latency.prediction_latency();
-    TargetSelection selection = target_selector_.select(snapshot, prediction_dt);
+    TargetSelection selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
     last_selection_ = selection;
 
     // 3. 无目标处理

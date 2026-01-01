@@ -37,6 +37,9 @@ struct RobotState {
     // 是否允许射击
     bool allow_fire = false;
 
+    // 预瞄锁定 (右键按下=true, 释放=false)
+    bool aiming_lock = false;
+
     // 时间戳 (微秒, steady_clock)
     int64_t timestamp_us = 0;
 
@@ -52,6 +55,7 @@ struct RobotState {
             state.enemy_color = s.enemy_color;
             state.aim_mode = s.aim_mode;
             state.allow_fire = s.allow_fire;
+            state.aiming_lock = s.aiming_lock;
         }
         state.timestamp_us = frame.timestamp_us;
         return state;
