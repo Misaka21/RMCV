@@ -79,11 +79,22 @@ BattlefieldSnapshot EnemyPredictor::export_snapshot() {
 
     const auto& table = observer_.table();
 
+    // 用于选择主目标
+    int best_target_id = -1;
+    double best_confidence = -1;
+
     // 从模型导出各车辆状态
     for (int i = 1; i < MAX_TARGETS; ++i) {
         if (enemy_models_[i] && enemy_models_[i]->alive()) {
             snapshot.vehicles[i] = enemy_models_[i]->predict(current_time_);
             snapshot.set_valid(i, true);
+
+            // 选择置信度最高的作为默认主目标
+            // 注意: 实际应由 FireControl 根据代价函数选择
+            if (snapshot.vehicles[i].confidence > best_confidence) {
+                best_confidence = snapshot.vehicles[i].confidence;
+                best_target_id = i;
+            }
         }
 
         // 标记当前帧检测到的
@@ -91,6 +102,9 @@ BattlefieldSnapshot EnemyPredictor::export_snapshot() {
             snapshot.set_detected(i, true);
         }
     }
+
+    // 设置默认主目标 (FireControl 可以覆盖)
+    snapshot.primary_target_id = best_target_id;
 
     return snapshot;
 }

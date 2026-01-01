@@ -177,12 +177,16 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
         spin_.omega = lmtd_motion_.get_omega();
         spin_.phase = lmtd_motion_.get_theta();
         spin_.radius = lmtd_motion_.get_radius();
+        spin_.radius_2 = lmtd_motion_.get_another_radius();
         spin_.level = lmtd_motion_.get_spin_level();
+        spin_.active = (spin_.level >= SpinLevel::LOW) && lmtd_motion_.valid();
     } else {
         spin_.omega = spin_motion_.get_omega();
         spin_.phase = spin_motion_.get_theta();
         spin_.radius = spin_motion_.get_radius();
+        spin_.radius_2 = spin_motion_.get_another_radius();
         spin_.update_level(spin_.omega);
+        spin_.active = (spin_.level >= SpinLevel::LOW) && spin_motion_.valid();
     }
 
     // 6. 更新敌方颜色 (用于绘图)
@@ -355,6 +359,10 @@ VehicleState VehicleModel::predict(double timestamp) const {
             double view_yaw = std::atan2(as.position.y(), as.position.x());
             double angle_diff = std::abs(math::reduced_angle(armor_yaw - view_yaw - M_PI));
             as.score = std::cos(angle_diff);
+
+            // 装甲板类型和朝向角
+            as.type = correct_armor_type(ArmorType::SMALL, enemy_type_);
+            as.z_to_v = angle_diff;
 
             if (as.score > local_best_score) {
                 local_best_score = as.score;
