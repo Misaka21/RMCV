@@ -142,16 +142,13 @@ int main(int argc, char* argv[]) {
         rmcv_bag::start_recorder_node();
     });
 
-    debug::print(debug::PrintMode::INFO, "Main", "All threads started");
+    // 启动看门狗节点线程
+    std::string heartbeat_file = debug::get_session_path() + "/heartbeat";
+    std::thread watchdog_thread([heartbeat_file]() {
+        watchdog::start_watchdog_node(heartbeat_file, 5000, 1000);
+    });
 
-    // 启动看门狗节点
-    watchdog::WatchdogNode watchdog;
-    watchdog.start(
-        {"hardware", "detector", "predictor"},  // 监控的节点
-        5000,   // 超时 5 秒
-        1000,   // 每秒检查一次
-        debug::get_session_path() + "/heartbeat"  // 心跳文件放到日志目录
-    );
+    debug::print(debug::PrintMode::INFO, "Main", "All threads started");
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 系统启动完成，按 Ctrl+C 退出\n");
 
     // 主线程等待
@@ -160,7 +157,8 @@ int main(int argc, char* argv[]) {
     }
 
     // 停止看门狗
-    watchdog.stop();
+    auto wd_running = umt::BasicObjManager<bool>::find("watchdog_running");
+    if (wd_running) wd_running->get() = false;
 
     // 等待线程结束
     fmt::print(fmt::fg(fmt::color::yellow), "[INFO] 等待线程结束...\n");
@@ -175,6 +173,9 @@ int main(int argc, char* argv[]) {
     }
     if (recorder_thread.joinable()) {
         recorder_thread.join();
+    }
+    if (watchdog_thread.joinable()) {
+        watchdog_thread.join();
     }
 
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 程序正常退出\n");
