@@ -287,7 +287,10 @@
     fire_advance = 0.03
 
 [AutoAim.FireControl.Trajectory]
-    #@string 求解器类型: "analytic_linear" (解析解+Ceres,快), "rk4_linear" (RK4+线性阻力), "rk4_quadratic" (RK4+二次阻力,吊射推荐)
+    #@string 求解器类型: 
+    #   "analytic_linear" (解析解+Ceres,快), 
+    #   "rk4_linear" (RK4+线性阻力), 
+    #   "rk4_quadratic" (RK4+二次阻力,吊射推荐)
     solver = "analytic_linear"
     #@string 阻力模型 (仅RK4生效): "linear" 或 "quadratic"
     drag_model = "quadratic"
@@ -307,7 +310,7 @@
     rk4_tolerance = 0.001
 
 [AutoAim.FireControl.TargetSelector]
-    # ========== 新策略参数 (rm.cv.fans 风格) ==========
+    # ========== 新策略参数==========
     #@double 目标保持时间 (s)，目标消失后等待此时间再切换
     keep_time = 0.1
     #@double 最大有效角度 (rad, 约70°)，超过此角度的装甲板不考虑
