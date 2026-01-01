@@ -71,7 +71,9 @@ namespace runtime_param {
 
     void ParamManager::load_and_update(const std::string &param_file_path) {
         using namespace std::chrono_literals;
-        while (true) {
+        auto running = umt::BasicObjManager<bool>::find_or_create("param_running", true);
+
+        while (running->get()) {
             try {
                 const auto table =
                         toml::parse_file(std::string(CONFIG_DIR) + "/" + param_file_path);
@@ -86,6 +88,7 @@ namespace runtime_param {
             }
             std::this_thread::sleep_for(1s);
         }
+        debug::print(debug::PrintMode::INFO, "param", "参数热重载线程退出");
     }
 
     void ParamManager::parse(const toml::node &node, const std::string &prefix) {

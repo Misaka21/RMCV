@@ -26,11 +26,13 @@ void signal_handler(int sig) {
     g_running = false;
 
     // 通知所有线程停止
+    auto param_running = umt::BasicObjManager<bool>::find_or_create("param_running", false);
     auto hw_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
     auto det_running = umt::BasicObjManager<bool>::find_or_create("detector_running", false);
     auto pred_running = umt::BasicObjManager<bool>::find_or_create("predictor_running", false);
     auto rec_running = umt::BasicObjManager<bool>::find_or_create("recorder_running", false);
     auto wd_running = umt::BasicObjManager<bool>::find_or_create("watchdog_running", false);
+    param_running->get() = false;
     hw_running->get() = false;
     det_running->get() = false;
     pred_running->get() = false;
@@ -89,11 +91,10 @@ int main(int argc, char* argv[]) {
             "======================================================================\n");
     }
 
-    // 启动运行时参数热重载线程 (内部有无限循环，必须在单独线程运行)
+    // 启动运行时参数热重载线程
     std::thread param_thread([]() {
         runtime_param::parameter_run("aimer.toml");
     });
-    param_thread.detach();  // 分离线程，程序退出时自动结束
 
     // 等待参数加载完成
     runtime_param::wait_for_param("ok");
@@ -162,8 +163,15 @@ int main(int argc, char* argv[]) {
     auto wd_running = umt::BasicObjManager<bool>::find("watchdog_running");
     if (wd_running) wd_running->get() = false;
 
+    // 停止参数热重载
+    auto param_running = umt::BasicObjManager<bool>::find("param_running");
+    if (param_running) param_running->get() = false;
+
     // 等待线程结束
     fmt::print(fmt::fg(fmt::color::yellow), "[INFO] 等待线程结束...\n");
+    if (param_thread.joinable()) {
+        param_thread.join();
+    }
     if (hardware_thread.joinable()) {
         hardware_thread.join();
     }
