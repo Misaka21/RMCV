@@ -2,9 +2,13 @@
  * @file target_selector.cpp
  * @brief 目标选择器实现
  *
- * 评分: 面积 + 静止 + 距离 + 类型 + 置信度
- * 切换: 迟滞比较，防止震荡
- * 参数: 通过 runtime_param::get_param 实时获取
+ * 选择策略 (参考 rm.cv.fans):
+ *   1. 选敌人：最靠近图像中心 (操作手意图)
+ *   2. 选装甲板：电机转动代价最小 (swing_cost)
+ *
+ * 锁定机制:
+ *   - 当有目标且可见时，保持当前目标
+ *   - 当目标丢失超过 keep_time 后才切换
  */
 
 #include "target_selector.hpp"
@@ -14,148 +18,153 @@
 #include <limits>
 
 #include "plugin/param/runtime_parameter.hpp"
-#include "aimer/auto_aim/common/types.hpp"  // 装甲板尺寸常量
 
 namespace autoaim::fire_control {
 
+// ============================================================================
+// 主选择函数
+// ============================================================================
+
 TargetSelection TargetSelector::select(
     const predictor::BattlefieldSnapshot& snapshot,
+    const GimbalState& gimbal,
     double dt)
 {
-    TargetSelection best;
-    double best_score = -std::numeric_limits<double>::infinity();
+    TargetSelection result;
+    double current_time = snapshot.timestamp;
 
     // 读取参数
-    double max_angle = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.max_angle");
-    double area_filter_ratio = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.area_filter_ratio");
+    double keep_time = runtime_param::get_param<double>(
+        "AutoAim.FireControl.TargetSelector.keep_time"
+    );
+    double max_angle = runtime_param::get_param<double>(
+        "AutoAim.FireControl.TargetSelector.max_angle"
+    );
 
-    // 第一遍：找最大面积 (用于过滤和归一化)
-    double max_area = 0;
-    snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
-        if (!vehicle.valid || vehicle.confidence < 0.1) return;
-        for (int i = 0; i < vehicle.armor_count; ++i) {
-            const auto& armor = vehicle.armors[i];
-            if (!armor.visible && !vehicle.spin.active) continue;
-            if (std::abs(armor.z_to_v) > max_angle) continue;
-
-            double area = compute_projected_area(armor);
-            max_area = std::max(max_area, area);
-        }
-    });
-
-    if (max_area < 1e-6) {
-        // 没有有效目标
-        current_target_id_ = -1;
-        current_armor_idx_ = -1;
-        current_score_ = 0;
-        return best;
-    }
-
-    // 如果有强制目标，只考虑该目标
+    // ========== 1. 预瞄锁定优先 ==========
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
-        int armor_idx = select_best_armor(vehicle, max_area);
+        int armor_idx = select_best_armor(vehicle, gimbal, dt);
 
         if (armor_idx >= 0) {
             const auto& armor = vehicle.armors[armor_idx];
-            best.has_target = true;
-            best.target_id = forced_target_id_;
-            best.armor_idx = armor_idx;
-            best.vehicle = &vehicle;
-            best.armor = &armor;
-            best.priority = compute_score(vehicle, armor, max_area);
-            best.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+            result.has_target = true;
+            result.target_id = forced_target_id_;
+            result.armor_idx = armor_idx;
+            result.vehicle = &vehicle;
+            result.armor = &armor;
+            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
 
             current_target_id_ = forced_target_id_;
             current_armor_idx_ = armor_idx;
-            current_score_ = best.priority;
-            return best;
+            last_seen_time_ = current_time;
+            return result;
         }
     }
 
-    // 记录当前目标的评分 (用于迟滞比较)
-    double current_target_best_score = -std::numeric_limits<double>::infinity();
-    TargetSelection current_selection;
+    // ========== 2. 检查当前目标是否还有效 ==========
+    bool current_target_valid = false;
+    if (current_target_id_ >= 0 && snapshot.is_valid(current_target_id_)) {
+        const auto& vehicle = snapshot.vehicles[current_target_id_];
+        int armor_idx = select_best_armor(vehicle, gimbal, dt);
 
-    // 第二遍：评分并选择
+        if (armor_idx >= 0) {
+            current_target_valid = true;
+            last_seen_time_ = current_time;
+
+            // 当前目标仍然有效，保持追踪
+            const auto& armor = vehicle.armors[armor_idx];
+            result.has_target = true;
+            result.target_id = current_target_id_;
+            result.armor_idx = armor_idx;
+            result.vehicle = &vehicle;
+            result.armor = &armor;
+            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+
+            current_armor_idx_ = armor_idx;
+        }
+    }
+
+    // ========== 3. 如果当前目标有效，检查是否在保持期内 ==========
+    if (current_target_valid) {
+        return result;  // 继续追踪当前目标
+    }
+
+    // 当前目标无效，检查是否在保持期内
+    if (current_target_id_ >= 0 && (current_time - last_seen_time_) < keep_time) {
+        // 在保持期内，不切换目标，返回空结果
+        // 这样 FireController 会使用上次的预测继续追踪
+        return result;
+    }
+
+    // ========== 4. 需要选择新目标：选最靠近中心的敌人 ==========
+    int best_target_id = -1;
+    double min_center_dist = std::numeric_limits<double>::infinity();
+
     snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
         if (!vehicle.valid || vehicle.confidence < 0.1) return;
 
-        bool is_current_target = (id == current_target_id_);
+        // 找该敌人最近中心的装甲板
+        for (int i = 0; i < vehicle.armor_count; ++i) {
+            const auto& armor = vehicle.armors[i];
 
-        // 选择该目标的最佳装甲板
-        int armor_idx = select_best_armor(vehicle, max_area);
-        if (armor_idx < 0) return;
+            // 跳过不可见的 (陀螺模式除外)
+            if (!armor.visible && !vehicle.spin.active) continue;
 
-        const auto& armor = vehicle.armors[armor_idx];
-        double score = compute_score(vehicle, armor, max_area);
+            // 角度过滤
+            if (std::abs(armor.z_to_v) > max_angle) continue;
 
-        // 记录当前跟踪目标的信息
-        if (is_current_target && score > current_target_best_score) {
-            current_target_best_score = score;
-            current_selection.has_target = true;
-            current_selection.target_id = id;
-            current_selection.armor_idx = armor_idx;
-            current_selection.vehicle = &vehicle;
-            current_selection.armor = &armor;
-            current_selection.priority = score;
-            current_selection.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
-        }
+            // 计算到中心的距离
+            Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
+            double dist = compute_center_distance(pos, gimbal);
 
-        // 更新全局最佳
-        if (score > best_score) {
-            best_score = score;
-            best.has_target = true;
-            best.target_id = id;
-            best.armor_idx = armor_idx;
-            best.vehicle = &vehicle;
-            best.armor = &armor;
-            best.priority = score;
-            best.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+            if (dist < min_center_dist) {
+                min_center_dist = dist;
+                best_target_id = id;
+            }
         }
     });
 
-    // 迟滞比较：是否切换目标
-    if (best.has_target && current_selection.has_target) {
-        if (best.target_id != current_target_id_) {
-            // 新目标，检查是否应该切换
-            if (!should_switch_target(best.priority, current_selection.priority)) {
-                // 差距不够大，继续跟踪当前目标
-                best = current_selection;
-            }
-        } else if (best.armor_idx != current_armor_idx_) {
-            // 同一目标，不同装甲板
-            // 找当前装甲板的评分
-            const auto& current_armor = best.vehicle->armors[current_armor_idx_];
-            double current_armor_score = compute_score(*best.vehicle, current_armor, max_area);
+    // ========== 5. 找到了新目标 ==========
+    if (best_target_id >= 0) {
+        const auto& vehicle = snapshot.vehicles[best_target_id];
+        int armor_idx = select_best_armor(vehicle, gimbal, dt);
 
-            if (!should_switch_armor(best.priority, current_armor_score)) {
-                // 差距不够大，继续跟踪当前装甲板
-                best.armor_idx = current_armor_idx_;
-                best.armor = &current_armor;
-                best.priority = current_armor_score;
-                best.predicted_pos = best.vehicle->predict_armor_position(current_armor_idx_, dt);
-            }
+        if (armor_idx >= 0) {
+            const auto& armor = vehicle.armors[armor_idx];
+            result.has_target = true;
+            result.target_id = best_target_id;
+            result.armor_idx = armor_idx;
+            result.vehicle = &vehicle;
+            result.armor = &armor;
+            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+
+            current_target_id_ = best_target_id;
+            current_armor_idx_ = armor_idx;
+            last_seen_time_ = current_time;
         }
-    }
-
-    // 更新状态
-    if (best.has_target) {
-        current_target_id_ = best.target_id;
-        current_armor_idx_ = best.armor_idx;
-        current_score_ = best.priority;
     } else {
+        // 没有目标
         current_target_id_ = -1;
         current_armor_idx_ = -1;
-        current_score_ = 0;
     }
 
-    return best;
+    return result;
 }
 
-void TargetSelector::force_target(int target_id)
+// ============================================================================
+// 锁定控制
+// ============================================================================
+
+void TargetSelector::force_lock(int target_id)
 {
     forced_target_id_ = target_id;
+}
+
+void TargetSelector::unlock()
+{
+    forced_target_id_ = -1;
+    // 不清除 current_target_id_，保持当前追踪
 }
 
 void TargetSelector::clear_target()
@@ -163,22 +172,108 @@ void TargetSelector::clear_target()
     forced_target_id_ = -1;
     current_target_id_ = -1;
     current_armor_idx_ = -1;
-    current_score_ = 0;
+    last_seen_time_ = 0;
 }
 
+// ============================================================================
+// 代价计算
+// ============================================================================
+
+std::pair<double, double> TargetSelector::pos_to_yaw_pitch(const Eigen::Vector3d& pos) const
+{
+    // 假设 pos 是世界坐标系下的位置 (相对于云台)
+    // yaw = atan2(y, x)
+    // pitch = atan2(-z, √(x² + y²))  (向下为正)
+    double yaw = std::atan2(pos.y(), pos.x());
+    double pitch = std::atan2(-pos.z(), std::hypot(pos.x(), pos.y()));
+    return {yaw, pitch};
+}
+
+double TargetSelector::compute_center_distance(
+    const Eigen::Vector3d& pos,
+    const GimbalState& gimbal) const
+{
+    // 图像中心 = 当前云台指向
+    // 距离 = 目标 yaw/pitch 与当前云台的角度差
+    auto [yaw, pitch] = pos_to_yaw_pitch(pos);
+    double delta_yaw = GimbalState::normalize_angle(yaw - gimbal.yaw);
+    double delta_pitch = pitch - gimbal.pitch;
+
+    // 欧几里得距离 (角度空间)
+    return std::hypot(delta_yaw, delta_pitch);
+}
+
+double TargetSelector::compute_swing_cost(
+    const Eigen::Vector3d& pos,
+    const GimbalState& gimbal) const
+{
+    // 电机转动代价 = √(Δyaw² + Δpitch²)
+    // 与 compute_center_distance 相同，但语义不同
+    return compute_center_distance(pos, gimbal);
+}
+
+// ============================================================================
+// 装甲板选择
+// ============================================================================
+
+int TargetSelector::select_best_armor(
+    const predictor::VehicleState& vehicle,
+    const GimbalState& gimbal,
+    double dt) const
+{
+    // 读取参数
+    double max_angle = runtime_param::get_param<double>(
+        "AutoAim.FireControl.TargetSelector.max_angle"
+    );
+
+    int best_idx = -1;
+    double min_swing_cost = std::numeric_limits<double>::infinity();
+
+    for (int i = 0; i < vehicle.armor_count; ++i) {
+        const auto& armor = vehicle.armors[i];
+
+        // 跳过不可见的 (陀螺模式除外)
+        if (!armor.visible && !vehicle.spin.active) continue;
+
+        // 角度过滤 (侧面装甲板不打)
+        if (std::abs(armor.z_to_v) > max_angle) continue;
+
+        // 预测位置
+        Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
+
+        // 计算转动代价
+        double cost = compute_swing_cost(pos, gimbal);
+
+        if (cost < min_swing_cost) {
+            min_swing_cost = cost;
+            best_idx = i;
+        }
+    }
+
+    return best_idx;
+}
+
+bool TargetSelector::should_keep_target(int target_id, double current_time) const
+{
+    if (target_id != current_target_id_) return false;
+
+    double keep_time = runtime_param::get_param<double>(
+        "AutoAim.FireControl.TargetSelector.keep_time"
+    );
+    return (current_time - last_seen_time_) < keep_time;
+}
+
+// ============================================================================
+// 旧策略 (注释保留，方便对比)
+// ============================================================================
+
+/*
 double TargetSelector::compute_projected_area(const predictor::ArmorState& armor) const
 {
-    // 使用 ArmorState 的尺寸方法
     double base_area = armor.width() * armor.height();
-
-    // 距离平方 (投影面积与距离平方成反比)
     double dist_sq = armor.position.squaredNorm();
     if (dist_sq < 0.01) dist_sq = 0.01;
-
-    // 朝向修正 (正对时最大，侧面时减小)
     double cos_angle = std::cos(std::abs(armor.z_to_v));
-
-    // 投影面积
     return base_area * cos_angle / dist_sq;
 }
 
@@ -187,7 +282,6 @@ double TargetSelector::compute_score(
     const predictor::ArmorState& armor,
     double max_area) const
 {
-    // 读取参数
     double w_area = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_area");
     double w_still = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_still");
     double w_distance = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.w_distance");
@@ -198,21 +292,19 @@ double TargetSelector::compute_score(
 
     double score = 0;
 
-    // 1. 面积评分 (0~1, 归一化到最大面积)
+    // 1. 面积评分
     double area = compute_projected_area(armor);
     double area_score = area / max_area;
     score += w_area * area_score;
 
-    // 2. 静止评分 (0~1, 速度越小越好)
-    // 注意: 高速陀螺的装甲板切向速度大但可预测，不适用此评分
-    // 火控层面会根据 spin.level 决定打 armor 还是 center
+    // 2. 静止评分
     if (!vehicle.spin.active || vehicle.spin.level != predictor::SpinLevel::HIGH) {
         double speed = armor.velocity.norm();
         double still_score = 1.0 / (1.0 + speed * still_speed_scale);
         score += w_still * still_score;
     }
 
-    // 3. 距离评分 (0~1, 近优先)
+    // 3. 距离评分
     double distance = armor.position.norm();
     if (distance > max_distance) {
         return -std::numeric_limits<double>::infinity();
@@ -233,70 +325,34 @@ double TargetSelector::compute_score(
 double TargetSelector::get_type_priority(predictor::EnemyType type) const
 {
     using predictor::EnemyType;
-
     switch (type) {
-        case EnemyType::HERO:       return 1.0;   // 英雄最高
+        case EnemyType::HERO:       return 1.0;
         case EnemyType::INFANTRY_3:
         case EnemyType::INFANTRY_4:
-        case EnemyType::INFANTRY_5: return 0.8;   // 步兵
-        case EnemyType::SENTRY:     return 0.7;   // 哨兵
-        case EnemyType::ENGINEER:   return 0.6;   // 工程
-        case EnemyType::OUTPOST:    return 0.5;   // 前哨站
-        case EnemyType::BASE:       return 0.3;   // 基地
+        case EnemyType::INFANTRY_5: return 0.8;
+        case EnemyType::SENTRY:     return 0.7;
+        case EnemyType::ENGINEER:   return 0.6;
+        case EnemyType::OUTPOST:    return 0.5;
+        case EnemyType::BASE:       return 0.3;
         default:                    return 0.4;
     }
 }
 
-int TargetSelector::select_best_armor(
-    const predictor::VehicleState& vehicle,
-    double max_area) const
-{
-    // 读取参数
-    double max_angle = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.max_angle");
-    double area_filter_ratio = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.area_filter_ratio");
-    double still_speed_scale = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.still_speed_scale");
-
-    int best_idx = -1;
-    double best_score = -std::numeric_limits<double>::infinity();
-
-    for (int i = 0; i < vehicle.armor_count; ++i) {
-        const auto& armor = vehicle.armors[i];
-
-        // 跳过不可见的 (陀螺模式除外)
-        if (!armor.visible && !vehicle.spin.active) continue;
-
-        // 角度过滤
-        if (std::abs(armor.z_to_v) > max_angle) continue;
-
-        // 面积过滤
-        double area = compute_projected_area(armor);
-        if (area < max_area * area_filter_ratio) continue;
-
-        // 简单评分: 面积 + 静止
-        double speed = armor.velocity.norm();
-        double score = area / max_area + 1.0 / (1.0 + speed * still_speed_scale);
-
-        if (score > best_score) {
-            best_score = score;
-            best_idx = i;
-        }
-    }
-
-    return best_idx;
-}
-
 bool TargetSelector::should_switch_target(double new_score, double current_score) const
 {
-    double switch_hysteresis = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.switch_hysteresis");
-    // 新目标必须比当前目标好 hysteresis 比例才切换
+    double switch_hysteresis = runtime_param::get_param<double>(
+        "AutoAim.FireControl.TargetSelector.switch_hysteresis"
+    );
     return new_score > current_score * (1.0 + switch_hysteresis);
 }
 
 bool TargetSelector::should_switch_armor(double new_score, double current_score) const
 {
-    double switch_armor_hysteresis = runtime_param::get_param<double>("AutoAim.FireControl.TargetSelector.switch_armor_hysteresis");
-    // 同一目标内切换装甲板，阈值可以小一点
+    double switch_armor_hysteresis = runtime_param::get_param<double>(
+        "AutoAim.FireControl.TargetSelector.switch_armor_hysteresis"
+    );
     return new_score > current_score * (1.0 + switch_armor_hysteresis);
 }
+*/
 
 }  // namespace autoaim::fire_control

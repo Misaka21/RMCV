@@ -307,6 +307,13 @@
     rk4_tolerance = 0.001
 
 [AutoAim.FireControl.TargetSelector]
+    # ========== 新策略参数 (rm.cv.fans 风格) ==========
+    #@double 目标保持时间 (s)，目标消失后等待此时间再切换
+    keep_time = 0.1
+    #@double 最大有效角度 (rad, 约70°)，超过此角度的装甲板不考虑
+    max_angle = 1.2
+
+    # ========== 旧策略参数 (已注释，保留参考) ==========
     # 权重系数
     #@double 面积权重 (最重要)
     w_area = 2.0
@@ -329,5 +336,3 @@
     still_speed_scale = 2.0
     #@double 最大有效距离 (m)
     max_distance = 10.0
-    #@double 最大有效角度 (rad, 约70°)
-    max_angle = 1.2
