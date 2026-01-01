@@ -15,7 +15,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/rmcv_bag/recorder_node.hpp"
-#include "plugin/watchdog/watchdog.hpp"
+#include "plugin/watchdog/watchdog_node.hpp"
 #include "umt/umt.hpp"
 
 // 全局运行标志
@@ -145,7 +145,7 @@ int main(int argc, char* argv[]) {
     debug::print(debug::PrintMode::INFO, "Main", "All threads started");
 
     // 启动看门狗节点
-    rmcv::WatchdogNode watchdog;
+    watchdog::WatchdogNode watchdog;
     watchdog.start(
         {"hardware", "detector", "predictor"},  // 监控的节点
         5000,   // 超时 5 秒

@@ -19,7 +19,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/stats/fps_stats.hpp"
-#include "plugin/watchdog/watchdog.hpp"
+#include "plugin/watchdog/watchdog_node.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim::predictor {
@@ -331,7 +331,7 @@ void start_predictor_node() {
     debug::print(debug::PrintMode::INFO, "PredictorNode", "Predictor node started");
 
     while (running->get()) {
-        rmcv::heartbeat("predictor");
+        watchdog::heartbeat("predictor");
         try {
             auto detection = sub.pop_for(1000);
 

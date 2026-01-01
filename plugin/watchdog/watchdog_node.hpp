@@ -1,5 +1,5 @@
-#ifndef RMCV_WATCHDOG_HPP
-#define RMCV_WATCHDOG_HPP
+#ifndef PLUGIN_WATCHDOG_NODE_HPP
+#define PLUGIN_WATCHDOG_NODE_HPP
 
 #include <atomic>
 #include <chrono>
@@ -11,7 +11,7 @@
 #include "plugin/debug/logger.hpp"
 #include "umt/umt.hpp"
 
-namespace rmcv {
+namespace watchdog {
 
 /**
  * @brief 更新节点心跳时间戳
@@ -167,6 +167,6 @@ private:
     std::thread thread_;
 };
 
-} // namespace rmcv
+} // namespace watchdog
 
-#endif // RMCV_WATCHDOG_HPP
+#endif // PLUGIN_WATCHDOG_NODE_HPP
