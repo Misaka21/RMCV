@@ -18,6 +18,11 @@ FireController::FireController()
 
 FireController::~FireController() = default;
 
+ControlMode FireController::current_mode() const {
+    return runtime_param::get_param<bool>("AutoAim.FireControl.use_mpc")
+        ? ControlMode::MPC : ControlMode::PID;
+}
+
 void FireController::reset()
 {
     target_selector_.clear_target();
@@ -36,8 +41,8 @@ FireCommand FireController::control(
     const LatencyInfo& latency_in
 )
 {
-    // 读取模式
-    use_mpc_ = runtime_param::get_param<bool>("AutoAim.FireControl.use_mpc");
+    // 读取模式 (每次调用都从 runtime_param 获取，支持热更新)
+    const bool use_mpc = runtime_param::get_param<bool>("AutoAim.FireControl.use_mpc");
 
     // 复制延迟信息 (需要迭代更新 fire_to_hit)
     LatencyInfo latency = latency_in;
@@ -103,7 +108,7 @@ FireCommand FireController::control(
     last_selection_ = selection;
 
     // 5. 分支处理
-    if (use_mpc_) {
+    if (use_mpc) {
         return process_mpc(selection, snapshot, latency);
     } else {
         return process_pid(selection, snapshot, latency);

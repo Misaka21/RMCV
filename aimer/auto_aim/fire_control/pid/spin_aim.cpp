@@ -61,8 +61,8 @@ SpinAimResult SpinAim::compute_spin(
     double predict_dt
 ) const
 {
-    // 读取参数
-    max_orientation_angle_ = runtime_param::get_param<double>(
+    // 读取参数 (每次调用都从 runtime_param 获取，支持热更新)
+    const double max_orientation_angle = runtime_param::get_param<double>(
         "AutoAim.FireControl.PID.max_orientation_angle"
     ) * M_PI / 180.0;
 
@@ -70,7 +70,7 @@ SpinAimResult SpinAim::compute_spin(
     std::vector<int> direct_indices;
     for (int i = 0; i < vehicle.armor_count; ++i) {
         double z_to_v = std::abs(vehicle.armors[i].z_to_v);
-        if (z_to_v < max_orientation_angle_) {
+        if (z_to_v < max_orientation_angle) {
             direct_indices.push_back(i);
         }
     }
@@ -126,6 +126,11 @@ SpinAimResult SpinAim::compute_indirect(
     SpinAimResult result;
     result.mode = AimMode::INDIRECT;
 
+    // 读取参数 (每次调用都从 runtime_param 获取，支持热更新)
+    const double max_orientation_angle = runtime_param::get_param<double>(
+        "AutoAim.FireControl.PID.max_orientation_angle"
+    ) * M_PI / 180.0;
+
     double omega = vehicle.spin.omega;
     double theta = vehicle.spin.phase;
     int armor_count = vehicle.armor_count;
@@ -135,7 +140,7 @@ SpinAimResult SpinAim::compute_indirect(
 
     // 计算每块装甲板到"出现位置"的角度差
     // 出现位置 = 装甲板朝向角达到 ±max_orientation_angle 时
-    double target_z_to_v = ccw ? -max_orientation_angle_ : max_orientation_angle_;
+    double target_z_to_v = ccw ? -max_orientation_angle : max_orientation_angle;
 
     int best_armor = -1;
     double min_time_to_emerge = std::numeric_limits<double>::max();

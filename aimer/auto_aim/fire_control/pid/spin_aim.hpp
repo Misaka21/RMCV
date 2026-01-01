@@ -69,14 +69,6 @@ public:
         double predict_dt
     ) const;
 
-    /**
-     * @brief 设置最大跟踪角 (rad)
-     *
-     * 装甲板朝向角 |z_to_v| < max_orientation_angle 时使用 DIRECT 模式
-     * 默认 60° (约 1.047 rad)
-     */
-    void set_max_orientation_angle(double angle) { max_orientation_angle_ = angle; }
-
 private:
     /**
      * @brief 非陀螺瞄准 (直接跟踪推荐装甲板)
@@ -123,10 +115,6 @@ private:
         const predictor::VehicleState& vehicle,
         int armor_idx
     ) const;
-
-    // 最大跟踪角 (超过此角度切换到 INDIRECT)
-    // 在运行时从参数读取
-    mutable double max_orientation_angle_ = 60.0 * M_PI / 180.0;  // 默认 60°
 };
 
 }  // namespace autoaim::fire_control

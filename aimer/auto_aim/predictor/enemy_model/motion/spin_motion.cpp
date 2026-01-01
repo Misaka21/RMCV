@@ -18,7 +18,7 @@ namespace autoaim::predictor {
 // ============================================================================
 
 SpinMotion::SpinMotion(int armor_num) : armor_num_(armor_num) {
-    another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
+    // another_r_ 在 init() 中从 runtime_param 读取，支持热更新
 }
 
 void SpinMotion::init(const ArmorData& armor, double timestamp) {

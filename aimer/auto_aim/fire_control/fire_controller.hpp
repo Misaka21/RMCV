@@ -72,7 +72,7 @@ public:
     /**
      * @brief 获取当前控制模式
      */
-    ControlMode current_mode() const { return use_mpc_ ? ControlMode::MPC : ControlMode::PID; }
+    ControlMode current_mode() const;
 
     // ==================== 调试接口 ====================
 
@@ -125,7 +125,6 @@ private:
     // ==================== 状态 ====================
 
     GimbalState gimbal_state_;
-    bool use_mpc_ = false;
     double last_time_ = 0;
 
     // ==================== 缓存 ====================
