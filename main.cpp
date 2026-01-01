@@ -1,5 +1,6 @@
 // C++ system headers
 #include <csignal>
+#include <cstring>
 #include <iostream>
 #include <thread>
 
@@ -14,6 +15,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/rmcv_bag/recorder_node.hpp"
+#include "plugin/watchdog/watchdog.hpp"
 #include "umt/umt.hpp"
 
 // 全局运行标志
@@ -35,13 +37,55 @@ void signal_handler(int sig) {
     std::exit(1);
 }
 
-int main() {
+void print_usage(const char* prog_name) {
+    fmt::print("用法: {} [选项]\n", prog_name);
+    fmt::print("选项:\n");
+    fmt::print("  --match, -m         比赛模式 (强制内录)\n");
+    fmt::print("  --log-dir <path>    指定日志目录 (由 watchdog 传入)\n");
+    fmt::print("  --help, -h          显示帮助信息\n");
+}
+
+int main(int argc, char* argv[]) {
+    // ========== 解析命令行参数 ==========
+    bool match_mode = false;
+    std::string log_dir;  // 外部指定的日志目录
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--match") == 0 || std::strcmp(argv[i], "-m") == 0) {
+            match_mode = true;
+        } else if (std::strcmp(argv[i], "--log-dir") == 0 && i + 1 < argc) {
+            log_dir = argv[++i];
+        } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+            print_usage(argv[0]);
+            return 0;
+        }
+    }
+
+    // 设置全局比赛模式标志 (其他节点可以读取)
+    auto match_mode_flag = umt::BasicObjManager<bool>::find_or_create("match_mode", match_mode);
+    match_mode_flag->get() = match_mode;
     // 注册信号处理
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
     // 初始化日志系统
-    debug::init_session();
+    // 优先使用外部指定的目录 (watchdog 传入)，否则自动创建
+    std::string session_path;
+    if (!log_dir.empty()) {
+        session_path = debug::init_session(log_dir);
+    } else if (match_mode) {
+        session_path = debug::init_session("", "match");
+    } else {
+        session_path = debug::init_session();
+    }
+
+    if (match_mode) {
+        fmt::print(fmt::fg(fmt::color::red),
+            "======================================================================\n"
+            "                     MATCH MODE - 比赛模式                           \n"
+            "                      强制内录已启用                                  \n"
+            "======================================================================\n");
+    }
 
     // 启动运行时参数热重载线程 (内部有无限循环，必须在单独线程运行)
     std::thread param_thread([]() {
@@ -99,12 +143,24 @@ int main() {
     });
 
     debug::print(debug::PrintMode::INFO, "Main", "All threads started");
+
+    // 启动看门狗节点
+    rmcv::WatchdogNode watchdog;
+    watchdog.start(
+        {"hardware", "detector", "predictor"},  // 监控的节点
+        5000,   // 超时 5 秒
+        1000,   // 每秒检查一次
+        debug::get_session_path() + "/heartbeat"  // 心跳文件放到日志目录
+    );
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 系统启动完成，按 Ctrl+C 退出\n");
 
     // 主线程等待
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
+    // 停止看门狗
+    watchdog.stop();
 
     // 等待线程结束
     fmt::print(fmt::fg(fmt::color::yellow), "[INFO] 等待线程结束...\n");
