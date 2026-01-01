@@ -123,16 +123,23 @@ inline std::string get_timestamp_for_filename() {
 }
 
 /**
- * @brief Initialize a new session with timestamped directory
- * @param suffix 文件夹后缀，比赛模式传 "match" 等
+ * @brief Initialize a new session
+ * @param session_dir 外部指定的会话目录 (如果为空则自动创建)
+ * @param suffix 文件夹后缀，比赛模式传 "match" 等 (仅在 session_dir 为空时使用)
  * @return Session directory path
  *
- * Directory structure: {LOG_DIR}/{timestamp}_{suffix}/ 或 {LOG_DIR}/{timestamp}/
- *   - run.log: log file
+ * 使用方式:
+ *   1. 自动创建: init_session("", "match") -> log/2024-01-01_12-00-00_match/
+ *   2. 外部指定: init_session("/path/to/session") -> 使用指定目录
+ *
+ * Directory structure:
+ *   - run.log: debug::print 输出
+ *   - screen.log: watchdog screen 输出 (由 watchdog 写入)
+ *   - heartbeat: 心跳文件
  *   - config/: 配置文件快照
- *   - *.avi: video recordings
+ *   - raw.mkv, debug.mkv, imu.csv: 录制文件
  */
-inline std::string init_session(const std::string& suffix = "") {
+inline std::string init_session(const std::string& session_dir = "", const std::string& suffix = "") {
     auto& state = LoggerState::instance();
     std::lock_guard<std::mutex> lock(state.file_mutex);
 
@@ -140,11 +147,18 @@ inline std::string init_session(const std::string& suffix = "") {
         state.log_file.close();
     }
 
-    state.session_timestamp = get_timestamp_for_filename();
-    if (suffix.empty()) {
-        state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp;
+    // 使用外部指定的目录，或自动创建
+    if (!session_dir.empty()) {
+        state.session_path = session_dir;
+        // 从路径提取时间戳 (可选)
+        state.session_timestamp = fs::path(session_dir).filename().string();
     } else {
-        state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp + "_" + suffix;
+        state.session_timestamp = get_timestamp_for_filename();
+        if (suffix.empty()) {
+            state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp;
+        } else {
+            state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp + "_" + suffix;
+        }
     }
 
     fs::create_directories(state.session_path);
