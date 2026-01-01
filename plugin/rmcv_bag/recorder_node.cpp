@@ -144,10 +144,15 @@ void start_recorder_node() {
 
     // 加载配置 (启动时读取一次)
     RecorderConfig config = RecorderConfig::load();
+    // 检查是否为比赛模式
+    auto match_mode = umt::BasicObjManager<bool>::find("match_mode");
+    bool force_record = match_mode && match_mode->get();
+    
     debug::print(debug::PrintMode::INFO, "RecorderNode",
-        "Config: raw={} debug={} imu={} fps={:.1f} codec={} sample=1/{}",
+        "Config: raw={} debug={} imu={} fps={:.1f} codec={} sample=1/{}{}",
         config.record_raw_video, config.record_debug_video, config.record_imu_csv,
-        config.get_record_fps(), config.video_codec, config.sample_interval);
+        config.get_record_fps(), config.video_codec, config.sample_interval,
+        force_record ? " [MATCH MODE - 强制 raw+imu]" : "");
 
     // 获取会话路径
     std::string session_path = debug::get_session_path();
@@ -180,8 +185,11 @@ void start_recorder_node() {
 
     while (running->get()) {
         try {
-            // 检查录制开关 (静态参数，启动时确定)
-            bool enable_recording = config.enable_recording;
+            // 检查录制开关
+            // 比赛模式: 强制录制 raw + imu，debug 按配置决定
+            auto match_mode = umt::BasicObjManager<bool>::find("match_mode");
+            bool is_match_mode = match_mode && match_mode->get();
+            bool enable_recording = config.enable_recording || is_match_mode;
 
             // ========== 状态转换: 开始录制 ==========
             if (enable_recording && !was_recording) {
@@ -204,6 +212,7 @@ void start_recorder_node() {
                 if (config.record_raw_video) {
                     raw_writer = std::make_unique<VideoWriterWrapper>();
                 }
+                // debug 视频: 比赛模式下仍按配置决定，不强制
                 if (config.record_debug_video) {
                     debug_writer = std::make_unique<VideoWriterWrapper>();
                 }
@@ -328,6 +337,11 @@ void start_recorder_node() {
                     std::to_string(s.recv_time_us)
                 });
                 csv_row_count++;
+
+                // 每 100 行 flush 一次，防止断电丢失数据
+                if (csv_row_count % 100 == 0) {
+                    imu_writer->flush();
+                }
             }
 
             // 计算写入耗时
