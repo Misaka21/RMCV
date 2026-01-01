@@ -30,10 +30,12 @@ void signal_handler(int sig) {
     auto det_running = umt::BasicObjManager<bool>::find_or_create("detector_running", false);
     auto pred_running = umt::BasicObjManager<bool>::find_or_create("predictor_running", false);
     auto rec_running = umt::BasicObjManager<bool>::find_or_create("recorder_running", false);
+    auto wd_running = umt::BasicObjManager<bool>::find_or_create("watchdog_running", false);
     hw_running->get() = false;
     det_running->get() = false;
     pred_running->get() = false;
     rec_running->get() = false;
+    wd_running->get() = false;
     std::exit(1);
 }
 
