@@ -1,0 +1,75 @@
+# RMCV 2026 Systemd Service
+#
+# 安装: sudo ./install_service.sh
+#
+# 使用:
+#   sudo systemctl start rmcv    # 启动 (比赛模式)
+#   sudo systemctl stop rmcv     # 停止
+#   sudo systemctl status rmcv   # 状态
+#   journalctl -u rmcv -f        # 日志
+#   screen -r rmcv               # 连接到终端
+
+[Unit]
+Description=RMCV 2026 Vision System
+After=network.target
+
+[Service]
+Type=simple
+
+# 用户和目录 (由 install_service.sh 替换)
+User=rmcv
+Group=rmcv
+WorkingDirectory=/home/rmcv/RMCV/scripts
+
+# 使用看门狗脚本启动 (支持 screen + 心跳监控)
+ExecStart=/home/rmcv/RMCV/scripts/watchdog.sh --match
+ExecStop=/bin/bash -c "pkill -f rmcv_watch; pkill -f RMCV2026; screen -S rmcv -X quit"
+
+# 崩溃自动重启
+Restart=always
+RestartSec=5
+
+# 重启限制 (1小时内最多50次)
+StartLimitBurst=50
+StartLimitIntervalSec=3600
+
+# ========== 进程优先级 ==========
+# Nice 优先级 (-20最高, 19最低)
+Nice=-15
+
+# 实时调度 (需要 root)
+# CPUSchedulingPolicy=fifo
+# CPUSchedulingPriority=50
+
+# CPU 亲和性 (可选，绑定到核心0-3)
+# CPUAffinity=0 1 2 3
+
+# IO 调度优先级 (realtime, best-effort, idle)
+IOSchedulingClass=realtime
+IOSchedulingPriority=0
+
+# ========== 资源限制 ==========
+# 允许实时优先级
+LimitRTPRIO=99
+LimitNICE=-20
+
+# 内存锁定 (防止换页)
+LimitMEMLOCK=infinity
+
+# 打开文件数
+LimitNOFILE=65536
+
+# ========== 环境变量 ==========
+Environment="DISPLAY=:0"
+Environment="LD_LIBRARY_PATH=/opt/MVS/lib/64:/usr/local/lib"
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+
+# 超时
+TimeoutStartSec=30
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
