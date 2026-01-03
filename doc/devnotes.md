@@ -1,8 +1,38 @@
+# 1.3
+框架结构变成这样是不是更好：
+  aimer/
+  ├── common/                   # 基础库 (被所有模块依赖)
+  │   ├── math/
+  │   ├── filter/               # ← 滤波器放这里! 是通用工具
+  │   │   └── adaptive_ekf.hpp
+  │   └── transformer/
+  │
+  └── auto_aim/
+      ├── detector/             # 检测模块
+      │
+      └── predictor/            # 预测模块
+          ├── predictor_node.cpp    # 入口
+          ├── enemy_predictor.cpp   # 协调器
+          │
+          ├── observer/             # 观测 (PnP)
+          │   ├── armor_observer.cpp
+          │   └── armor_table.hpp
+          │
+          └── model/                # 模型 (包含跟踪和滤波)
+              ├── enemy_model.hpp       # 接口
+              ├── vehicle/              # 车辆模型
+              │   ├── vehicle_model.cpp
+              │   ├── armor_tracker.cpp # ID分配+消抖
+              │   └── motion/           # 运动EKF
+              │       ├── armor_ekf.cpp
+              │       ├── spin_ekf.cpp
+              │       └── lmtd_ekf.cpp
+              ├── outpost/
+              └── base/
+
 # 1.1元旦快乐
 
- 自瞄是辅助人类操作手的，因此我认为自瞄要打的应该是最靠相机中心的目标，因为操作手会把要击打的目标放在中心，因此你其
-  实只要击打中心的目标就可以，操作手会按右键进行预瞄，也许我会给你发预瞄指令，此时电控也会进行抬枪，但是这也许又会导致最靠
-  中心的目标改变，所以应该要有个锁
+自瞄是辅助人类操作手的，因此我认为自瞄要打的应该是最靠相机中心的目标，因为操作手会把要击打的目标放在中心，因此你其实只要击打中心的目标就可以，操作手会按右键进行预瞄，也许我会给你发预瞄指令，此时电控也会进行抬枪，但是这也许又会导致最靠中心的目标改变，所以应该要有个锁
 
 # 12.29
 
