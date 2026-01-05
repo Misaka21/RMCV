@@ -94,17 +94,17 @@ OpenvinoDetector::OpenvinoDetector(const OpenvinoConfig& config, EnemyColor colo
     // 构建模型
     model_ = ppp.build();
 
-    // 编译模型 (使用 THROUGHPUT 模式优化并行推理)
+    // 编译模型 (使用 LATENCY 模式优化单帧延迟，减少 CPU 占用)
     compiled_model_ = core_.compile_model(
         model_,
         config_.device,
-        ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT)
+        ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
     );
 
     // 创建推理请求 (用于同步模式)
     infer_request_ = compiled_model_.create_infer_request();
 
-    debug::print("info", "OpenVINO", "Detector initialized on device: {} (THROUGHPUT mode)", config_.device);
+    debug::print("info", "OpenVINO", "Detector initialized on device: {} (LATENCY mode)", config_.device);
 }
 
 std::unique_ptr<OpenvinoDetector> OpenvinoDetector::from_config(
