@@ -642,8 +642,8 @@ void TensorrtDetector::init_async_slots() {
         // 创建独立的CUDA流
         cudaStreamCreate(&slot.stream);
 
-        // 创建事件用于同步
-        cudaEventCreate(&slot.event);
+        // 创建事件用于同步 (使用 BlockingSync 避免 CPU 忙等待)
+        cudaEventCreateWithFlags(&slot.event, cudaEventBlockingSync);
 
         // 分配GPU缓冲区
         cudaMalloc(&slot.img_device, img_buffer_size_);  // 原图缓冲
