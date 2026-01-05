@@ -60,8 +60,9 @@ struct TensorrtConfig {
 struct InferenceSlot {
     cudaStream_t stream = nullptr;
     cudaEvent_t event = nullptr;
-    void* input_device = nullptr;
-    void* output_device = nullptr;
+    void* img_device = nullptr;      // GPU 原图缓冲 (uint8, BGR)
+    void* input_device = nullptr;    // GPU 输入张量 (float32, RGB, CHW)
+    void* output_device = nullptr;   // GPU 输出张量
     std::vector<float> output_buffer;
     bool in_use = false;
 };
@@ -220,9 +221,11 @@ private:
     std::unique_ptr<nvinfer1::IExecutionContext> context_;
 
     // CUDA 缓冲区 (同步模式使用)
-    void* input_device_ = nullptr;
+    void* img_device_ = nullptr;     // GPU 原图缓冲 (uint8, BGR)
+    void* input_device_ = nullptr;   // GPU 输入张量 (float32)
     void* output_device_ = nullptr;
     std::vector<float> output_buffer_;
+    size_t img_buffer_size_ = 0;     // 原图缓冲区大小
 
     // CUDA 流 (同步模式使用)
     cudaStream_t stream_ = nullptr;

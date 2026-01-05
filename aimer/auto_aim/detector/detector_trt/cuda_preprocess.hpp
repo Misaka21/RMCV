@@ -1,6 +1,9 @@
 /**
  * @file cuda_preprocess.hpp
  * @brief CUDA 图像预处理接口
+ *
+ * 在 GPU 上完成所有预处理:
+ *   letterbox resize + BGR→RGB + normalize + HWC→CHW
  */
 
 #ifndef AIMER_AUTOAIM_DETECTOR_CUDA_PREPROCESS_HPP
@@ -14,33 +17,29 @@ namespace autoaim::detector {
 /**
  * @brief GPU 预处理: letterbox + BGR→RGB + normalize + HWC→CHW
  *
- * @param src_device 输入图像 (GPU, BGR, HWC, uint8)
- * @param dst_device 输出张量 (GPU, RGB, CHW, float32, normalized)
- * @param src_width 输入宽度
- * @param src_height 输入高度
- * @param dst_size 输出尺寸 (正方形)
- * @param stream CUDA 流
+ * 一个 kernel 完成所有预处理，输出可直接用于推理
+ *
+ * @param src_device    输入图像 (GPU, BGR, HWC, uint8)
+ * @param dst_device    输出张量 (GPU, RGB, CHW, float32, normalized)
+ * @param src_width     输入图像宽度
+ * @param src_height    输入图像高度
+ * @param dst_size      输出尺寸 (正方形, 如 640)
+ * @param scale_out     [out] 缩放比例 (用于后处理坐标还原)
+ * @param pad_x_out     [out] X 方向 padding (用于后处理坐标还原)
+ * @param pad_y_out     [out] Y 方向 padding (用于后处理坐标还原)
+ * @param stream        CUDA 流
+ * @param use_bilinear  是否使用双线性插值 (默认 false, 用最近邻)
  */
 void cuda_preprocess(
     const uint8_t* src_device,
     float* dst_device,
     int src_width, int src_height,
     int dst_size,
-    cudaStream_t stream
-);
-
-/**
- * @brief GPU 预处理 (返回 letterbox 参数用于后处理坐标还原)
- */
-void cuda_preprocess_with_params(
-    const uint8_t* src_device,
-    float* dst_device,
-    int src_width, int src_height,
-    int dst_size,
-    float* out_scale,
-    int* out_dx,
-    int* out_dy,
-    cudaStream_t stream
+    float* scale_out = nullptr,
+    int* pad_x_out = nullptr,
+    int* pad_y_out = nullptr,
+    cudaStream_t stream = nullptr,
+    bool use_bilinear = false
 );
 
 }  // namespace autoaim::detector

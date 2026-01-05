@@ -4,6 +4,7 @@
  */
 
 #include "tensorrt_detector.hpp"
+#include "cuda_preprocess.hpp"
 
 #include <algorithm>
 #include <array>
@@ -145,17 +146,21 @@ TensorrtDetector::TensorrtDetector(const TensorrtConfig& config, EnemyColor colo
         input_size_, input_size_ * 4 / 1024, output_size_, output_size_ * 4 / 1024);
 
     // 分配 CUDA 缓冲区
+    // 预分配原图缓冲区 (假设最大 1920x1200 图像)
+    img_buffer_size_ = 1920 * 1200 * 3;  // BGR uint8
+    cudaError_t err0 = cudaMalloc(&img_device_, img_buffer_size_);
     cudaError_t err1 = cudaMalloc(&input_device_, input_size_ * sizeof(float));
     cudaError_t err2 = cudaMalloc(&output_device_, output_size_ * sizeof(float));
 
-    if (err1 != cudaSuccess || err2 != cudaSuccess) {
-        throw std::runtime_error("Failed to allocate CUDA memory: input=" +
+    if (err0 != cudaSuccess || err1 != cudaSuccess || err2 != cudaSuccess) {
+        throw std::runtime_error("Failed to allocate CUDA memory: img=" +
+                                std::string(cudaGetErrorString(err0)) + ", input=" +
                                 std::string(cudaGetErrorString(err1)) + ", output=" +
                                 std::string(cudaGetErrorString(err2)));
     }
 
-    debug::print("info", "TensorRT", "cudaMalloc: input_ptr={}, output_ptr={}",
-        input_device_, output_device_);
+    debug::print("info", "TensorRT", "cudaMalloc: img_ptr={}, input_ptr={}, output_ptr={}",
+        img_device_, input_device_, output_device_);
 
     output_buffer_.resize(output_size_);
 
@@ -214,6 +219,7 @@ TensorrtDetector::~TensorrtDetector() {
 
     // 释放同步模式资源
     if (stream_) cudaStreamDestroy(stream_);
+    if (img_device_) cudaFree(img_device_);
     if (input_device_) cudaFree(input_device_);
     if (output_device_) cudaFree(output_device_);
 }
@@ -330,44 +336,31 @@ std::string TensorrtDetector::get_engine_path() const {
 // ============================================================================
 
 std::vector<DetectedArmor> TensorrtDetector::detect(const cv::Mat& image) {
-    // 预处理
-    auto [resized, scale, dx, dy] = preprocess(image);
+    // 确保图像是连续的
+    cv::Mat continuous_image = image.isContinuous() ? image : image.clone();
 
-    // DEBUG: 检查预处理后的图像
-    static int preprocess_debug = 0;
-    if (++preprocess_debug <= 3) {
-        cv::Scalar mean_val = cv::mean(resized);
-        debug::print("info", "TensorRT", "Preprocess: input={}x{}, resized={}x{}, scale={:.3f}, dx={}, dy={}, mean=[{:.1f},{:.1f},{:.1f}]",
-            image.cols, image.rows, resized.cols, resized.rows, scale, dx, dy,
-            mean_val[0], mean_val[1], mean_val[2]);
+    // 检查图像大小是否超过缓冲区
+    size_t img_size = continuous_image.total() * continuous_image.elemSize();
+    if (img_size > img_buffer_size_) {
+        debug::print("error", "TensorRT", "Image size {} exceeds buffer size {}", img_size, img_buffer_size_);
+        return {};
     }
 
-    // 转换为 NCHW float 并归一化
-    cv::Mat blob;
-    cv::dnn::blobFromImage(resized, blob, 1.0/255.0, cv::Size(), cv::Scalar(),
-                           true, false, CV_32F);  // RGB, no crop
+    // 拷贝原图到 GPU
+    cudaMemcpyAsync(img_device_, continuous_image.data, img_size, cudaMemcpyHostToDevice, stream_);
 
-    // DEBUG: 检查输入数据（统计整个 blob）
-    static int input_debug = 0;
-    if (++input_debug <= 3) {
-        float* ptr = blob.ptr<float>();
-        int total = blob.total();
-        float sum = 0, min_val = ptr[0], max_val = ptr[0];
-        for (int i = 0; i < total; ++i) {
-            sum += ptr[i];
-            min_val = std::min(min_val, ptr[i]);
-            max_val = std::max(max_val, ptr[i]);
-        }
-        debug::print("info", "TensorRT", "Input blob: total={}, sum={:.0f}, min={:.4f}, max={:.4f}, mean={:.4f}",
-            total, sum, min_val, max_val, sum / total);
-    }
-
-    // 拷贝输入到 GPU
-    cudaError_t err = cudaMemcpy(input_device_, blob.ptr<float>(),
-               input_size_ * sizeof(float), cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) {
-        debug::print("error", "TensorRT", "cudaMemcpy to device failed: {}", cudaGetErrorString(err));
-    }
+    // GPU 预处理: letterbox + BGR→RGB + normalize + HWC→CHW
+    float scale;
+    int dx, dy;
+    cuda_preprocess(
+        static_cast<uint8_t*>(img_device_),
+        static_cast<float*>(input_device_),
+        image.cols, image.rows,
+        config_.input_size,
+        &scale, &dx, &dy,
+        stream_,
+        false  // 使用最近邻，速度更快
+    );
 
     // 构建 bindings 数组 (旧版 API)
     void* bindings[2];
@@ -375,48 +368,14 @@ std::vector<DetectedArmor> TensorrtDetector::detect(const cv::Mat& image) {
     bindings[output_binding_idx_] = output_device_;
 
     // 推理 (使用旧版 API, 兼容 TensorRT 8.2+)
-    bool success = context_->enqueueV2(bindings, stream_, nullptr);
+    context_->enqueueV2(bindings, stream_, nullptr);
 
-    // 同步等待推理完成
-    cudaStreamSynchronize(stream_);
-
-    // 拷贝输出到 CPU (同步)
-    cudaError_t copy_err = cudaMemcpy(output_buffer_.data(), output_device_,
-               output_size_ * sizeof(float), cudaMemcpyDeviceToHost);
-    if (copy_err != cudaSuccess) {
-        debug::print("error", "TensorRT", "cudaMemcpy from device failed: {}", cudaGetErrorString(copy_err));
-    }
+    // 拷贝输出到 CPU
+    cudaMemcpyAsync(output_buffer_.data(), output_device_,
+                    output_size_ * sizeof(float), cudaMemcpyDeviceToHost, stream_);
 
     // 同步等待完成
-    cudaError_t sync_err = cudaStreamSynchronize(stream_);
-
-    static int exec_debug = 0;
-    if (++exec_debug <= 5) {
-        debug::print("info", "TensorRT", "enqueueV2: success={}, sync_err={}",
-            success, cudaGetErrorString(sync_err));
-
-        // 输出前20个值来检查数据
-        std::string first_vals = "";
-        for (int i = 0; i < 20 && i < static_cast<int>(output_buffer_.size()); ++i) {
-            first_vals += fmt::format("{:.2f},", output_buffer_[i]);
-        }
-        debug::print("info", "TensorRT", "First 20 output values: {}", first_vals);
-
-        // 统计 NaN 数量
-        int nan_count = 0;
-        int inf_count = 0;
-        float min_val = output_buffer_[0], max_val = output_buffer_[0];
-        for (size_t i = 0; i < output_buffer_.size(); ++i) {
-            if (std::isnan(output_buffer_[i])) nan_count++;
-            else if (std::isinf(output_buffer_[i])) inf_count++;
-            else {
-                min_val = std::min(min_val, output_buffer_[i]);
-                max_val = std::max(max_val, output_buffer_[i]);
-            }
-        }
-        debug::print("info", "TensorRT", "Output stats: nan={}, inf={}, min={:.2f}, max={:.2f}",
-            nan_count, inf_count, min_val, max_val);
-    }
+    cudaStreamSynchronize(stream_);
 
     // 后处理
     // DEBUG: 检查原始输出数据
@@ -687,6 +646,7 @@ void TensorrtDetector::init_async_slots() {
         cudaEventCreate(&slot.event);
 
         // 分配GPU缓冲区
+        cudaMalloc(&slot.img_device, img_buffer_size_);  // 原图缓冲
         cudaMalloc(&slot.input_device, input_size_ * sizeof(float));
         cudaMalloc(&slot.output_device, output_size_ * sizeof(float));
 
@@ -695,7 +655,7 @@ void TensorrtDetector::init_async_slots() {
 
         slot.in_use = false;
     }
-    debug::print("info", "TensorRT", "Initialized {} async inference slots", NUM_ASYNC_SLOTS);
+    debug::print("info", "TensorRT", "Initialized {} async inference slots (GPU preprocess)", NUM_ASYNC_SLOTS);
 }
 
 void TensorrtDetector::destroy_async_slots() {
@@ -707,6 +667,7 @@ void TensorrtDetector::destroy_async_slots() {
             cudaStreamDestroy(slot.stream);
         }
         if (slot.event) cudaEventDestroy(slot.event);
+        if (slot.img_device) cudaFree(slot.img_device);
         if (slot.input_device) cudaFree(slot.input_device);
         if (slot.output_device) cudaFree(slot.output_device);
     }
@@ -750,17 +711,26 @@ void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
 
     auto& slot = async_slots_[slot_idx];
 
-    // 预处理
-    auto [resized, scale, dx, dy] = preprocess(image);
+    // 确保图像是连续的
+    cv::Mat continuous_image = image.isContinuous() ? image : image.clone();
+    size_t img_size = continuous_image.total() * continuous_image.elemSize();
 
-    // 转换为 NCHW float 并归一化
-    cv::Mat blob;
-    cv::dnn::blobFromImage(resized, blob, 1.0/255.0, cv::Size(), cv::Scalar(),
-                           true, false, CV_32F);
+    // 异步拷贝原图到 GPU
+    cudaMemcpyAsync(slot.img_device, continuous_image.data, img_size,
+                    cudaMemcpyHostToDevice, slot.stream);
 
-    // 异步拷贝输入到 GPU
-    cudaMemcpyAsync(slot.input_device, blob.ptr<float>(),
-                    input_size_ * sizeof(float), cudaMemcpyHostToDevice, slot.stream);
+    // GPU 预处理: letterbox + BGR→RGB + normalize + HWC→CHW
+    float scale;
+    int dx, dy;
+    cuda_preprocess(
+        static_cast<uint8_t*>(slot.img_device),
+        static_cast<float*>(slot.input_device),
+        image.cols, image.rows,
+        config_.input_size,
+        &scale, &dx, &dy,
+        slot.stream,
+        false  // 使用最近邻
+    );
 
     // 构建 bindings 数组
     void* bindings[2];

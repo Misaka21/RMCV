@@ -16,21 +16,44 @@ else ()
     message(STATUS "  Ubuntu/Debian: sudo apt-get install ccache")
     message(STATUS "  macOS: brew install ccache")
 endif ()
-add_compile_options(-Wall -Werror=return-type -Wno-unused-variable)
+# C/C++ 编译选项 (不应用于 CUDA)
+add_compile_options(
+    $<$<COMPILE_LANGUAGE:C,CXX>:-Wall>
+    $<$<COMPILE_LANGUAGE:C,CXX>:-Werror=return-type>
+    $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-variable>
+)
 
 # 性能分析模式：保持优化但添加调试符号和帧指针
 if (ENABLE_PROFILING)
     message(STATUS "Profiling mode enabled - adding debug symbols and frame pointers")
-    add_compile_options(-O3 -g -fno-omit-frame-pointer -march=native)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C,CXX>:-O3>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-g>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-fno-omit-frame-pointer>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-march=native>
+    )
     # 不使用 LTO，便于符号解析
 elseif (CMAKE_BUILD_TYPE STREQUAL Release)
-    add_compile_options(-O3 -flto=auto -march=native)
+    # LTO 只对 C/CXX 启用，CUDA 不支持
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C,CXX>:-O3>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-march=native>
+    )
+    # 注意: 移除 LTO 以避免与 CUDA 冲突
+    # add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-flto=auto>)
 elseif (CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo)
-    add_compile_options(-O3 -flto=auto -march=native -g)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C,CXX>:-O3>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-march=native>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-g>
+    )
 elseif (CMAKE_BUILD_TYPE STREQUAL MinSizeRel)
-    add_compile_options(-Os -flto=auto -march=native)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C,CXX>:-Os>
+        $<$<COMPILE_LANGUAGE:C,CXX>:-march=native>
+    )
 else ()
-    add_compile_options(-O0 -g)
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-O0> $<$<COMPILE_LANGUAGE:C,CXX>:-g>)
 endif ()
 
 # 设置 asset 和 log 目录路径
