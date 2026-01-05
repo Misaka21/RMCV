@@ -94,17 +94,20 @@ OpenvinoDetector::OpenvinoDetector(const OpenvinoConfig& config, EnemyColor colo
     // 构建模型
     model_ = ppp.build();
 
-    // 编译模型 (使用 LATENCY 模式优化单帧延迟，减少 CPU 占用)
+    // 编译模型
+    // THROUGHPUT 模式高吞吐但 CPU 占用高，限制线程数来平衡
     compiled_model_ = core_.compile_model(
         model_,
         config_.device,
-        ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY)
+        ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT),
+        ov::inference_num_threads(4),  // 限制 CPU 线程数
+        ov::num_streams(2)             // 限制并行推理流
     );
 
     // 创建推理请求 (用于同步模式)
     infer_request_ = compiled_model_.create_infer_request();
 
-    debug::print("info", "OpenVINO", "Detector initialized on device: {} (LATENCY mode)", config_.device);
+    debug::print("info", "OpenVINO", "Detector initialized on device: {} (THROUGHPUT, 4 threads, 2 streams)", config_.device);
 }
 
 std::unique_ptr<OpenvinoDetector> OpenvinoDetector::from_config(
@@ -268,7 +271,8 @@ std::tuple<cv::Mat, float, int, int> OpenvinoDetector::preprocess(const cv::Mat&
     int new_h = static_cast<int>(image.rows * scale);
 
     cv::Mat resized;
-    cv::resize(image, resized, cv::Size(new_w, new_h));
+    // INTER_NEAREST 最快，检测任务对图像质量不敏感
+    cv::resize(image, resized, cv::Size(new_w, new_h), 0, 0, cv::INTER_NEAREST);
 
     // 创建灰色背景
     cv::Mat padded(target_size, target_size, CV_8UC3, cv::Scalar(114, 114, 114));
