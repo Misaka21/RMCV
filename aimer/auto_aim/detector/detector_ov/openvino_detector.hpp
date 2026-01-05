@@ -8,8 +8,8 @@
  * 模型输出格式 (每个检测):
  *   [0-7]:   4个关键点坐标 (x0,y0,x1,y1,x2,y2,x3,y3)，从左上角逆时针
  *   [8]:     置信度
- *   [9-12]:  颜色独热 (red, blue, gray, purple)
- *   [13-21]: 类别独热 (G, 1, 2, 3, 4, 5, O, Bs, Bb)
+ *   [9-12]:  颜色 (red, blue, gray, purple)
+ *   [13-21]: 类别 (G, 1, 2, 3, 4, 5, O, Bs, Bb)
  */
 
 #ifndef AIMER_AUTOAIM_DETECTOR_OPENVINO_DETECTOR_HPP

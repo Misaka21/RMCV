@@ -30,10 +30,10 @@ namespace output_idx {
     constexpr int CLASS_END = 22;
 }
 
-// 模型颜色索引 (模型输出顺序: blue, red, gray, purple)
+// 模型颜色索引 (模型输出顺序: red, blue, gray, purple)
 namespace model_color {
-    constexpr int BLUE = 0;
-    constexpr int RED = 1;
+    constexpr int RED = 0;
+    constexpr int BLUE = 1;
     constexpr int GRAY = 2;
     constexpr int PURPLE = 3;
 }
