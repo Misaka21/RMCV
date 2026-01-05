@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 set(lib_name "plugin")
-# Find dependencies
-find_package(OpenCV REQUIRED)
-find_package(Eigen3 REQUIRED)
-find_package(tomlplusplus CONFIG REQUIRED)
-find_package(fmt REQUIRED)
 
+# 依赖已在根目录 find_package，这里直接使用
 
 # Collect debug source
 aux_source_directory(./debug debug_src)

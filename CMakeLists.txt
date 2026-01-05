@@ -76,14 +76,25 @@ find_package(OpenCV REQUIRED)
 find_package(fmt REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
-find_package(Python 3.6 REQUIRED COMPONENTS Development Interpreter)
-find_package(pybind11 REQUIRED)
+
+# Python/pybind11 可选 (UMT 的 Python 绑定功能，当前未使用)
+find_package(Python 3.6 QUIET COMPONENTS Development Interpreter)
+find_package(pybind11 QUIET)
+if(pybind11_FOUND AND Python_FOUND)
+    set(ENABLE_PYTHON_BINDINGS ON)
+    message(STATUS "Python bindings: ENABLED (pybind11 found)")
+else()
+    set(ENABLE_PYTHON_BINDINGS OFF)
+    message(STATUS "Python bindings: DISABLED (pybind11 or Python not found)")
+endif()
 
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR})
-include_directories(${Python_INCLUDE_DIRS})
-include_directories(${pybind11_INCLUDE_DIRS})
+if(ENABLE_PYTHON_BINDINGS)
+    include_directories(${Python_INCLUDE_DIRS})
+    include_directories(${pybind11_INCLUDE_DIRS})
+endif()
 include_directories(umt)
 
 add_subdirectory(plugin)
@@ -208,14 +219,9 @@ if(TARGET tomlplusplus::tomlplusplus)
 endif()
 
 # --- Python ---
-if(Python_FOUND)
+if(ENABLE_PYTHON_BINDINGS)
     message(STATUS "Python Include Dirs: ${Python_INCLUDE_DIRS}")
     message(STATUS "Python Libraries: ${Python_LIBRARIES}")
-endif()
-
-# --- pybind11 ---
-if(pybind11_FOUND)
-    # pybind11 提供了一个便捷变量来获取头文件路径
     message(STATUS "pybind11 Include Dirs: ${pybind11_INCLUDE_DIRS}")
 endif()
 
