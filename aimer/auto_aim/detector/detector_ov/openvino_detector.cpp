@@ -167,6 +167,9 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
                             const serial::SerialReceiveData& serial_data)
 {
+    // 记录提交时间 (用于计算端到端延迟)
+    auto submit_time = std::chrono::steady_clock::now();
+
     // 队列过长时直接丢弃新帧 (不阻塞)
     {
         std::lock_guard lock(task_mutex_);
@@ -202,7 +205,7 @@ void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
             scale, dx, dy,
             frame_id, timestamp_us,
             serial_data,
-            std::chrono::steady_clock::now()
+            submit_time  // 使用 push 开始时记录的时间
         });
     }
     task_cv_.notify_one();

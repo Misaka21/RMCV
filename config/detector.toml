@@ -56,11 +56,11 @@
 
 [Detector.yolo]
     #@string 推理后端: "openvino" | "tensorrt" | "onnxruntime"
-    backend = "tensorrt"
+    backend = "openvino"
 
     #@string 模型文件 (相对于 asset 目录)
     # 注意: 原始模型(armor_0526.onnx)是FP16输入，需使用转换后的FP32版本
-    model = "armor_0526_fp32.onnx"
+    model = "armor_0526.onnx"
 
     #@int 输入尺寸 (正方形)
     input_size = 640
