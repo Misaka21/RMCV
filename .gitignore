@@ -15,6 +15,10 @@ docs/
 *.cache
 __pycache__
 
+# model cache files
+**/ov_cache/
+*.engine
+
 # vscode files
 .vscode/
 .VSCodeCounter/
