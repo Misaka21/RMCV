@@ -94,20 +94,17 @@ OpenvinoDetector::OpenvinoDetector(const OpenvinoConfig& config, EnemyColor colo
     // 构建模型
     model_ = ppp.build();
 
-    // 编译模型
-    // THROUGHPUT 模式高吞吐但 CPU 占用高，限制线程数来平衡
+    // 编译模型 (使用 THROUGHPUT 模式优化并行推理)
     compiled_model_ = core_.compile_model(
         model_,
         config_.device,
-        ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT),
-        ov::inference_num_threads(4),  // 限制 CPU 线程数
-        ov::num_streams(2)             // 限制并行推理流
+        ov::hint::performance_mode(ov::hint::PerformanceMode::THROUGHPUT)
     );
 
     // 创建推理请求 (用于同步模式)
     infer_request_ = compiled_model_.create_infer_request();
 
-    debug::print("info", "OpenVINO", "Detector initialized on device: {} (THROUGHPUT, 4 threads, 2 streams)", config_.device);
+    debug::print("info", "OpenVINO", "Detector initialized on device: {} (THROUGHPUT mode)", config_.device);
 }
 
 std::unique_ptr<OpenvinoDetector> OpenvinoDetector::from_config(
@@ -170,9 +167,6 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
                             const serial::SerialReceiveData& serial_data)
 {
-    // 记录提交时间 (用于计算端到端延迟)
-    auto submit_time = std::chrono::steady_clock::now();
-
     // 队列过长时直接丢弃新帧 (不阻塞)
     {
         std::lock_guard lock(task_mutex_);
@@ -208,7 +202,7 @@ void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
             scale, dx, dy,
             frame_id, timestamp_us,
             serial_data,
-            submit_time  // 使用 push 开始时记录的时间
+            std::chrono::steady_clock::now()
         });
     }
     task_cv_.notify_one();
@@ -271,8 +265,7 @@ std::tuple<cv::Mat, float, int, int> OpenvinoDetector::preprocess(const cv::Mat&
     int new_h = static_cast<int>(image.rows * scale);
 
     cv::Mat resized;
-    // INTER_NEAREST 最快，检测任务对图像质量不敏感
-    cv::resize(image, resized, cv::Size(new_w, new_h), 0, 0, cv::INTER_NEAREST);
+    cv::resize(image, resized, cv::Size(new_w, new_h));
 
     // 创建灰色背景
     cv::Mat padded(target_size, target_size, CV_8UC3, cv::Scalar(114, 114, 114));
