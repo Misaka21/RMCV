@@ -9,7 +9,9 @@
 #include "cuda_preprocess.hpp"
 #include <algorithm>
 
-namespace autoaim::detector {
+// nvcc 对 C++17 嵌套命名空间支持有限，使用分开写法
+namespace autoaim {
+namespace detector {
 
 /**
  * @brief Letterbox + BGR→RGB + Normalize + HWC→CHW kernel
@@ -176,4 +178,5 @@ void cuda_preprocess(
     }
 }
 
-}  // namespace autoaim::detector
+}  // namespace detector
+}  // namespace autoaim

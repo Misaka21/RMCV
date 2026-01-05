@@ -12,7 +12,9 @@
 #include <cuda_runtime.h>
 #include <cstdint>
 
-namespace autoaim::detector {
+// nvcc 对 C++17 嵌套命名空间支持有限，使用分开写法
+namespace autoaim {
+namespace detector {
 
 /**
  * @brief GPU 预处理: letterbox + BGR→RGB + normalize + HWC→CHW
@@ -42,6 +44,7 @@ void cuda_preprocess(
     bool use_bilinear = false
 );
 
-}  // namespace autoaim::detector
+}  // namespace detector
+}  // namespace autoaim
 
 #endif  // AIMER_AUTOAIM_DETECTOR_CUDA_PREPROCESS_HPP

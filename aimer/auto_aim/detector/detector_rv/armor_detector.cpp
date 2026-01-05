@@ -20,7 +20,6 @@
 // std
 #include <algorithm>
 #include <cmath>
-#include <execution>
 #include <vector>
 // OpenCV
 #include <opencv2/core.hpp>
@@ -132,27 +131,19 @@ std::vector<Armor> Detector::detect_internal(const cv::Mat& input) noexcept {
     armors_ = match_lights(lights_);
 
     if (!armors_.empty() && classifier != nullptr) {
-        // 4. 并行提取所有数字图像
-        std::for_each(
-            std::execution::par,
-            armors_.begin(),
-            armors_.end(),
-            [this, &input](Armor& armor) {
-                armor.number_img = classifier->extract_number(input, armor);
-            }
-        );
+        // 4. 提取所有数字图像 (装甲板数量少，串行即可)
+        for (auto& armor : armors_) {
+            armor.number_img = classifier->extract_number(input, armor);
+        }
 
         // 5. 批量分类 (一次推理，性能更好)
         classifier->classify_batch(armors_);
 
-        // 6. 并行校正角点
+        // 6. 校正角点
         if (corner_corrector != nullptr) {
-            std::for_each(
-                std::execution::par,
-                armors_.begin(),
-                armors_.end(),
-                [this](Armor& armor) { corner_corrector->correct_corners(armor, gray_img_); }
-            );
+            for (auto& armor : armors_) {
+                corner_corrector->correct_corners(armor, gray_img_);
+            }
         }
 
         // 7. 移除忽略的类别

@@ -15,6 +15,7 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <NvOnnxParser.h>
+#include <NvInferVersion.h>
 
 #include "plugin/param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
@@ -265,9 +266,13 @@ void TensorrtDetector::build_engine_from_onnx() {
     auto config = std::unique_ptr<nvinfer1::IBuilderConfig>(
         builder->createBuilderConfig());
 
-    // 设置工作空间
+    // 设置工作空间 (TensorRT 8.4+ 使用新 API)
+#if NV_TENSORRT_MAJOR > 8 || (NV_TENSORRT_MAJOR == 8 && NV_TENSORRT_MINOR >= 4)
     config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE,
                                config_.workspace_mb * (1ULL << 20));
+#else
+    config->setMaxWorkspaceSize(config_.workspace_mb * (1ULL << 20));
+#endif
 
     // FP16 模式
     if (config_.fp16 && builder->platformHasFastFp16()) {

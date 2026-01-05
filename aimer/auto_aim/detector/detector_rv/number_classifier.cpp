@@ -28,7 +28,6 @@
 // std
 #include <algorithm>
 #include <cstddef>
-#include <execution>
 #include <fstream>
 #include <future>
 #include <map>

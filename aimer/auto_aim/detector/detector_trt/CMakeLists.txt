@@ -13,6 +13,14 @@ find_package(CUDAToolkit REQUIRED)
 # CUDA 编译标志 (避免继承不兼容的 C++ 标志)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 --use_fast_math")
 
+# CUDA 架构设置
+# 可通过 cmake -DRMCV_CUDA_ARCH="72" 指定单一架构加速编译
+# 默认编译所有常用架构: Xavier(72), Turing(75), Ampere(86,87)
+if(NOT DEFINED RMCV_CUDA_ARCH)
+    set(RMCV_CUDA_ARCH "72;75;86;87")
+endif()
+message(STATUS "CUDA architectures: ${RMCV_CUDA_ARCH}")
+
 # 创建库 (包含 CUDA 源文件)
 add_library(detector_tensorrt STATIC
     tensorrt_detector.cpp
@@ -20,9 +28,10 @@ add_library(detector_tensorrt STATIC
 )
 
 # CUDA 编译选项
-# 注意: 不使用 CUDA_SEPARABLE_COMPILATION 以避免与 LTO 冲突
 set_target_properties(detector_tensorrt PROPERTIES
-    CUDA_ARCHITECTURES "72;75;86;87"  # Xavier(72), Turing(75), Ampere(86,87)
+    CUDA_STANDARD 14
+    CUDA_STANDARD_REQUIRED ON
+    CUDA_ARCHITECTURES "${RMCV_CUDA_ARCH}"
     INTERPROCEDURAL_OPTIMIZATION OFF  # 禁用 LTO 避免与 CUDA 冲突
 )
 
