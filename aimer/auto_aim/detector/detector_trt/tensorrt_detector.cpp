@@ -74,10 +74,19 @@ void TrtLogger::log(Severity severity, const char* msg) noexcept {
 TensorrtDetector::TensorrtDetector(const TensorrtConfig& config, EnemyColor color)
     : config_(config), detect_color_(color)
 {
+    // 设置 CUDA 调度模式为阻塞同步，避免 CPU 忙等待
+    // 注意：必须在第一个 CUDA API 调用之前设置
+    cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+    if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess) {
+        debug::print("warning", "TensorRT", "Failed to set blocking sync mode: {}",
+                     cudaGetErrorString(flags_err));
+    }
+
     debug::print("info", "TensorRT", "Loading model: {}", config_.model_path);
 
     // 检查是否有缓存的 engine
     std::string engine_path = get_engine_path();
+    debug::print("info", "TensorRT", "Looking for engine: {}", engine_path);
 
     if (fs::exists(engine_path)) {
         if (load_engine(engine_path)) {
