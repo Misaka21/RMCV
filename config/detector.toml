@@ -79,7 +79,7 @@
 # TensorRT 后端配置 (预留)
 [Detector.yolo.tensorrt]
     #@bool 使用 FP16 推理
-    fp16 = false
+    fp16 = true
     #@bool 使用 INT8 量化
     int8 = false
     #@int 工作空间大小 (MB)
