@@ -45,7 +45,8 @@ struct OpenvinoConfig {
  */
 struct InferenceTask {
     ov::InferRequest request;
-    cv::Mat image;
+    cv::Mat image;              // 原始图像 (用于可视化)
+    cv::Mat preprocessed;       // 预处理后图像 (tensor 引用此数据)
     float scale;
     int dx, dy;
     int frame_id;
