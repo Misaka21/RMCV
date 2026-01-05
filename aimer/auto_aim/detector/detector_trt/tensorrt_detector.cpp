@@ -6,6 +6,7 @@
 #include "tensorrt_detector.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <filesystem>
@@ -35,6 +36,7 @@ namespace output_idx {
     constexpr int FEATURE_SIZE = 22;
 }
 
+// 模型颜色索引 (模型输出顺序: red, blue, gray, purple)
 namespace model_color {
     constexpr int RED = 0;
     constexpr int BLUE = 1;
@@ -97,26 +99,27 @@ TensorrtDetector::TensorrtDetector(const TensorrtConfig& config, EnemyColor colo
                                 std::string(cudaGetErrorString(stream_err)));
     }
 
-    // 使用新 API 获取张量信息
-    int num_io_tensors = engine_->getNbIOTensors();
-    debug::print("info", "TensorRT", "Number of IO tensors: {}", num_io_tensors);
+    // 使用旧版 API 获取 binding 信息 (兼容 TensorRT 8.2+)
+    int num_bindings = engine_->getNbBindings();
+    debug::print("info", "TensorRT", "Number of bindings: {}", num_bindings);
 
-    for (int i = 0; i < num_io_tensors; ++i) {
-        const char* name = engine_->getIOTensorName(i);
-        nvinfer1::TensorIOMode mode = engine_->getTensorIOMode(name);
-        nvinfer1::Dims dims = engine_->getTensorShape(name);
+    for (int i = 0; i < num_bindings; ++i) {
+        const char* name = engine_->getBindingName(i);
+        bool is_input = engine_->bindingIsInput(i);
+        nvinfer1::Dims dims = engine_->getBindingDimensions(i);
 
-        bool is_input = (mode == nvinfer1::TensorIOMode::kINPUT);
-        debug::print("info", "TensorRT", "  Tensor {}: name='{}', is_input={}, nbDims={}, dims=[{},{},{},{}]",
+        debug::print("info", "TensorRT", "  Binding {}: name='{}', is_input={}, nbDims={}, dims=[{},{},{},{}]",
             i, name, is_input, dims.nbDims, dims.d[0], dims.d[1], dims.d[2],
             dims.nbDims > 3 ? dims.d[3] : 0);
 
         if (is_input) {
             input_name_ = name;
             input_dims_ = dims;
+            input_binding_idx_ = i;
         } else {
             output_name_ = name;
             output_dims_ = dims;
+            output_binding_idx_ = i;
         }
     }
 
@@ -156,32 +159,28 @@ TensorrtDetector::TensorrtDetector(const TensorrtConfig& config, EnemyColor colo
 
     output_buffer_.resize(output_size_);
 
-    // 设置张量地址 (新 API)
-    // setInputTensorAddress 用于输入 (const void*)
-    // setTensorAddress 用于输出 (void*)
-    if (!context_->setInputTensorAddress(input_name_.c_str(), input_device_)) {
-        throw std::runtime_error("Failed to set input tensor address");
-    }
-    if (!context_->setTensorAddress(output_name_.c_str(), output_device_)) {
-        throw std::runtime_error("Failed to set output tensor address");
-    }
-
-    debug::print("info", "TensorRT", "Engine loaded. Input: '{}' [{}x{}x{}x{}], Output: '{}' [{}x{}x{}]",
-               input_name_, input_dims_.d[0], input_dims_.d[1], input_dims_.d[2], input_dims_.d[3],
-               output_name_, output_dims_.d[0], output_dims_.d[1], output_dims_.d[2]);
+    debug::print("info", "TensorRT", "Engine loaded. Input: '{}' [{}x{}x{}x{}] (binding {}), Output: '{}' [{}x{}x{}] (binding {})",
+               input_name_, input_dims_.d[0], input_dims_.d[1], input_dims_.d[2], input_dims_.d[3], input_binding_idx_,
+               output_name_, output_dims_.d[0], output_dims_.d[1], output_dims_.d[2], output_binding_idx_);
 
     // 检查输出维度顺序
     if (output_dims_.d[1] == 22 && output_dims_.d[2] == 25200) {
         debug::print("warning", "TensorRT", "Output is transposed! [1,22,25200] instead of [1,25200,22]");
     }
 
-    // Warmup 暂时禁用，避免影响调试
-    // debug::print("info", "TensorRT", "Warming up...");
-    // for (int i = 0; i < 3; ++i) {
-    //     context_->enqueueV3(stream_);
-    //     cudaStreamSynchronize(stream_);
-    // }
-    // debug::print("info", "TensorRT", "Warmup done");
+    // Warmup (预热GPU，提高首帧速度)
+    debug::print("info", "TensorRT", "Warming up...");
+    void* bindings[2];
+    bindings[input_binding_idx_] = input_device_;
+    bindings[output_binding_idx_] = output_device_;
+    for (int i = 0; i < 3; ++i) {
+        context_->enqueueV2(bindings, stream_, nullptr);
+        cudaStreamSynchronize(stream_);
+    }
+    debug::print("info", "TensorRT", "Warmup done");
+
+    // 初始化异步推理资源
+    init_async_slots();
 }
 
 std::unique_ptr<TensorrtDetector> TensorrtDetector::from_config(
@@ -210,6 +209,10 @@ std::unique_ptr<TensorrtDetector> TensorrtDetector::from_config(
 }
 
 TensorrtDetector::~TensorrtDetector() {
+    // 释放异步推理资源
+    destroy_async_slots();
+
+    // 释放同步模式资源
     if (stream_) cudaStreamDestroy(stream_);
     if (input_device_) cudaFree(input_device_);
     if (output_device_) cudaFree(output_device_);
@@ -359,28 +362,20 @@ std::vector<DetectedArmor> TensorrtDetector::detect(const cv::Mat& image) {
             total, sum, min_val, max_val, sum / total);
     }
 
-    // DEBUG: 测试使用常量输入
-    static int test_frame = 0;
-    if (++test_frame <= 3) {
-        // 创建全0.5的测试输入
-        std::vector<float> test_input(input_size_, 0.5f);
-        cudaMemcpy(input_device_, test_input.data(), input_size_ * sizeof(float), cudaMemcpyHostToDevice);
-        debug::print("info", "TensorRT", "TEST: Using constant 0.5 input for frame {}", test_frame);
-    } else {
-        // 正常输入
-        cudaError_t err = cudaMemcpy(input_device_, blob.ptr<float>(),
-                   input_size_ * sizeof(float), cudaMemcpyHostToDevice);
-        if (err != cudaSuccess) {
-            debug::print("error", "TensorRT", "cudaMemcpy to device failed: {}", cudaGetErrorString(err));
-        }
+    // 拷贝输入到 GPU
+    cudaError_t err = cudaMemcpy(input_device_, blob.ptr<float>(),
+               input_size_ * sizeof(float), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) {
+        debug::print("error", "TensorRT", "cudaMemcpy to device failed: {}", cudaGetErrorString(err));
     }
 
-    // 设置张量地址 (每次推理前都要设置)
-    context_->setInputTensorAddress(input_name_.c_str(), input_device_);
-    context_->setTensorAddress(output_name_.c_str(), output_device_);
+    // 构建 bindings 数组 (旧版 API)
+    void* bindings[2];
+    bindings[input_binding_idx_] = input_device_;
+    bindings[output_binding_idx_] = output_device_;
 
-    // 推理 (使用新 API)
-    bool success = context_->enqueueV3(stream_);
+    // 推理 (使用旧版 API, 兼容 TensorRT 8.2+)
+    bool success = context_->enqueueV2(bindings, stream_, nullptr);
 
     // 同步等待推理完成
     cudaStreamSynchronize(stream_);
@@ -397,7 +392,7 @@ std::vector<DetectedArmor> TensorrtDetector::detect(const cv::Mat& image) {
 
     static int exec_debug = 0;
     if (++exec_debug <= 5) {
-        debug::print("info", "TensorRT", "enqueueV3: success={}, sync_err={}",
+        debug::print("info", "TensorRT", "enqueueV2: success={}, sync_err={}",
             success, cudaGetErrorString(sync_err));
 
         // 输出前20个值来检查数据
@@ -508,10 +503,12 @@ std::vector<DetectedArmor> TensorrtDetector::postprocess(
     int dx,
     int dy)
 {
-    // 注意: detect_color_ 是我方颜色，需要反转得到敌方颜色
-    int target_color_idx = (detect_color_ == EnemyColor::BLUE)
-                           ? model_color::RED    // 我方蓝 → 敌方红
-                           : model_color::BLUE;  // 我方红 → 敌方蓝
+    // detect_color_ 是串口传来的 enemy_color (敌方颜色)
+    // enemy_color=RED(敌方红) → 检测红色装甲板
+    // enemy_color=BLUE(敌方蓝) → 检测蓝色装甲板
+    int target_color_idx = (detect_color_ == EnemyColor::RED)
+                           ? model_color::RED
+                           : model_color::BLUE;
 
     std::vector<DetectedArmor> candidates;
     std::vector<cv::Rect> boxes;
@@ -545,13 +542,16 @@ std::vector<DetectedArmor> TensorrtDetector::postprocess(
         }
 
         // 颜色过滤
-        if (color == model_color::GRAY || color == model_color::PURPLE) {
+        // - purple 丢弃 (无意义)
+        // - gray 保留 (灯条闪烁时会短暂变灰，传给 predictor 做消抖)
+        // - 敌方颜色保留
+        if (color == model_color::PURPLE) {
             color_filtered++;
             continue;
         }
-        if (color != target_color_idx) {
+        if (color != target_color_idx && color != model_color::GRAY) {
             color_filtered++;
-            continue;
+            continue;  // 既不是敌方颜色，也不是灰色
         }
 
         // 解析类别
@@ -604,7 +604,12 @@ std::vector<DetectedArmor> TensorrtDetector::postprocess(
         det.confidence = conf;
         det.number = label_to_armor_number(label);
         det.type = get_armor_type(label, ratio);
-        det.color = (color == model_color::RED) ? EnemyColor::RED : EnemyColor::BLUE;
+        // 设置颜色 (灰色用 GRAY 表示，供 predictor 消抖)
+        if (color == model_color::GRAY) {
+            det.color = EnemyColor::GRAY;
+        } else {
+            det.color = (color == model_color::RED) ? EnemyColor::RED : EnemyColor::BLUE;
+        }
 
         candidates.push_back(det);
         boxes.push_back(box);
@@ -623,12 +628,12 @@ std::vector<DetectedArmor> TensorrtDetector::postprocess(
     }
 
     // DEBUG: 输出统计信息
-    static int frame_count = 0;
-    if (++frame_count % 30 == 0) {  // 每30帧输出一次
-        debug::print("debug", "TensorRT",
-            "detections={}, max_conf={:.3f}, above_thresh={}, color_filtered={}, final={}",
-            num_detections, max_conf, above_threshold, color_filtered, results.size());
-    }
+    // static int frame_count = 0;
+    // if (++frame_count % 30 == 0) {  // 每30帧输出一次
+    //     debug::print("debug", "TensorRT",
+    //         "detections={}, max_conf={:.3f}, above_thresh={}, color_filtered={}, final={}",
+    //         num_detections, max_conf, above_threshold, color_filtered, results.size());
+    // }
 
     return results;
 }
@@ -665,6 +670,170 @@ ArmorType TensorrtDetector::get_armor_type(int label, float ratio) {
         return ArmorType::SMALL;
     }
     return (ratio > 3.5f) ? ArmorType::LARGE : ArmorType::SMALL;
+}
+
+// ============================================================================
+// 异步推理实现
+// ============================================================================
+
+void TensorrtDetector::init_async_slots() {
+    for (int i = 0; i < NUM_ASYNC_SLOTS; ++i) {
+        auto& slot = async_slots_[i];
+
+        // 创建独立的CUDA流
+        cudaStreamCreate(&slot.stream);
+
+        // 创建事件用于同步
+        cudaEventCreate(&slot.event);
+
+        // 分配GPU缓冲区
+        cudaMalloc(&slot.input_device, input_size_ * sizeof(float));
+        cudaMalloc(&slot.output_device, output_size_ * sizeof(float));
+
+        // 分配CPU输出缓冲区
+        slot.output_buffer.resize(output_size_);
+
+        slot.in_use = false;
+    }
+    debug::print("info", "TensorRT", "Initialized {} async inference slots", NUM_ASYNC_SLOTS);
+}
+
+void TensorrtDetector::destroy_async_slots() {
+    for (int i = 0; i < NUM_ASYNC_SLOTS; ++i) {
+        auto& slot = async_slots_[i];
+
+        if (slot.stream) {
+            cudaStreamSynchronize(slot.stream);
+            cudaStreamDestroy(slot.stream);
+        }
+        if (slot.event) cudaEventDestroy(slot.event);
+        if (slot.input_device) cudaFree(slot.input_device);
+        if (slot.output_device) cudaFree(slot.output_device);
+    }
+}
+
+int TensorrtDetector::acquire_slot() {
+    std::lock_guard lock(slot_mutex_);
+    for (int i = 0; i < NUM_ASYNC_SLOTS; ++i) {
+        if (!async_slots_[i].in_use) {
+            async_slots_[i].in_use = true;
+            return i;
+        }
+    }
+    return -1;  // 无空闲槽位
+}
+
+void TensorrtDetector::release_slot(int idx) {
+    if (idx >= 0 && idx < NUM_ASYNC_SLOTS) {
+        std::lock_guard lock(slot_mutex_);
+        async_slots_[idx].in_use = false;
+    }
+}
+
+void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
+                            const serial::SerialReceiveData& serial_data)
+{
+    // 检查队列是否已满
+    {
+        std::lock_guard lock(task_mutex_);
+        constexpr size_t MAX_QUEUE_SIZE = 2;
+        if (task_queue_.size() >= MAX_QUEUE_SIZE) {
+            return;  // 丢弃当前帧
+        }
+    }
+
+    // 获取空闲槽位
+    int slot_idx = acquire_slot();
+    if (slot_idx < 0) {
+        return;  // 无可用槽位，丢弃
+    }
+
+    auto& slot = async_slots_[slot_idx];
+
+    // 预处理
+    auto [resized, scale, dx, dy] = preprocess(image);
+
+    // 转换为 NCHW float 并归一化
+    cv::Mat blob;
+    cv::dnn::blobFromImage(resized, blob, 1.0/255.0, cv::Size(), cv::Scalar(),
+                           true, false, CV_32F);
+
+    // 异步拷贝输入到 GPU
+    cudaMemcpyAsync(slot.input_device, blob.ptr<float>(),
+                    input_size_ * sizeof(float), cudaMemcpyHostToDevice, slot.stream);
+
+    // 构建 bindings 数组
+    void* bindings[2];
+    bindings[input_binding_idx_] = slot.input_device;
+    bindings[output_binding_idx_] = slot.output_device;
+
+    // 异步推理
+    context_->enqueueV2(bindings, slot.stream, nullptr);
+
+    // 异步拷贝输出到 CPU
+    cudaMemcpyAsync(slot.output_buffer.data(), slot.output_device,
+                    output_size_ * sizeof(float), cudaMemcpyDeviceToHost, slot.stream);
+
+    // 记录事件 (用于检测完成)
+    cudaEventRecord(slot.event, slot.stream);
+
+    // 入队任务
+    {
+        std::lock_guard lock(task_mutex_);
+        task_queue_.push(TrtInferenceTask{
+            slot_idx,
+            image.clone(),
+            scale, dx, dy,
+            frame_id, timestamp_us,
+            serial_data,
+            std::chrono::steady_clock::now()
+        });
+    }
+    task_cv_.notify_one();
+}
+
+AsyncDetectionResult TensorrtDetector::pop()
+{
+    TrtInferenceTask task;
+
+    // 出队
+    {
+        std::unique_lock lock(task_mutex_);
+        task_cv_.wait(lock, [this] { return !task_queue_.empty(); });
+        task = std::move(task_queue_.front());
+        task_queue_.pop();
+    }
+
+    auto& slot = async_slots_[task.slot_idx];
+
+    // 等待推理完成
+    cudaEventSynchronize(slot.event);
+
+    // 计算延迟
+    auto now = std::chrono::steady_clock::now();
+    float latency_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+        now - task.submit_time).count() / 1000.0f;
+
+    // 后处理
+    auto armors = postprocess(slot.output_buffer.data(), num_detections_,
+                              task.scale, task.dx, task.dy);
+
+    // 释放槽位
+    release_slot(task.slot_idx);
+
+    return AsyncDetectionResult{
+        std::move(armors),
+        std::move(task.image),
+        task.frame_id,
+        task.timestamp_us,
+        task.serial_data,
+        latency_ms
+    };
+}
+
+size_t TensorrtDetector::queue_size() const {
+    std::lock_guard lock(task_mutex_);
+    return task_queue_.size();
 }
 
 }  // namespace autoaim::detector

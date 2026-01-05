@@ -15,7 +15,11 @@
 #ifndef AIMER_AUTOAIM_DETECTOR_TENSORRT_DETECTOR_HPP
 #define AIMER_AUTOAIM_DETECTOR_TENSORRT_DETECTOR_HPP
 
+#include <chrono>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -51,12 +55,39 @@ struct TensorrtConfig {
 };
 
 /**
+ * @brief 异步推理资源槽位 (预分配，避免频繁分配)
+ */
+struct InferenceSlot {
+    cudaStream_t stream = nullptr;
+    cudaEvent_t event = nullptr;
+    void* input_device = nullptr;
+    void* output_device = nullptr;
+    std::vector<float> output_buffer;
+    bool in_use = false;
+};
+
+/**
+ * @brief 异步推理任务
+ */
+struct TrtInferenceTask {
+    int slot_idx;                    // 使用的槽位索引
+    cv::Mat image;                   // 原始图像
+    float scale;
+    int dx, dy;
+    int frame_id;
+    int64_t timestamp_us;
+    serial::SerialReceiveData serial_data;
+    std::chrono::steady_clock::time_point submit_time;
+};
+
+/**
  * @brief 基于 TensorRT 的 YOLO 检测器
  *
  * 特点:
  *   - 使用 NVIDIA TensorRT 推理引擎
  *   - 支持 FP16/INT8 量化加速
  *   - 自动缓存编译后的 engine 文件
+ *   - 支持异步推理 (push/pop 接口)
  */
 class TensorrtDetector : public DetectorInterface {
 public:
@@ -91,6 +122,16 @@ public:
     void set_enemy_color(EnemyColor color) override { detect_color_ = color; }
     EnemyColor get_enemy_color() const override { return detect_color_; }
     cv::Mat debug_image() const override { return debug_img_; }
+    bool is_async() const override { return true; }  // 支持异步
+
+    // ============================================================================
+    // 异步推理接口 (覆盖基类)
+    // ============================================================================
+
+    void push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
+              const serial::SerialReceiveData& serial_data) override;
+    AsyncDetectionResult pop() override;
+    size_t queue_size() const override;
 
 private:
     /**
@@ -152,18 +193,38 @@ private:
      */
     static ArmorType get_armor_type(int label, float ratio);
 
+    /**
+     * @brief 初始化异步推理资源
+     */
+    void init_async_slots();
+
+    /**
+     * @brief 释放异步推理资源
+     */
+    void destroy_async_slots();
+
+    /**
+     * @brief 获取空闲槽位 (-1 表示无)
+     */
+    int acquire_slot();
+
+    /**
+     * @brief 释放槽位
+     */
+    void release_slot(int idx);
+
     // TensorRT 组件
     TrtLogger logger_;
     std::unique_ptr<nvinfer1::IRuntime> runtime_;
     std::unique_ptr<nvinfer1::ICudaEngine> engine_;
     std::unique_ptr<nvinfer1::IExecutionContext> context_;
 
-    // CUDA 缓冲区 (新 API 使用命名张量)
+    // CUDA 缓冲区 (同步模式使用)
     void* input_device_ = nullptr;
     void* output_device_ = nullptr;
     std::vector<float> output_buffer_;
 
-    // CUDA 流
+    // CUDA 流 (同步模式使用)
     cudaStream_t stream_ = nullptr;
 
     // 模型信息
@@ -174,6 +235,20 @@ private:
     size_t input_size_ = 0;
     size_t output_size_ = 0;
     int num_detections_ = 0;
+
+    // Binding 索引 (旧版 API)
+    int input_binding_idx_ = 0;
+    int output_binding_idx_ = 1;
+
+    // 异步推理资源
+    static constexpr int NUM_ASYNC_SLOTS = 2;  // 最多2个并行任务
+    std::array<InferenceSlot, NUM_ASYNC_SLOTS> async_slots_;
+    mutable std::mutex slot_mutex_;
+
+    // 异步任务队列
+    mutable std::mutex task_mutex_;
+    std::condition_variable task_cv_;
+    std::queue<TrtInferenceTask> task_queue_;
 
     // 配置
     TensorrtConfig config_;
