@@ -72,18 +72,15 @@ OpenvinoDetector::OpenvinoDetector(const OpenvinoConfig& config, EnemyColor colo
     ov::preprocess::PrePostProcessor ppp(model_);
 
     // 输入配置: NHWC, BGR, uint8
-    // 注意: 输入尺寸是动态的（加边后的正方形），GPU resize 到模型尺寸
     ppp.input()
         .tensor()
         .set_element_type(ov::element::u8)
         .set_layout("NHWC")
-        .set_spatial_dynamic_shape()  // 动态尺寸
         .set_color_format(ov::preprocess::ColorFormat::BGR);
 
-    // 预处理: GPU resize + 转 float32 + BGR→RGB + 归一化到 [0,1]
+    // 预处理: 转 float32, BGR→RGB, 归一化到 [0,1]
     ppp.input()
         .preprocess()
-        .resize(ov::preprocess::ResizeAlgorithm::RESIZE_LINEAR)  // GPU resize
         .convert_element_type(ov::element::f32)
         .convert_color(ov::preprocess::ColorFormat::RGB)
         .scale({255.0, 255.0, 255.0});
@@ -139,16 +136,14 @@ OpenvinoDetector::~OpenvinoDetector() = default;
 
 std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 {
-    // 预处理 (CPU 加边成正方形，GPU resize 到模型尺寸)
-    auto [padded, scale, dx, dy] = preprocess(image);
+    // 预处理
+    auto [resized, scale, dx, dy] = preprocess(image);
 
-    // 创建输入张量 (动态尺寸: 加边后的正方形)
-    ov::Shape input_shape = {1, static_cast<size_t>(padded.rows),
-                             static_cast<size_t>(padded.cols), 3};
+    // 创建输入张量
     ov::Tensor input_tensor = ov::Tensor(
-        ov::element::u8,
-        input_shape,
-        padded.data
+        compiled_model_.input().get_element_type(),
+        compiled_model_.input().get_shape(),
+        resized.data
     );
 
     // 推理
@@ -172,9 +167,6 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
                             const serial::SerialReceiveData& serial_data)
 {
-    // 记录提交时间
-    auto submit_time = std::chrono::steady_clock::now();
-
     // 队列过长时直接丢弃新帧 (不阻塞)
     {
         std::lock_guard lock(task_mutex_);
@@ -184,36 +176,33 @@ void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
         }
     }
 
-    // 预处理 (CPU 加边成正方形)
-    auto [padded, scale, dx, dy] = preprocess(image);
+    // 预处理
+    auto [resized, scale, dx, dy] = preprocess(image);
 
     // 创建新的 InferRequest (每帧一个，支持并行)
     auto infer_request = compiled_model_.create_infer_request();
 
-    // 创建输入张量 (动态尺寸: 加边后的正方形)
-    ov::Shape input_shape = {1, static_cast<size_t>(padded.rows),
-                             static_cast<size_t>(padded.cols), 3};
+    // 创建输入张量
     ov::Tensor input_tensor = ov::Tensor(
-        ov::element::u8,
-        input_shape,
-        padded.data
+        compiled_model_.input().get_element_type(),
+        compiled_model_.input().get_shape(),
+        resized.data
     );
 
     // 设置输入并异步启动推理
     infer_request.set_input_tensor(input_tensor);
     infer_request.start_async();
 
-    // 入队 (保存 padded 图像，因为 tensor 引用它的数据)
+    // 入队
     {
         std::lock_guard lock(task_mutex_);
         task_queue_.push(InferenceTask{
             std::move(infer_request),
-            image.clone(),           // 原始图像用于可视化
-            std::move(padded),       // 预处理后图像 (tensor 依赖)
+            image.clone(),  // 保存原始图像用于可视化
             scale, dx, dy,
             frame_id, timestamp_us,
             serial_data,
-            submit_time
+            std::chrono::steady_clock::now()
         });
     }
     task_cv_.notify_one();
@@ -266,25 +255,25 @@ std::tuple<cv::Mat, float, int, int> OpenvinoDetector::preprocess(const cv::Mat&
 {
     int target_size = config_.input_size;
 
-    // 优化: CPU 只加边成正方形, GPU 做 resize
-    // 这样 CPU 只需 copyMakeBorder (~0.3ms), 避免 cv::resize (~5ms)
-    int max_side = std::max(image.cols, image.rows);
-    float scale = static_cast<float>(target_size) / max_side;
+    // Letterbox resize (保持宽高比)
+    float scale = std::min(
+        static_cast<float>(target_size) / image.cols,
+        static_cast<float>(target_size) / image.rows
+    );
 
-    // 计算 padding (加边到正方形)
-    int pad_x = (max_side - image.cols) / 2;
-    int pad_y = (max_side - image.rows) / 2;
+    int new_w = static_cast<int>(image.cols * scale);
+    int new_h = static_cast<int>(image.rows * scale);
 
-    // CPU 加边 (很快，只是内存拷贝)
-    cv::Mat padded;
-    cv::copyMakeBorder(image, padded,
-                       pad_y, max_side - image.rows - pad_y,
-                       pad_x, max_side - image.cols - pad_x,
-                       cv::BORDER_CONSTANT, cv::Scalar(114, 114, 114));
+    cv::Mat resized;
+    cv::resize(image, resized, cv::Size(new_w, new_h));
 
-    // 返回 dx, dy 是最终 640x640 图上的偏移
-    int dx = static_cast<int>(pad_x * scale);
-    int dy = static_cast<int>(pad_y * scale);
+    // 创建灰色背景
+    cv::Mat padded(target_size, target_size, CV_8UC3, cv::Scalar(114, 114, 114));
+
+    // 居中放置
+    int dx = (target_size - new_w) / 2;
+    int dy = (target_size - new_h) / 2;
+    resized.copyTo(padded(cv::Rect(dx, dy, new_w, new_h)));
 
     return {padded, scale, dx, dy};
 }
