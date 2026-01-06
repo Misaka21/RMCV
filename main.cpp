@@ -46,7 +46,8 @@ void signal_handler(int sig) {
     pred_running->get() = false;
     rec_running->get() = false;
     wd_running->get() = false;
-    std::exit(1);
+    // 不调用 exit()，让主线程 join 各线程后正常退出
+    // 这样 recorder 有时间 release() 保存视频
 }
 
 void print_usage(const char* prog_name) {

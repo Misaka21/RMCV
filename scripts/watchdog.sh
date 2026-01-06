@@ -190,7 +190,10 @@ check_heartbeat() {
 
 bringup() {
     kill_screen
-    pkill -9 -f RMCV2026 2>/dev/null || true
+    # 先发 SIGTERM 让进程优雅退出，等待 2 秒后再强制杀死
+    pkill -TERM -x RMCV2026 2>/dev/null || true
+    sleep 2
+    pkill -9 -x RMCV2026 2>/dev/null || true
     sleep 1
     start_screen
 }
