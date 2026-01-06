@@ -15,7 +15,7 @@
 #
 
 # ========== 配置 ==========
-TIMEOUT=10                       # 心跳超时 (秒)
+TIMEOUT=15                       # 心跳超时 (秒), 需 > C++ watchdog_node (5s超时 + 10s等待)
 MAX_RETRY=100                    # 最大重启次数
 SCREEN_NAME="rmcv"               # screen 会话名
 
@@ -143,7 +143,7 @@ start_screen() {
     sleep 3  # 等待 RMCV 启动
 
     # 获取 RMCV PID 并设置优先级
-    RMCV_PID=$(pgrep -f "RMCV2026" | head -1)
+    RMCV_PID=$(pgrep -x RMCV2026 | head -1)
     if [ -n "$RMCV_PID" ]; then
         log_msg "RMCV PID: $RMCV_PID"
         set_priority $RMCV_PID
@@ -153,7 +153,7 @@ start_screen() {
 # ========== 进程/心跳检查 ==========
 
 check_process() {
-    pgrep -f RMCV2026 > /dev/null
+    pgrep -x RMCV2026 > /dev/null
 }
 
 check_screen() {

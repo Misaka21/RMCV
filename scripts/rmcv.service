@@ -23,7 +23,7 @@ WorkingDirectory=/home/rmcv/RMCV/scripts
 
 # 使用看门狗脚本启动 (支持 screen + 心跳监控)
 ExecStart=/home/rmcv/RMCV/scripts/watchdog.sh --match
-ExecStop=/bin/bash -c "pkill -f rmcv_watch; pkill -f RMCV2026; screen -S rmcv -X quit"
+ExecStop=/bin/bash -c "pkill -f watchdog.sh; pkill -f RMCV2026; screen -S rmcv -X quit"
 
 # 崩溃自动重启
 Restart=always
@@ -34,10 +34,8 @@ StartLimitBurst=50
 StartLimitIntervalSec=3600
 
 # ========== 进程优先级 ==========
-# Nice 优先级 (-20最高, 19最低)
-Nice=-15
-
-# 实时调度 (需要 root)
+# Nice/RT 优先级由 watchdog.sh 设置 (更灵活)
+# Nice=-15
 # CPUSchedulingPolicy=fifo
 # CPUSchedulingPriority=50
 

@@ -69,10 +69,12 @@ def stream():
 
 @app.route('/api/topics')
 def list_topics():
-    """List all image topics"""
+    """List all image topics (only topics starting with '/' are for Web UI)"""
     if MESSAGE_MODULE is not None:
         try:
-            topics = list(MESSAGE_MODULE.names())
+            all_topics = list(MESSAGE_MODULE.names())
+            # 只显示以 '/' 开头的调试 topic，其他是内部用途 (如 predictor_vis 给录制)
+            topics = [t for t in all_topics if t.startswith('/')]
             return jsonify(topics)
         except Exception as e:
             return jsonify({"error": str(e)})
