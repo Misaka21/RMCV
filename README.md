@@ -69,7 +69,52 @@ make -j$(nproc)
 ### 运行
 
 ```bash
-./RMCV2026
+./RMCV2026              # 普通运行
+./RMCV2026 --web        # 带 Web 调试界面 (http://localhost:5000)
+./RMCV2026 --match      # 比赛模式 (强制内录)
+```
+
+### 服务管理
+
+安装 systemd 服务 (开机自启)：
+```bash
+sudo ./scripts/install_service.sh
+```
+
+服务控制命令：
+```bash
+sudo systemctl start rmcv     # 启动
+sudo systemctl stop rmcv      # 停止
+sudo systemctl status rmcv    # 查看状态
+sudo systemctl restart rmcv   # 重启
+
+# 开机自启控制
+sudo systemctl enable rmcv    # 启用开机自启
+sudo systemctl disable rmcv   # 禁用开机自启
+
+# 查看日志
+journalctl -u rmcv -f         # 实时日志
+screen -r rmcv                # 连接终端 (Ctrl+A D 断开)
+```
+
+### 调试模式
+
+调试前需要先停止服务：
+```bash
+# 停止 + 禁用开机自启
+sudo systemctl disable --now rmcv
+
+# 手动运行调试
+cd build
+./RMCV2026 --web
+
+# 调试完成后恢复
+sudo systemctl enable --now rmcv
+```
+
+或使用清理脚本：
+```bash
+./scripts/cleanup.sh          # 停止所有 RMCV 相关进程
 ```
 
 ### 测试
