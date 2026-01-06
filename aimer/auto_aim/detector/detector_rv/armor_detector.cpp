@@ -180,8 +180,8 @@ Detector::find_lights(const cv::Mat& rgb_img, const cv::Mat& binary_img) noexcep
         if (is_light(light)) {
             int sum_r = 0, sum_b = 0;
             for (const auto& point: contour) {
-                sum_b += rgb_img.at<cv::Vec3b>(point.y, point.x)[0];  // BGR: [0]=B
-                sum_r += rgb_img.at<cv::Vec3b>(point.y, point.x)[2];  // BGR: [2]=R
+                sum_r += rgb_img.at<cv::Vec3b>(point.y, point.x)[0];  // RGB: [0]=R
+                sum_b += rgb_img.at<cv::Vec3b>(point.y, point.x)[2];  // RGB: [2]=B
             }
             if (std::abs(sum_r - sum_b) / static_cast<int>(contour.size())
                 > light_params.color_diff_thresh)
