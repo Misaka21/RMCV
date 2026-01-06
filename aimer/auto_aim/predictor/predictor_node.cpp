@@ -20,6 +20,7 @@
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
+#include "plugin/webview/dashboard.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim::predictor {
@@ -324,6 +325,7 @@ void start_predictor_node() {
     umt::Subscriber<DetectionResult> sub("detections");
     umt::Publisher<BattlefieldSnapshot> pub("battlefield");
     umt::Publisher<cv::Mat> vis_pub("predictor_vis");  // 可视化帧 (供录制)
+    umt::Publisher<cv::Mat> pub_debug("/predictor/debug");  // Web 调试图像
     auto running = umt::BasicObjManager<bool>::find_or_create("predictor_running", true);
 
     stats::FpsStats stats("PredictorNode", "tracked");
@@ -386,9 +388,15 @@ void start_predictor_node() {
             }
             stats.update(latency, tracked > 0);  // tick + print_if_needed
 
-            // 可视化 (只在需要时执行)
+            // 更新 Dashboard 数据
+            dashboard::set("predictor.latency_ms", latency);
+            dashboard::set("predictor.tracked_count", tracked);
+            dashboard::set("predictor.fps", stats.last_fps);
+
+            // 可视化 (在有 Web 订阅者或 show_window 时执行)
             bool show_window = runtime_param::get_param<bool>("AutoAim.Predictor.show_window");
-            if (show_window && !detection.img.empty()) {
+            bool has_sub = pub_debug.has_subscriber();
+            if ((has_sub || show_window) && !detection.img.empty()) {
                 cv::Mat vis = detection.img.clone();
                 draw_prediction(vis, snapshot, table, detection.state.q_imu);
                 predictor.draw(vis, detection.state.q_imu, timestamp);
@@ -446,8 +454,14 @@ void start_predictor_node() {
                     cv::Scalar(100, 255, 150), -1);
 
                 vis_pub.push(vis);
-                cv::imshow("Predictor", vis);
-                cv::waitKey(1);
+
+                if (has_sub) {
+                    pub_debug.push(vis);
+                }
+                if (show_window) {
+                    cv::imshow("Predictor", vis);
+                    cv::waitKey(1);
+                }
             }
 
         } catch (const umt::MessageError_Timeout&) {

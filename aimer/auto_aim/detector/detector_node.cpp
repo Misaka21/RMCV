@@ -10,11 +10,14 @@
 #include <memory>
 #include <thread>
 
+#include <fmt/format.h>
+
 #include "detector_factory.hpp"
 #include "detector_node.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
+#include "plugin/webview/dashboard.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim {
@@ -28,6 +31,7 @@ using SteadyClock = std::chrono::steady_clock;
 void run_sync_loop(detector::DetectorInterface* detector) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<aimer::DetectionResult> pub("detections");
+    umt::Publisher<cv::Mat> pub_debug("/detector/debug");
     auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
 
     auto config = static_param::parse_file("detector.toml");
@@ -78,6 +82,33 @@ void run_sync_loop(detector::DetectorInterface* detector) {
             pub.push(result);
             stats.update(latency_ms, !result.armors.empty());
 
+            // 更新 Dashboard 数据
+            dashboard::set("detector.latency_ms", latency_ms);
+            dashboard::set("detector.armor_count", static_cast<int>(result.armors.size()));
+            dashboard::set("detector.fps", stats.last_fps);
+
+            // 发布 Debug 图像给 Web (只在有订阅者时处理)
+            if (pub_debug.has_subscriber()) {
+                cv::Mat debug_img = frame.image.clone();
+                for (const auto& armor : result.armors) {
+                    const auto& pts = armor.landmarks;
+                    for (size_t i = 0; i < pts.size(); i++) {
+                        cv::line(debug_img, pts[i], pts[(i+1)%pts.size()],
+                                 cv::Scalar(0, 255, 0), 2);
+                    }
+                    cv::circle(debug_img, armor.center, 5, cv::Scalar(0, 0, 255), -1);
+                    cv::putText(debug_img, armor_number_to_string(armor.number),
+                                armor.center + cv::Point2f(10, -10),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 0), 2);
+                }
+                std::string info = fmt::format("FPS:{} Lat:{:.1f}ms Cnt:{}",
+                    stats.last_fps, latency_ms, result.armors.size());
+                cv::putText(debug_img, info, cv::Point(10, 30),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
+                pub_debug.push(debug_img);
+            }
+
+            // 原始 debug 窗口 (包含世界坐标网格)
             if (debug_mode) {
                 draw_debug_visualization(frame.image, result, frame);
             }
@@ -99,6 +130,7 @@ void run_sync_loop(detector::DetectorInterface* detector) {
 void run_async_loop(detector::DetectorInterface* detector) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<aimer::DetectionResult> pub("detections");
+    umt::Publisher<cv::Mat> pub_debug("/detector/debug");
     auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
 
     auto config = static_param::parse_file("detector.toml");
@@ -170,6 +202,33 @@ void run_async_loop(detector::DetectorInterface* detector) {
         pub.push(result);
         pop_stats.update(async_result.latency_ms, !result.armors.empty());
 
+        // 更新 Dashboard 数据
+        dashboard::set("detector.latency_ms", async_result.latency_ms);
+        dashboard::set("detector.armor_count", static_cast<int>(result.armors.size()));
+        dashboard::set("detector.fps", pop_stats.last_fps);
+
+        // 发布 Debug 图像给 Web (只在有订阅者时处理)
+        if (pub_debug.has_subscriber() && !async_result.image.empty()) {
+            cv::Mat debug_img = async_result.image.clone();
+            for (const auto& armor : result.armors) {
+                const auto& pts = armor.landmarks;
+                for (size_t i = 0; i < pts.size(); i++) {
+                    cv::line(debug_img, pts[i], pts[(i+1)%pts.size()],
+                             cv::Scalar(0, 255, 0), 2);
+                }
+                cv::circle(debug_img, armor.center, 5, cv::Scalar(0, 0, 255), -1);
+                cv::putText(debug_img, armor_number_to_string(armor.number),
+                            armor.center + cv::Point2f(10, -10),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 0), 2);
+            }
+            std::string info = fmt::format("FPS:{} Lat:{:.1f}ms Cnt:{}",
+                pop_stats.last_fps, async_result.latency_ms, result.armors.size());
+            cv::putText(debug_img, info, cv::Point(10, 30),
+                cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
+            pub_debug.push(debug_img);
+        }
+
+        // 原始 debug 窗口 (包含世界坐标网格)
         if (debug_mode && !async_result.image.empty()) {
             hardware::SyncFrame frame;
             frame.image = async_result.image;

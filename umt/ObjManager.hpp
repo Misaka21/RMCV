@@ -5,11 +5,15 @@
 
 // C++ system headers
 #include <mutex>
+#include <set>
+#include <unordered_map>
 
-// Third-party library headers
+// Third-party library headers (optional)
+#ifdef ENABLE_WEBVIEW
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#endif
 
 namespace umt {
     namespace utils {
@@ -154,6 +158,8 @@ namespace umt {
     ObjManager<T>::_map;
 } // namespace umt
 
+#ifdef ENABLE_WEBVIEW
+// pybind11 导出宏 - 仅在启用 ENABLE_WEBVIEW 时生效
 #define UMT_EXPORT_OBJMANAGER_ALIAS(name, type, var)               \
   void __umt_init_objmanager_##name(pybind11::class_<type>&& var); \
   PYBIND11_EMBEDDED_MODULE(ObjManager_##name, m) {                 \
@@ -173,5 +179,15 @@ namespace umt {
 
 #define UMT_EXPORT_OBJMANAGER(type, var) \
   UMT_EXPORT_OBJMANAGER_ALIAS(type, type, var)
+
+#else
+// 空实现 - 禁用 Python 绑定时不做任何事
+#define UMT_EXPORT_OBJMANAGER_ALIAS(name, type, var) \
+  static inline void __umt_noop_objmanager_##name([[maybe_unused]] int var)
+
+#define UMT_EXPORT_OBJMANAGER(type, var) \
+  UMT_EXPORT_OBJMANAGER_ALIAS(type, type, var)
+
+#endif  // ENABLE_WEBVIEW
 
 #endif /* _UMT_OBJ_MANAGER_HPP_ */

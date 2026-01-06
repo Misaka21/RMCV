@@ -7,6 +7,10 @@
 // Third-party library headers
 #include <fmt/color.h>
 
+#ifdef ENABLE_WEBVIEW
+#include <Python.h>
+#endif
+
 // Project headers
 #include "aimer/auto_aim/detector/detector_node.hpp"
 #include "aimer/auto_aim/predictor/predictor_node.hpp"
@@ -17,6 +21,10 @@
 #include "plugin/rmcv_bag/recorder_node.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
 #include "umt/umt.hpp"
+
+#ifndef WEB_DIR
+#define WEB_DIR "web"
+#endif
 
 // 全局运行标志
 static std::atomic<bool> g_running{true};
@@ -45,6 +53,7 @@ void print_usage(const char* prog_name) {
     fmt::print("用法: {} [选项]\n", prog_name);
     fmt::print("选项:\n");
     fmt::print("  --match, -m         比赛模式 (强制内录)\n");
+    fmt::print("  --web               Web调试模式 (启动Flask服务器)\n");
     fmt::print("  --log-dir <path>    指定日志目录 (由 watchdog 传入)\n");
     fmt::print("  --help, -h          显示帮助信息\n");
 }
@@ -52,11 +61,20 @@ void print_usage(const char* prog_name) {
 int main(int argc, char* argv[]) {
     // ========== 解析命令行参数 ==========
     bool match_mode = false;
+    bool web_mode = false;
     std::string log_dir;  // 外部指定的日志目录
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--match") == 0 || std::strcmp(argv[i], "-m") == 0) {
             match_mode = true;
+        } else if (std::strcmp(argv[i], "--web") == 0) {
+#ifdef ENABLE_WEBVIEW
+            web_mode = true;
+#else
+            fmt::print(fmt::fg(fmt::color::red),
+                "[ERROR] --web 需要 ENABLE_WEBVIEW，请安装 pybind11 后重新编译\n");
+            return 1;
+#endif
         } else if (std::strcmp(argv[i], "--log-dir") == 0 && i + 1 < argc) {
             log_dir = argv[++i];
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
@@ -154,9 +172,41 @@ int main(int argc, char* argv[]) {
     debug::print(debug::PrintMode::INFO, "Main", "All threads started");
     fmt::print(fmt::fg(fmt::color::green), "[INFO] 系统启动完成，按 Ctrl+C 退出\n");
 
-    // 主线程等待
-    while (g_running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+#ifdef ENABLE_WEBVIEW
+    if (web_mode) {
+        // Web调试模式：启动Flask服务器
+        fmt::print(fmt::fg(fmt::color::cyan),
+            "======================================================================\n"
+            "                     WEB DEBUG MODE - 网页调试模式                    \n"
+            "                     http://localhost:5000                            \n"
+            "======================================================================\n");
+
+        // 设置Python路径
+        std::string app_path = std::string(WEB_DIR) + "/app.py";
+
+        // 构建Python argv
+        std::wstring w_prog = L"RMCV2026";
+        std::wstring w_app_path(app_path.begin(), app_path.end());
+
+        wchar_t* py_argv[] = {
+            const_cast<wchar_t*>(w_prog.c_str()),
+            const_cast<wchar_t*>(w_app_path.c_str()),
+            nullptr
+        };
+
+        // 运行Python (阻塞，直到Flask服务器退出)
+        int py_result = Py_Main(2, py_argv);
+
+        // Python退出后，通知所有线程停止
+        g_running = false;
+        fmt::print(fmt::fg(fmt::color::yellow), "[INFO] Flask服务器已退出 (code={})\n", py_result);
+    } else
+#endif
+    {
+        // 普通模式：主线程等待
+        while (g_running) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 
     // 停止看门狗

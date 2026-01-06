@@ -10,9 +10,11 @@
 #include <mutex>
 #include <queue>
 
-// Third-party library headers
+// Third-party library headers (optional)
+#ifdef ENABLE_WEBVIEW
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
+#endif
 
 // Project headers
 #include "ObjManager.hpp"
@@ -346,6 +348,8 @@ namespace umt {
     };
 } // namespace umt
 
+#ifdef ENABLE_WEBVIEW
+// pybind11 导出宏 - 仅在启用 ENABLE_WEBVIEW 时生效
 #define UMT_EXPORT_MESSAGE_ALIAS_WITHOUT_TYPE_EXPORT(name, type, var) \
   PYBIND11_EMBEDDED_MODULE(Message_##name, m) {                       \
     using namespace umt;                                              \
@@ -398,5 +402,15 @@ namespace umt {
     }                                                              \
   }                                                                \
   void __umt_init_message_##name(pybind11::class_<type>&& var)
+
+#else
+// 空实现 - 禁用 Python 绑定时不做任何事
+#define UMT_EXPORT_MESSAGE_ALIAS_WITHOUT_TYPE_EXPORT(name, type, var) \
+  static inline void __umt_noop_msg_noexport_##name([[maybe_unused]] int var)
+
+#define UMT_EXPORT_MESSAGE_ALIAS(name, type, var) \
+  static inline void __umt_noop_msg_##name([[maybe_unused]] int var)
+
+#endif  // ENABLE_WEBVIEW
 
 #endif /* _UMT_MESSAGE_HPP_ */

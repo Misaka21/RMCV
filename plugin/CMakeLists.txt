@@ -8,8 +8,13 @@ aux_source_directory(./debug debug_src)
 aux_source_directory(./param param_src)
 aux_source_directory(./plotter plotter_src)
 
+# Webview sources (仅在启用时编译)
+if(ENABLE_WEBVIEW)
+    aux_source_directory(./webview webview_src)
+endif()
+
 # Create plugin library
-add_library(${lib_name} STATIC ${debug_src} ${param_src} ${plotter_src})
+add_library(${lib_name} STATIC ${debug_src} ${param_src} ${plotter_src} ${webview_src})
 
 target_include_directories(${lib_name} PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -17,12 +22,25 @@ target_include_directories(${lib_name} PUBLIC
         ${EIGEN3_INCLUDE_DIR}
 )
 
+# 基础链接库
 target_link_libraries(${lib_name} PUBLIC
         ${OpenCV_LIBS}
         Eigen3::Eigen
         tomlplusplus::tomlplusplus
         fmt::fmt
 )
+
+# 如果启用 ENABLE_WEBVIEW，添加 pybind11 依赖
+if(ENABLE_WEBVIEW)
+    target_include_directories(${lib_name} PUBLIC
+            ${Python_INCLUDE_DIRS}
+            ${pybind11_INCLUDE_DIRS}
+    )
+    target_link_libraries(${lib_name} PUBLIC
+            pybind11::embed
+            ${Python_LIBRARIES}
+    )
+endif()
 
 # 添加 rmcv_bag 子模块 (录制和回放)
 add_subdirectory(rmcv_bag)
