@@ -52,6 +52,8 @@ endif()
 # 创建 detector_node 库
 add_library(detector_node STATIC
     detector_node.cpp
+    detector_helpers.cpp
+    detector_visualizer.cpp
 )
 
 target_include_directories(detector_node PUBLIC

@@ -77,6 +77,7 @@ message(STATUS "--------------------ENABLE_PROFILING: ${ENABLE_PROFILING}-------
 find_package(OpenCV REQUIRED)
 find_package(fmt REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(Threads REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
 
 # Python/pybind11 可选 - 用于 Web UI (--web 参数)
@@ -123,7 +124,7 @@ else()
 endif()
 
 add_executable(test_param test/test_param.cpp)
-target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin)
+target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin Threads::Threads)
 
 add_executable(test_serial test/test_serial.cpp)
 target_link_libraries(test_serial ${OpenCV_LIBS} fmt::fmt plugin hardware)

@@ -1,19 +1,19 @@
 //
 // Detector Node - 检测节点
 //
-// 根据检测器类型自动选择模式:
-//   - is_async() = false: 单线程同步模式 (传统检测器)
-//   - is_async() = true:  双线程异步模式 (YOLO检测器)
-//
+
+#include "detector_node.hpp"
 
 #include <atomic>
 #include <memory>
 #include <thread>
 
 #include <fmt/format.h>
+#include <opencv2/core/mat.hpp>
 
 #include "detector_factory.hpp"
-#include "detector_node.hpp"
+#include "detector_helpers.hpp"
+#include "detector_visualizer.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
@@ -25,10 +25,45 @@ namespace autoaim {
 using SteadyClock = std::chrono::steady_clock;
 
 // ============================================================================
+// 公共辅助
+// ============================================================================
+
+namespace {
+
+// 更新检测器颜色
+void update_detector_color(detector::DetectorInterface* det, uint8_t serial_color) {
+    if (serial_color != 0) {
+        det->set_enemy_color(detector::serial_to_enemy_color(serial_color));
+    }
+}
+
+// 更新 Dashboard 数据
+void update_dashboard(float latency_ms, size_t armor_count, float fps) {
+    dashboard::set("detector.latency_ms", latency_ms);
+    dashboard::set("detector.armor_count", static_cast<int>(armor_count));
+    dashboard::set("detector.fps", fps);
+}
+
+// 发布 Debug 图像 (如果有订阅者)
+void publish_debug_image(
+    umt::Publisher<cv::Mat>& pub,
+    const cv::Mat& image,
+    const std::vector<detector::DetectedArmor>& armors,
+    float fps,
+    float latency_ms
+) {
+    if (pub.has_subscriber() && !image.empty()) {
+        pub.push(detector::draw_debug_overlay(image, armors, fps, latency_ms));
+    }
+}
+
+}  // namespace
+
+// ============================================================================
 // 同步模式 (传统检测器)
 // ============================================================================
 
-void run_sync_loop(detector::DetectorInterface* detector) {
+void run_sync_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<aimer::DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
@@ -45,72 +80,36 @@ void run_sync_loop(detector::DetectorInterface* detector) {
         watchdog::heartbeat("detector");
         try {
             auto frame = sub.pop_for(1000);
-            if (frame.image.empty()) continue;
-            if (!frame.serial_valid) continue;
+            if (frame.image.empty() || !frame.serial_valid) continue;
 
             // 更新颜色
-            if (frame.serial_data.enemy_color != 0) {
-                auto color = (frame.serial_data.enemy_color == 1)
-                    ? detector::EnemyColor::RED
-                    : detector::EnemyColor::BLUE;
-                detector->set_enemy_color(color);
-            }
+            update_detector_color(det, frame.serial_data.enemy_color);
 
-            // 同步检测
-            auto detect_start = SteadyClock::now();
-            auto armors = detector->detect(frame.image);
-            auto detect_end = SteadyClock::now();
+            // 检测
+            auto t0 = SteadyClock::now();
+            auto armors = det->detect(frame.image);
+            auto t1 = SteadyClock::now();
+            float latency_ms = std::chrono::duration<float, std::milli>(t1 - t0).count();
 
-            float latency_ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                detect_end - detect_start).count() / 1000.0f;
-
-            // 构建 DetectionResult
-            aimer::DetectionResult result;
-            result.frame_id = frame.frame_id;
-            result.armors = std::move(armors);
-            result.latency_ms = latency_ms;
-            result.img = frame.image;  // 始终传递图片给 predictor
-
-            const auto& s = frame.serial_data;
-            result.state.set_euler(s.yaw, s.pitch, s.roll);
-            result.state.bullet_speed = s.bullet_speed;
-            result.state.enemy_color = s.enemy_color;
-            result.state.aim_mode = s.aim_mode;
-            result.state.allow_fire = s.allow_fire;
-            result.state.timestamp_us = frame.timestamp_us;
-
+            // 构建并发布结果
+            auto result = detector::build_detection_result(
+                std::move(armors), frame.image,
+                frame.frame_id, frame.timestamp_us,
+                frame.serial_data, latency_ms
+            );
             pub.push(result);
+
+            // 统计
             stats.update(latency_ms, !result.armors.empty());
+            update_dashboard(latency_ms, result.armors.size(), stats.last_fps);
 
-            // 更新 Dashboard 数据
-            dashboard::set("detector.latency_ms", latency_ms);
-            dashboard::set("detector.armor_count", static_cast<int>(result.armors.size()));
-            dashboard::set("detector.fps", stats.last_fps);
+            // Web 调试图像
+            publish_debug_image(pub_debug, frame.image, result.armors,
+                                stats.last_fps, latency_ms);
 
-            // 发布 Debug 图像给 Web (只在有订阅者时处理)
-            if (pub_debug.has_subscriber()) {
-                cv::Mat debug_img = frame.image.clone();
-                for (const auto& armor : result.armors) {
-                    const auto& pts = armor.landmarks;
-                    for (size_t i = 0; i < pts.size(); i++) {
-                        cv::line(debug_img, pts[i], pts[(i+1)%pts.size()],
-                                 cv::Scalar(0, 255, 0), 2);
-                    }
-                    cv::circle(debug_img, armor.center, 5, cv::Scalar(0, 0, 255), -1);
-                    cv::putText(debug_img, armor_number_to_string(armor.number),
-                                armor.center + cv::Point2f(10, -10),
-                                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 0), 2);
-                }
-                std::string info = fmt::format("FPS:{} Lat:{:.1f}ms Cnt:{}",
-                    stats.last_fps, latency_ms, result.armors.size());
-                cv::putText(debug_img, info, cv::Point(10, 30),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
-                pub_debug.push(debug_img);
-            }
-
-            // 原始 debug 窗口 (包含世界坐标网格)
+            // 本地调试窗口
             if (debug_mode) {
-                draw_debug_visualization(frame.image, result, frame);
+                detector::draw_debug_visualization(frame.image, result, frame);
             }
 
         } catch (const umt::MessageError_Timeout&) {
@@ -119,7 +118,7 @@ void run_sync_loop(detector::DetectorInterface* detector) {
     }
 
     if (debug_mode) {
-        cv::destroyWindow("Detector Debug");
+        detector::close_debug_window();
     }
 }
 
@@ -127,7 +126,7 @@ void run_sync_loop(detector::DetectorInterface* detector) {
 // 异步模式 (YOLO 检测器)
 // ============================================================================
 
-void run_async_loop(detector::DetectorInterface* detector) {
+void run_async_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<aimer::DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
@@ -141,28 +140,26 @@ void run_async_loop(detector::DetectorInterface* detector) {
 
     std::atomic<detector::EnemyColor> current_color{detector::EnemyColor::RED};
 
-    // Push 线程
+    // Push 线程: 从相机读取帧，推送给检测器
     std::thread push_thread([&]() {
         debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread started");
 
         while (running->get()) {
-        watchdog::heartbeat("detector");
+            watchdog::heartbeat("detector");
             try {
                 auto frame = sub.pop_for(1000);
-                if (frame.image.empty()) continue;
-                if (!frame.serial_valid) continue;
+                if (frame.image.empty() || !frame.serial_valid) continue;
 
+                // 更新颜色
                 if (frame.serial_data.enemy_color != 0) {
-                    auto color = (frame.serial_data.enemy_color == 1)
-                        ? detector::EnemyColor::RED
-                        : detector::EnemyColor::BLUE;
+                    auto color = detector::serial_to_enemy_color(frame.serial_data.enemy_color);
                     if (current_color.load() != color) {
                         current_color.store(color);
-                        detector->set_enemy_color(color);
+                        det->set_enemy_color(color);
                     }
                 }
 
-                detector->push(frame.image, frame.frame_id, frame.timestamp_us, frame.serial_data);
+                det->push(frame.image, frame.frame_id, frame.timestamp_us, frame.serial_data);
                 push_stats.update();
 
             } catch (const umt::MessageError_Timeout&) {
@@ -175,60 +172,30 @@ void run_async_loop(detector::DetectorInterface* detector) {
 
     debug::print(debug::PrintMode::INFO, "DetectorNode", "Running in async mode");
 
-    // Pop 主循环
+    // Pop 主循环: 获取检测结果并发布
     while (running->get()) {
         watchdog::heartbeat("detector");
-        if (detector->queue_size() == 0) {
+
+        if (det->queue_size() == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
 
-        auto async_result = detector->pop();
+        auto async_result = det->pop();
 
-        aimer::DetectionResult result;
-        result.frame_id = async_result.frame_id;
-        result.armors = std::move(async_result.armors);
-        result.latency_ms = async_result.latency_ms;
-        result.img = async_result.image;
-
-        const auto& s = async_result.serial_data;
-        result.state.set_euler(s.yaw, s.pitch, s.roll);
-        result.state.bullet_speed = s.bullet_speed;
-        result.state.enemy_color = s.enemy_color;
-        result.state.aim_mode = s.aim_mode;
-        result.state.allow_fire = s.allow_fire;
-        result.state.timestamp_us = async_result.timestamp_us;
-
+        // 构建并发布结果
+        auto result = detector::build_detection_result(async_result);
         pub.push(result);
+
+        // 统计
         pop_stats.update(async_result.latency_ms, !result.armors.empty());
+        update_dashboard(async_result.latency_ms, result.armors.size(), pop_stats.last_fps);
 
-        // 更新 Dashboard 数据
-        dashboard::set("detector.latency_ms", async_result.latency_ms);
-        dashboard::set("detector.armor_count", static_cast<int>(result.armors.size()));
-        dashboard::set("detector.fps", pop_stats.last_fps);
+        // Web 调试图像
+        publish_debug_image(pub_debug, async_result.image, result.armors,
+                            pop_stats.last_fps, async_result.latency_ms);
 
-        // 发布 Debug 图像给 Web (只在有订阅者时处理)
-        if (pub_debug.has_subscriber() && !async_result.image.empty()) {
-            cv::Mat debug_img = async_result.image.clone();
-            for (const auto& armor : result.armors) {
-                const auto& pts = armor.landmarks;
-                for (size_t i = 0; i < pts.size(); i++) {
-                    cv::line(debug_img, pts[i], pts[(i+1)%pts.size()],
-                             cv::Scalar(0, 255, 0), 2);
-                }
-                cv::circle(debug_img, armor.center, 5, cv::Scalar(0, 0, 255), -1);
-                cv::putText(debug_img, armor_number_to_string(armor.number),
-                            armor.center + cv::Point2f(10, -10),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 0), 2);
-            }
-            std::string info = fmt::format("FPS:{} Lat:{:.1f}ms Cnt:{}",
-                pop_stats.last_fps, async_result.latency_ms, result.armors.size());
-            cv::putText(debug_img, info, cv::Point(10, 30),
-                cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
-            pub_debug.push(debug_img);
-        }
-
-        // 原始 debug 窗口 (包含世界坐标网格)
+        // 本地调试窗口
         if (debug_mode && !async_result.image.empty()) {
             hardware::SyncFrame frame;
             frame.image = async_result.image;
@@ -236,7 +203,7 @@ void run_async_loop(detector::DetectorInterface* detector) {
             frame.timestamp_us = async_result.timestamp_us;
             frame.serial_data = async_result.serial_data;
             frame.serial_valid = true;
-            draw_debug_visualization(async_result.image, result, frame);
+            detector::draw_debug_visualization(async_result.image, result, frame);
         }
     }
 
@@ -245,7 +212,7 @@ void run_async_loop(detector::DetectorInterface* detector) {
     }
 
     if (debug_mode) {
-        cv::destroyWindow("Detector Debug");
+        detector::close_debug_window();
     }
 }
 
@@ -272,4 +239,4 @@ void start_detector_node() {
     }
 }
 
-} // namespace autoaim
+}  // namespace autoaim

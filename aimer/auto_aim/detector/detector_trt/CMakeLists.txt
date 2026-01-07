@@ -6,6 +6,27 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 # 查找 TensorRT
 find_package(TensorRT REQUIRED)
 
+# 自动检测 CUDA 编译器 (解决 CLion/snap CMake 找不到 nvcc 的问题)
+if(NOT CMAKE_CUDA_COMPILER)
+    # 常见 CUDA 安装路径 (桌面 + Jetson)
+    set(_CUDA_SEARCH_PATHS
+        /usr/local/cuda/bin          # 通用符号链接
+        /usr/local/cuda-12.0/bin     # 桌面 CUDA 12.x
+        /usr/local/cuda-11.8/bin
+        /usr/local/cuda-11.7/bin
+        /usr/local/cuda-11.6/bin
+        /usr/local/cuda-11.4/bin     # Jetson JetPack 5.x
+        /usr/local/cuda-10.2/bin     # Jetson JetPack 4.x
+        /opt/cuda/bin
+    )
+    find_program(_NVCC_EXECUTABLE nvcc HINTS ${_CUDA_SEARCH_PATHS})
+    if(_NVCC_EXECUTABLE)
+        set(CMAKE_CUDA_COMPILER ${_NVCC_EXECUTABLE} CACHE FILEPATH "CUDA compiler")
+        message(STATUS "Auto-detected CUDA compiler: ${CMAKE_CUDA_COMPILER}")
+    endif()
+    unset(_NVCC_EXECUTABLE CACHE)
+endif()
+
 # 启用 CUDA
 enable_language(CUDA)
 find_package(CUDAToolkit REQUIRED)

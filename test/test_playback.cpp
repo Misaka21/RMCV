@@ -5,6 +5,7 @@
  * 用法: ./test_playback <bag_path> [speed]
  */
 
+#include <atomic>
 #include <csignal>
 #include <iostream>
 #include <thread>
