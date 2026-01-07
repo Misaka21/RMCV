@@ -487,22 +487,21 @@ std::vector<DetectedArmor> TensorrtDetector::postprocess(
     std::vector<cv::Rect> boxes;
     std::vector<float> scores;
 
-    // DEBUG: 统计信息
-    float max_conf = 0;
-    int above_threshold = 0;
-    int color_filtered = 0;
+    // 预计算 logit 阈值: sigmoid(x) > thresh  <=>  x > log(thresh/(1-thresh))
+    // 避免对 25200 个检测都调用 sigmoid
+    const float logit_threshold = std::log(config_.conf_threshold / (1.0f - config_.conf_threshold));
 
     for (int i = 0; i < num_detections; ++i) {
         const float* row = output + i * output_idx::FEATURE_SIZE;
 
-        // 置信度过滤
-        float conf = sigmoid(row[output_idx::CONFIDENCE]);
-        max_conf = std::max(max_conf, conf);
-
-        if (conf < config_.conf_threshold) {
+        // 快速过滤：用 logit 阈值 (避免 sigmoid 计算)
+        float raw_conf = row[output_idx::CONFIDENCE];
+        if (raw_conf < logit_threshold) {
             continue;
         }
-        above_threshold++;
+
+        // 通过初筛后才计算 sigmoid
+        float conf = sigmoid(raw_conf);
 
         // 解析颜色
         int color = 0;
@@ -519,11 +518,9 @@ std::vector<DetectedArmor> TensorrtDetector::postprocess(
         // - gray 保留 (灯条闪烁时会短暂变灰，传给 predictor 做消抖)
         // - 敌方颜色保留
         if (color == model_color::PURPLE) {
-            color_filtered++;
             continue;
         }
         if (color != target_color_idx && color != model_color::GRAY) {
-            color_filtered++;
             continue;  // 既不是敌方颜色，也不是灰色
         }
 
@@ -706,7 +703,8 @@ void TensorrtDetector::release_slot(int idx) {
 }
 
 void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
-                            const serial::SerialReceiveData& serial_data)
+                            const serial::SerialReceiveData& serial_data,
+                            bool save_image)
 {
     // 记录提交时间 (用于计算端到端延迟)
     auto submit_time = std::chrono::steady_clock::now();
@@ -769,7 +767,7 @@ void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
         std::lock_guard lock(task_mutex_);
         task_queue_.push(TrtInferenceTask{
             slot_idx,
-            image.clone(),
+            save_image ? image.clone() : cv::Mat(),  // 只在需要调试时 clone
             scale, dx, dy,
             frame_id, timestamp_us,
             serial_data,

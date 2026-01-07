@@ -134,6 +134,10 @@ void run_async_loop(detector::DetectorInterface* det) {
     auto config = static_param::parse_file("detector.toml");
     bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");
 
+    // 共享标志: 是否需要保存图像 (用于 Web 调试或本地调试)
+    auto need_debug_img = umt::BasicObjManager<bool>::find_or_create(
+        "detector_need_debug_image", debug_mode);
+
     stats::FpsStats push_stats("DetectorNode-Push", "", 5000);
     stats::FpsStats pop_stats("DetectorNode", "detected", 5000);
 
@@ -158,7 +162,8 @@ void run_async_loop(detector::DetectorInterface* det) {
                     }
                 }
 
-                det->push(frame.image, frame.frame_id, frame.timestamp_us, frame.serial_data);
+                det->push(frame.image, frame.frame_id, frame.timestamp_us,
+                         frame.serial_data, need_debug_img->get());
                 push_stats.update();
 
             } catch (const umt::MessageError_Timeout&) {
@@ -174,6 +179,9 @@ void run_async_loop(detector::DetectorInterface* det) {
     // Pop 主循环: 获取检测结果并发布
     while (running->get()) {
         watchdog::heartbeat("detector");
+
+        // 动态更新是否需要保存图像
+        need_debug_img->get() = debug_mode || pub_debug.has_subscriber();
 
         if (det->queue_size() == 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));

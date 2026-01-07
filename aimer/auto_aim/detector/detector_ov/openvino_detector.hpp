@@ -83,7 +83,8 @@ public:
 
     // ========== 异步接口 (覆盖基类，真正异步) ==========
     void push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
-              const serial::SerialReceiveData& serial_data) override;
+              const serial::SerialReceiveData& serial_data,
+              bool save_image = true) override;
     AsyncDetectionResult pop() override;
     size_t queue_size() const override;
 
