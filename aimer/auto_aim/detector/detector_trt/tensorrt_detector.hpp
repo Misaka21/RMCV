@@ -29,7 +29,6 @@
 #include <cuda_runtime.h>
 
 #include "detector_interface.hpp"
-#include "types.hpp"
 
 namespace autoaim::detector {
 

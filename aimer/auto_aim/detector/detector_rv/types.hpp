@@ -28,9 +28,13 @@
 #include <opencv2/imgproc.hpp>
 
 // 公共类型
-#include "../common/types.hpp"
+#include "aimer/auto_aim/common/types.hpp"
 
 namespace autoaim::detector {
+
+// 从 autoaim 命名空间导入类型
+using autoaim::EnemyColor;
+using autoaim::ArmorType;
 
 // 15度对应的弧度 (内部使用)
 constexpr double FIFTEEN_DEGREE_RAD = 15 * CV_PI / 180;

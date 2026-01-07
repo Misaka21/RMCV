@@ -15,10 +15,15 @@
 
 #include <opencv2/core.hpp>
 
-#include "types.hpp"
+#include "aimer/auto_aim/common/types.hpp"
 #include "hardware/serial/serial_thread.hpp"
 
 namespace autoaim::detector {
+
+// 从 autoaim 命名空间导入类型
+using autoaim::EnemyColor;
+using autoaim::ArmorType;
+using autoaim::DetectedArmor;
 
 /**
  * @brief 异步检测结果

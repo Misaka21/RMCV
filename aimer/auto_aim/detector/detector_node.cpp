@@ -13,7 +13,6 @@
 
 #include "detector_factory.hpp"
 #include "detector_helpers.hpp"
-#include "detector_visualizer.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
@@ -65,7 +64,7 @@ void publish_debug_image(
 
 void run_sync_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
-    umt::Publisher<aimer::DetectionResult> pub("detections");
+    umt::Publisher<DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
     auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
 
@@ -128,7 +127,7 @@ void run_sync_loop(detector::DetectorInterface* det) {
 
 void run_async_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
-    umt::Publisher<aimer::DetectionResult> pub("detections");
+    umt::Publisher<DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
     auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
 

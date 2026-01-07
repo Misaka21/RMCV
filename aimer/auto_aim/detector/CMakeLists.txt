@@ -51,9 +51,9 @@ endif()
 
 # 创建 detector_node 库
 add_library(detector_node STATIC
+    detector_factory.cpp
     detector_node.cpp
     detector_helpers.cpp
-    detector_visualizer.cpp
 )
 
 target_include_directories(detector_node PUBLIC
@@ -71,15 +71,15 @@ target_link_libraries(detector_node PUBLIC
     fmt::fmt
 )
 
-# 传递编译宏并链接 YOLO 检测器
+# 条件编译 YOLO 检测器 (宏定义是 PRIVATE，不传播到上层)
 if(ENABLE_OPENVINO_DETECTOR)
-    target_compile_definitions(detector_node PUBLIC ENABLE_OPENVINO_DETECTOR)
-    target_link_libraries(detector_node PUBLIC detector_openvino)
+    target_compile_definitions(detector_node PRIVATE ENABLE_OPENVINO_DETECTOR)
+    target_link_libraries(detector_node PRIVATE detector_openvino)
 endif()
 
 if(ENABLE_TENSORRT_DETECTOR)
-    target_compile_definitions(detector_node PUBLIC ENABLE_TENSORRT_DETECTOR)
-    target_link_libraries(detector_node PUBLIC detector_tensorrt)
+    target_compile_definitions(detector_node PRIVATE ENABLE_TENSORRT_DETECTOR)
+    target_link_libraries(detector_node PRIVATE detector_tensorrt)
 endif()
 
 # 创建 detector 统一接口库
