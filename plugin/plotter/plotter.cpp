@@ -28,7 +28,7 @@ public:
         }
         socket_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
         dest_addr_.sin_family = AF_INET;
-        dest_addr_.sin_port = ::htons(port);
+        dest_addr_.sin_port = htons(port);
         dest_addr_.sin_addr.s_addr = ::inet_addr(host.c_str());
     }
 
@@ -53,7 +53,7 @@ private:
         if (socket_fd_ < 0) {
             socket_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
             dest_addr_.sin_family = AF_INET;
-            dest_addr_.sin_port = ::htons(9870);
+            dest_addr_.sin_port = htons(9870);
             dest_addr_.sin_addr.s_addr = ::inet_addr("127.0.0.1");
         }
     }

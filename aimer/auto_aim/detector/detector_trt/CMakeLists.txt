@@ -32,7 +32,7 @@ enable_language(CUDA)
 find_package(CUDAToolkit REQUIRED)
 
 # CUDA 编译标志 (避免继承不兼容的 C++ 标志)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 --use_fast_math")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --use_fast_math")
 
 # CUDA 架构设置
 # 可通过 cmake -DRMCV_CUDA_ARCH="72" 指定单一架构加速编译
