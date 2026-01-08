@@ -76,11 +76,19 @@
     #@string 推理设备: "CPU" | "GPU" | "AUTO"
     device = "GPU"
 
-# TensorRT 后端配置 (预留)
+# TensorRT 后端配置
 [Detector.yolo.tensorrt]
     #@bool 使用 FP16 推理
     fp16 = true
-    #@bool 使用 INT8 量化
+
+    #@bool 使用 INT8 量化 (需要校准数据)
+    # INT8 用法:
+    #   1. 在 asset/int8_calib_data/ 放入 100-500 张代表性图片
+    #   2. 设置 int8 = true, fp16 = false
+    #   3. 首次运行会自动校准并生成 asset/int8_calib.cache
+    #   4. 后续运行直接加载缓存
+    # 抽帧命令: ffmpeg -i video.avi -vf "select=not(mod(n\,10))" -frames:v 200 int8_calib_data/frame_%04d.jpg
     int8 = false
+
     #@int 工作空间大小 (MB)
     workspace_mb = 1024

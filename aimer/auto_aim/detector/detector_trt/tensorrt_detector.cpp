@@ -5,6 +5,7 @@
 
 #include "tensorrt_detector.hpp"
 #include "cuda_preprocess.hpp"
+#include "int8_calibrator.hpp"
 
 #include <algorithm>
 #include <array>
@@ -280,10 +281,22 @@ void TensorrtDetector::build_engine_from_onnx() {
         debug::print("info", "TensorRT", "FP16 mode enabled");
     }
 
-    // INT8 模式 (需要校准数据，这里只是启用标志)
+    // INT8 模式 (需要校准数据)
+    std::unique_ptr<Int8EntropyCalibrator> calibrator;
     if (config_.int8 && builder->platformHasFastInt8()) {
         config->setFlag(nvinfer1::BuilderFlag::kINT8);
-        debug::print("info", "TensorRT", "INT8 mode enabled (requires calibration data)");
+
+        // 校准图片目录和缓存文件路径
+        fs::path model_dir = fs::path(config_.model_path).parent_path();
+        std::string calib_images_dir = (model_dir / "int8_calib_data").string();
+        std::string calib_cache_file = (model_dir / "int8_calib.cache").string();
+
+        // 创建校准器 (会自动加载缓存或从图片校准)
+        calibrator = std::make_unique<Int8EntropyCalibrator>(
+            config_.input_size, calib_images_dir, calib_cache_file);
+        config->setInt8Calibrator(calibrator.get());
+
+        debug::print("info", "TensorRT", "INT8 mode enabled with calibration");
     }
 
     // 构建 engine
