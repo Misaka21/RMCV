@@ -76,10 +76,10 @@ inline const std::unordered_map<std::string, std::function<void()>> WAIT_MAP = {
         tf::init("camera.yaml");
     }},
     {"hardware", [] {
-        auto hardware_ready = umt::BasicObjManager<bool>::find("hardware_running");
+        // 必须用 find_or_create，否则 find 返回 nullptr 会跳过等待
+        auto hardware_ready = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
         auto app_running = umt::BasicObjManager<bool>::find("app_running");
-        while (hardware_ready && app_running &&
-               !hardware_ready->get() && app_running->get()) {
+        while (app_running && !hardware_ready->get() && app_running->get()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     }},

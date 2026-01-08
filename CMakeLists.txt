@@ -189,7 +189,7 @@ endif()
 # TensorRT Engine 生成测试 (需要TensorRT)
 if(ENABLE_TENSORRT_DETECTOR)
     add_executable(test_trt_engine test/test_trt_engine.cpp)
-    target_link_libraries(test_trt_engine ${OpenCV_LIBS} fmt::fmt plugin detector)
+    target_link_libraries(test_trt_engine ${OpenCV_LIBS} fmt::fmt plugin detector_tensorrt)
     message(STATUS "test_trt_engine will be built (TensorRT enabled)")
 endif()
 
