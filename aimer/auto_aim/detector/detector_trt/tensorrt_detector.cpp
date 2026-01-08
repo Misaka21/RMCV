@@ -759,8 +759,7 @@ void TensorrtDetector::release_slot(int idx) {
 }
 
 void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
-                            const serial::SerialReceiveData& serial_data,
-                            bool save_image)
+                            const serial::SerialReceiveData& serial_data)
 {
     // 记录提交时间 (用于计算端到端延迟)
     auto submit_time = std::chrono::steady_clock::now();
@@ -835,11 +834,11 @@ void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
         std::lock_guard lock(task_mutex_);
         task_queue_.push(TrtInferenceTask{
             slot_idx,
-            save_image ? image.clone() : cv::Mat(),  // 只在需要调试时 clone
+            image,  // Hardware 已 clone，直接赋值
             scale, dx, dy,
             frame_id, timestamp_us,
             serial_data,
-            submit_time  // 使用 push 开始时记录的时间
+            submit_time
         });
     }
     task_cv_.notify_one();

@@ -165,8 +165,7 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 // ============================================================================
 
 void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
-                            const serial::SerialReceiveData& serial_data,
-                            bool save_image)
+                            const serial::SerialReceiveData& serial_data)
 {
     // 队列过长时直接丢弃新帧 (不阻塞)
     {
@@ -199,7 +198,7 @@ void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
         std::lock_guard lock(task_mutex_);
         task_queue_.push(InferenceTask{
             std::move(infer_request),
-            save_image ? image.clone() : cv::Mat(),  // 只在需要调试时 clone
+            image,  // Hardware 已 clone，直接赋值
             scale, dx, dy,
             frame_id, timestamp_us,
             serial_data,
