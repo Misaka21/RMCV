@@ -30,7 +30,7 @@
     #@bool 启用Gamma校正
     GammaEnable = false
     #@float 采集帧率
-    AcquisitionFrameRate = 200.0
+    AcquisitionFrameRate = 100.0
     #@bool 启用帧率限制
     AcquisitionFrameRateEnable = true
 
