@@ -19,7 +19,7 @@ using SteadyClock = std::chrono::steady_clock;
 struct FpsStats {
     std::string module_name;
     std::string secondary_label;
-    int interval_ms = 5000;  // 输出间隔（毫秒）
+    int interval_ms = 10000;  // 输出间隔（毫秒）
 
     int fps_count = 0;
     int secondary_count = 0;
