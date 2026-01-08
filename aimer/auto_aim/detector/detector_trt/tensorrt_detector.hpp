@@ -55,8 +55,12 @@ struct TensorrtConfig {
 
 /**
  * @brief 异步推理资源槽位 (预分配，避免频繁分配)
+ *
+ * 每个槽位有独立的 IExecutionContext，实现真正的并行推理。
+ * 同一个 Engine 可以创建多个 Context，各自独立执行。
  */
 struct InferenceSlot {
+    nvinfer1::IExecutionContext* context = nullptr;  // 独立的执行上下文 (关键!)
     cudaStream_t stream = nullptr;
     cudaEvent_t event = nullptr;
     void* img_device = nullptr;      // GPU 原图缓冲 (uint8, BGR)

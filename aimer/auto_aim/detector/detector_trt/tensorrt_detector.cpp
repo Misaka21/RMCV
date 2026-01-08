@@ -650,6 +650,13 @@ void TensorrtDetector::init_async_slots() {
     for (int i = 0; i < NUM_ASYNC_SLOTS; ++i) {
         auto& slot = async_slots_[i];
 
+        // 每个槽位创建独立的 ExecutionContext (关键!)
+        // 这样多个槽位可以真正并行推理
+        slot.context = engine_->createExecutionContext();
+        if (!slot.context) {
+            throw std::runtime_error("Failed to create execution context for slot " + std::to_string(i));
+        }
+
         // 创建独立的CUDA流
         cudaStreamCreate(&slot.stream);
 
@@ -666,7 +673,7 @@ void TensorrtDetector::init_async_slots() {
 
         slot.in_use = false;
     }
-    debug::print("info", "TensorRT", "Initialized {} async inference slots (GPU preprocess)", NUM_ASYNC_SLOTS);
+    debug::print("info", "TensorRT", "Initialized {} async inference slots with independent contexts", NUM_ASYNC_SLOTS);
 }
 
 void TensorrtDetector::destroy_async_slots() {
@@ -681,6 +688,10 @@ void TensorrtDetector::destroy_async_slots() {
         if (slot.img_device) cudaFree(slot.img_device);
         if (slot.input_device) cudaFree(slot.input_device);
         if (slot.output_device) cudaFree(slot.output_device);
+        if (slot.context) {
+            delete slot.context;  // 销毁独立的 context
+            slot.context = nullptr;
+        }
     }
 }
 
@@ -752,8 +763,8 @@ void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
     bindings[input_binding_idx_] = slot.input_device;
     bindings[output_binding_idx_] = slot.output_device;
 
-    // 异步推理
-    context_->enqueueV2(bindings, slot.stream, nullptr);
+    // 异步推理 (使用槽位独立的 context，实现真正并行!)
+    slot.context->enqueueV2(bindings, slot.stream, nullptr);
 
     // 异步拷贝输出到 CPU
     cudaMemcpyAsync(slot.output_buffer.data(), slot.output_device,
