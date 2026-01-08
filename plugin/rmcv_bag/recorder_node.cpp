@@ -167,7 +167,7 @@ void start_recorder_node() {
     umt::Subscriber<cv::Mat> vis_sub("predictor_vis", 1);
 
     // 运行状态
-    auto running = umt::BasicObjManager<bool>::find_or_create("recorder_running", true);
+    auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     // 录制器资源
     std::unique_ptr<VideoWriterWrapper> raw_writer;

@@ -26,7 +26,7 @@
 [AutoAim.Predictor]
     # 可视化
     #@bool 是否显示预测可视化窗口
-    show_window = false
+    show_window = true
 
     use_lmtd = false
 

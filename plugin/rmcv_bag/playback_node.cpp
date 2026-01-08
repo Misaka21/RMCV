@@ -138,7 +138,7 @@ void start_playback_node(const std::string& bag_path, double playback_speed) {
 
     // 设置 UMT
     umt::Publisher<SyncFrame> pub("sync_frame");
-    auto running = umt::BasicObjManager<bool>::find_or_create("hardware_running", true);
+    auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     // 计算帧间隔
     double frame_interval_ms = 1000.0 / video_fps;

@@ -269,6 +269,8 @@ void start_hardware_node() {
 
         // 通知其他线程硬件节点已开始发布（初始为false，发布后设为true）
         auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
+        // 全局运行标志 (初始 true，退出时设为 false)
+        auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Hardware node started");
 
@@ -286,7 +288,7 @@ void start_hardware_node() {
         int consecutive_errors = 0;
         const int MAX_CONSECUTIVE_ERRORS = 3;  // 连续失败3次后退出
 
-        while (true) {
+        while (app_running->get()) {
             watchdog::heartbeat("hardware");
             try {
                 // Capture image
@@ -357,6 +359,8 @@ void start_hardware_node() {
                 std::this_thread::sleep_for(100ms);
             }
         }
+
+        debug::print(debug::PrintMode::INFO, "HardwareNode", "Hardware node stopped");
 
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::FATAL, "HardwareNode", "Init failed: {}", e.what());

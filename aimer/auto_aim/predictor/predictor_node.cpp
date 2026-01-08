@@ -326,7 +326,7 @@ void start_predictor_node() {
     umt::Publisher<BattlefieldSnapshot> pub("battlefield");
     umt::Publisher<cv::Mat> vis_pub("predictor_vis");  // 可视化帧 (供录制)
     umt::Publisher<cv::Mat> pub_debug("/predictor/debug");  // Web 调试图像
-    auto running = umt::BasicObjManager<bool>::find_or_create("predictor_running", true);
+    auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     stats::FpsStats stats("PredictorNode", "tracked");
 

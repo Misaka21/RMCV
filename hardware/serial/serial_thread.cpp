@@ -22,12 +22,13 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
         // 视觉数据状态管理
         auto vision_transmit = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
         auto send_enabled = umt::BasicObjManager<bool>::find_or_create("serial_send_enabled", true);
+        auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
         debug::print(debug::PrintMode::INFO, "SerialSender", "Sender thread started");
 
         stats::FpsStats fps_stats("SerialSender");
 
-        while (true) {
+        while (app_running->get()) {
             try {
                 // 检查发送是否启用
                 if (!send_enabled->get()) {
@@ -60,6 +61,8 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
             }
         }
 
+        debug::print(debug::PrintMode::INFO, "SerialSender", "Sender thread stopped");
+
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::ERROR, "SerialSender", "Init failed: {}", e.what());
     }
@@ -70,10 +73,11 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
         // 创建接收数据队列并通过BasicObjManager共享
         auto receive_queue = umt::BasicObjManager<ReceiveQueue>::find_or_create("receive_queue");
         auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
+        auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
         debug::print(debug::PrintMode::INFO, "SerialReceiver", "Receiver thread started");
 
-        while (true) {
+        while (app_running->get()) {
             try {
                 // 检查接收是否启用
                 if (!recv_enabled->get()) {
@@ -113,6 +117,8 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                 std::this_thread::sleep_for(10ms);
             }
         }
+
+        debug::print(debug::PrintMode::INFO, "SerialReceiver", "Receiver thread stopped");
 
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::ERROR, "SerialReceiver", "Init failed: {}", e.what());

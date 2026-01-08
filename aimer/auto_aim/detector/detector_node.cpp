@@ -66,7 +66,7 @@ void run_sync_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
-    auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
+    auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     auto config = static_param::parse_file("detector.toml");
     bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");
@@ -129,7 +129,7 @@ void run_async_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
-    auto running = umt::BasicObjManager<bool>::find_or_create("detector_running", true);
+    auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     auto config = static_param::parse_file("detector.toml");
     bool debug_mode = static_param::get_param<bool>(config, "Detector.traditional", "debug");

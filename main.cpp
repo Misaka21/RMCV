@@ -26,28 +26,10 @@
 #define WEB_DIR "web"
 #endif
 
-// 全局运行标志
-static std::atomic<bool> g_running{true};
-
 void signal_handler(int sig) {
     fmt::print(fmt::fg(fmt::color::yellow), "\n[INFO] 收到信号 {}, 正在退出...\n", sig);
-    g_running = false;
-
-    // 通知所有线程停止
-    auto param_running = umt::BasicObjManager<bool>::find_or_create("param_running", false);
-    auto hw_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
-    auto det_running = umt::BasicObjManager<bool>::find_or_create("detector_running", false);
-    auto pred_running = umt::BasicObjManager<bool>::find_or_create("predictor_running", false);
-    auto rec_running = umt::BasicObjManager<bool>::find_or_create("recorder_running", false);
-    auto wd_running = umt::BasicObjManager<bool>::find_or_create("watchdog_running", false);
-    param_running->get() = false;
-    hw_running->get() = false;
-    det_running->get() = false;
-    pred_running->get() = false;
-    rec_running->get() = false;
-    wd_running->get() = false;
-    // 不调用 exit()，让主线程 join 各线程后正常退出
-    // 这样 recorder 有时间 release() 保存视频
+    auto app_running = umt::BasicObjManager<bool>::find("app_running");
+    if (app_running) app_running->get() = false;
 }
 
 void print_usage(const char* prog_name) {
@@ -87,6 +69,10 @@ int main(int argc, char* argv[]) {
     // 设置全局比赛模式标志 (其他节点可以读取)
     auto match_mode_flag = umt::BasicObjManager<bool>::find_or_create("match_mode", match_mode);
     match_mode_flag->get() = match_mode;
+
+    // 创建全局运行标志 (所有线程共享)
+    auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
+
     // 注册信号处理
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
@@ -138,11 +124,11 @@ int main(int argc, char* argv[]) {
 
     // 等待硬件节点完成初始化
     debug::print(debug::PrintMode::INFO, "Main", "Waiting for hardware node...");
-    while (!hardware_ready->get() && g_running) {
+    while (!hardware_ready->get() && app_running->get()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    if (!g_running) {
+    if (!app_running->get()) {
         if (hardware_thread.joinable()) hardware_thread.join();
         return 0;
     }
@@ -199,24 +185,16 @@ int main(int argc, char* argv[]) {
         int py_result = Py_Main(2, py_argv);
 
         // Python退出后，通知所有线程停止
-        g_running = false;
+        app_running->get() = false;
         fmt::print(fmt::fg(fmt::color::yellow), "[INFO] Flask服务器已退出 (code={})\n", py_result);
     } else
 #endif
     {
         // 普通模式：主线程等待
-        while (g_running) {
+        while (app_running->get()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
-
-    // 停止看门狗
-    auto wd_running = umt::BasicObjManager<bool>::find("watchdog_running");
-    if (wd_running) wd_running->get() = false;
-
-    // 停止参数热重载
-    auto param_running = umt::BasicObjManager<bool>::find("param_running");
-    if (param_running) param_running->get() = false;
 
     // 等待线程结束
     fmt::print(fmt::fg(fmt::color::yellow), "[INFO] 等待线程结束...\n");

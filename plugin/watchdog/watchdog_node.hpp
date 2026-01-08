@@ -112,7 +112,7 @@ inline void start_watchdog_node(const std::string& heartbeat_file,
     std::vector<std::string> nodes = {"hardware", "detector", "predictor"};
 
     // 运行标志
-    auto running = umt::BasicObjManager<bool>::find_or_create("watchdog_running", true);
+    auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     // 等待所有节点初始化
     std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms * 2));

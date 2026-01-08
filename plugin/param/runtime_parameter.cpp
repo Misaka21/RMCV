@@ -71,7 +71,7 @@ namespace runtime_param {
 
     void ParamManager::load_and_update(const std::string &param_file_path) {
         using namespace std::chrono_literals;
-        auto running = umt::BasicObjManager<bool>::find_or_create("param_running", true);
+        auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
         while (running->get()) {
             try {
