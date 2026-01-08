@@ -17,6 +17,7 @@
 #include <opencv2/imgproc.hpp>
 #include <NvOnnxParser.h>
 #include <NvInferVersion.h>
+#include <cuda_fp16.h>
 
 #include "plugin/param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
@@ -119,15 +120,27 @@ TensorrtDetector::TensorrtDetector(const TensorrtConfig& config, EnemyColor colo
         const char* name = engine_->getBindingName(i);
         bool is_input = engine_->bindingIsInput(i);
         nvinfer1::Dims dims = engine_->getBindingDimensions(i);
+        nvinfer1::DataType dtype = engine_->getBindingDataType(i);
 
-        debug::print("info", "TensorRT", "  Binding {}: name='{}', is_input={}, nbDims={}, dims=[{},{},{},{}]",
-            i, name, is_input, dims.nbDims, dims.d[0], dims.d[1], dims.d[2],
+        const char* dtype_str = "unknown";
+        switch (dtype) {
+            case nvinfer1::DataType::kFLOAT: dtype_str = "FP32"; break;
+            case nvinfer1::DataType::kHALF:  dtype_str = "FP16"; break;
+            case nvinfer1::DataType::kINT8:  dtype_str = "INT8"; break;
+            case nvinfer1::DataType::kINT32: dtype_str = "INT32"; break;
+            default: break;
+        }
+
+        debug::print("info", "TensorRT", "  Binding {}: name='{}', type={}, is_input={}, dims=[{},{},{},{}]",
+            i, name, dtype_str, is_input, dims.d[0], dims.d[1], dims.d[2],
             dims.nbDims > 3 ? dims.d[3] : 0);
 
         if (is_input) {
             input_name_ = name;
             input_dims_ = dims;
             input_binding_idx_ = i;
+            // 检测 FP16 输入
+            use_fp16_input_ = (dtype == nvinfer1::DataType::kHALF);
         } else {
             output_name_ = name;
             output_dims_ = dims;
@@ -153,14 +166,18 @@ TensorrtDetector::TensorrtDetector(const TensorrtConfig& config, EnemyColor colo
     // 获取检测数量
     num_detections_ = output_dims_.d[1];
 
-    debug::print("info", "TensorRT", "Buffer sizes: input={} floats ({}KB), output={} floats ({}KB)",
-        input_size_, input_size_ * 4 / 1024, output_size_, output_size_ * 4 / 1024);
+    // 计算输入元素大小
+    size_t input_elem_size = use_fp16_input_ ? sizeof(__half) : sizeof(float);
+
+    debug::print("info", "TensorRT", "Buffer sizes: input={} elements ({}KB, {}), output={} floats ({}KB)",
+        input_size_, input_size_ * input_elem_size / 1024, use_fp16_input_ ? "FP16" : "FP32",
+        output_size_, output_size_ * 4 / 1024);
 
     // 分配 CUDA 缓冲区
     // 预分配原图缓冲区 (假设最大 1920x1200 图像)
     img_buffer_size_ = 1920 * 1200 * 3;  // BGR uint8
     cudaError_t err0 = cudaMalloc(&img_device_, img_buffer_size_);
-    cudaError_t err1 = cudaMalloc(&input_device_, input_size_ * sizeof(float));
+    cudaError_t err1 = cudaMalloc(&input_device_, input_size_ * input_elem_size);
     cudaError_t err2 = cudaMalloc(&output_device_, output_size_ * sizeof(float));
 
     if (err0 != cudaSuccess || err1 != cudaSuccess || err2 != cudaSuccess) {
@@ -379,15 +396,27 @@ std::vector<DetectedArmor> TensorrtDetector::detect(const cv::Mat& image) {
     // GPU 预处理: letterbox + BGR→RGB + normalize + HWC→CHW
     float scale;
     int dx, dy;
-    cuda_preprocess(
-        static_cast<uint8_t*>(img_device_),
-        static_cast<float*>(input_device_),
-        image.cols, image.rows,
-        config_.input_size,
-        &scale, &dx, &dy,
-        stream_,
-        false  // 使用最近邻，速度更快
-    );
+    if (use_fp16_input_) {
+        cuda_preprocess_fp16(
+            static_cast<uint8_t*>(img_device_),
+            static_cast<__half*>(input_device_),
+            image.cols, image.rows,
+            config_.input_size,
+            &scale, &dx, &dy,
+            stream_,
+            false  // 使用最近邻，速度更快
+        );
+    } else {
+        cuda_preprocess(
+            static_cast<uint8_t*>(img_device_),
+            static_cast<float*>(input_device_),
+            image.cols, image.rows,
+            config_.input_size,
+            &scale, &dx, &dy,
+            stream_,
+            false  // 使用最近邻，速度更快
+        );
+    }
 
     // 构建 bindings 数组 (旧版 API)
     void* bindings[2];
@@ -660,6 +689,8 @@ ArmorType TensorrtDetector::get_armor_type(int label, float ratio) {
 // ============================================================================
 
 void TensorrtDetector::init_async_slots() {
+    size_t input_elem_size = use_fp16_input_ ? sizeof(__half) : sizeof(float);
+
     for (int i = 0; i < NUM_ASYNC_SLOTS; ++i) {
         auto& slot = async_slots_[i];
 
@@ -678,7 +709,7 @@ void TensorrtDetector::init_async_slots() {
 
         // 分配GPU缓冲区
         cudaMalloc(&slot.img_device, img_buffer_size_);  // 原图缓冲
-        cudaMalloc(&slot.input_device, input_size_ * sizeof(float));
+        cudaMalloc(&slot.input_device, input_size_ * input_elem_size);  // FP16 或 FP32
         cudaMalloc(&slot.output_device, output_size_ * sizeof(float));
 
         // 分配CPU输出缓冲区
@@ -686,7 +717,8 @@ void TensorrtDetector::init_async_slots() {
 
         slot.in_use = false;
     }
-    debug::print("info", "TensorRT", "Initialized {} async inference slots with independent contexts", NUM_ASYNC_SLOTS);
+    debug::print("info", "TensorRT", "Initialized {} async slots (input: {})",
+        NUM_ASYNC_SLOTS, use_fp16_input_ ? "FP16" : "FP32");
 }
 
 void TensorrtDetector::destroy_async_slots() {
@@ -761,15 +793,27 @@ void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
     // GPU 预处理: letterbox + BGR→RGB + normalize + HWC→CHW
     float scale;
     int dx, dy;
-    cuda_preprocess(
-        static_cast<uint8_t*>(slot.img_device),
-        static_cast<float*>(slot.input_device),
-        image.cols, image.rows,
-        config_.input_size,
-        &scale, &dx, &dy,
-        slot.stream,
-        false  // 使用最近邻
-    );
+    if (use_fp16_input_) {
+        cuda_preprocess_fp16(
+            static_cast<uint8_t*>(slot.img_device),
+            static_cast<__half*>(slot.input_device),
+            image.cols, image.rows,
+            config_.input_size,
+            &scale, &dx, &dy,
+            slot.stream,
+            false  // 使用最近邻
+        );
+    } else {
+        cuda_preprocess(
+            static_cast<uint8_t*>(slot.img_device),
+            static_cast<float*>(slot.input_device),
+            image.cols, image.rows,
+            config_.input_size,
+            &scale, &dx, &dy,
+            slot.stream,
+            false  // 使用最近邻
+        );
+    }
 
     // 构建 bindings 数组
     void* bindings[2];

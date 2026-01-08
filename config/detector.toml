@@ -59,8 +59,10 @@
     backend = "tensorrt"
 
     #@string 模型文件 (相对于 asset 目录)
-    # 注意: 原始模型(armor_0526.onnx)是FP16输入，需使用转换后的FP32版本
-    model = "armor_0526_fp32.onnx"
+    # armor_0526.onnx: 原始模型 (FP16 输入)
+    # armor_0526_fp32.onnx: 转换后 (FP32 输入)
+    # TensorRT 会自动检测输入类型并使用对应预处理
+    model = "armor_0526.onnx"
 
     #@int 输入尺寸 (正方形)
     input_size = 640

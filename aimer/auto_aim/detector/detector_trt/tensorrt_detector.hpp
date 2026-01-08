@@ -226,10 +226,11 @@ private:
 
     // CUDA 缓冲区 (同步模式使用)
     void* img_device_ = nullptr;     // GPU 原图缓冲 (uint8, BGR)
-    void* input_device_ = nullptr;   // GPU 输入张量 (float32)
+    void* input_device_ = nullptr;   // GPU 输入张量 (float32 或 float16)
     void* output_device_ = nullptr;
     std::vector<float> output_buffer_;
     size_t img_buffer_size_ = 0;     // 原图缓冲区大小
+    bool use_fp16_input_ = false;    // 模型是否使用 FP16 输入
 
     // CUDA 流 (同步模式使用)
     cudaStream_t stream_ = nullptr;
