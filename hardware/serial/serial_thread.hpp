@@ -75,14 +75,22 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver);
 void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver);
 
 /**
- * @brief 启动串口通信（同时启动发送和接收线程，共享串口实例）
+ * @brief 启动串口通信（从配置文件 hardware.toml 读取设置）
+ *
+ * 根据 Serial.protocol 配置自动选择 UART 或 USB Bulk 协议
+ * 支持断线重连
+ */
+void start_serial_communication();
+
+/**
+ * @brief 启动串口通信（指定端口和波特率，向后兼容）
  * @param port_path 串口设备路径
  * @param baud_rate 波特率
  *
  * 该函数会创建一个串口实例，并同时启动发送和接收线程
  * 确保发送和接收共享同一个串口设备
  */
-void start_serial_communication(const std::string& port_path = "/dev/ttyUSB0", int baud_rate = 115200);
+void start_serial_communication(const std::string& port_path, int baud_rate);
 
 /**
  * @brief 串口工具类，用于包转换和底层操作

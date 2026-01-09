@@ -35,10 +35,8 @@
     AcquisitionFrameRateEnable = true
 
 [Serial]
-    #@string 串口设备路径
-    port_name = "/dev/ttyUSB0"
-    #@int 波特率
-    baudrate = 115200
+    #@string 协议类型: "uart" 或 "usb_bulk"
+    protocol = "uart"
     #@bool 打印调试信息
     data_print_debug = false
     #@bool 忽略CRC校验
@@ -49,6 +47,36 @@
     imu_pitch_negate = false
     #@bool IMU符号修正: 如果云台右倾时roll变小，需要设为true
     imu_roll_negate = true
+
+# UART 协议配置 (protocol = "uart" 时使用)
+[Serial.uart]
+    #@string 串口设备路径
+    port_name = "/dev/ttyUSB0"
+    #@int 波特率
+    baudrate = 115200
+    #@int 读取超时 (ms)
+    read_timeout_ms = 100
+
+# USB Bulk 协议配置 (protocol = "usb_bulk" 时使用)
+[Serial.usb_bulk]
+    #@string 厂商ID (16进制字符串, 如 "0x0483" 或 "0483")
+    vendor_id = "0xa11c"
+    #@string 产品ID (16进制字符串), 空字符串表示匹配该厂商所有设备
+    product_id = ""
+    #@string 设备序列号, 空字符串表示自动选择第一个匹配的设备
+    serial_number = ""
+    #@int USB 接口号
+    interface_number = 1
+    #@string Bulk IN 端点 (16进制, 如 "0x81")
+    bulk_in_endpoint = "0x81"
+    #@string Bulk OUT 端点 (16进制, 如 "0x01")
+    bulk_out_endpoint = "0x01"
+    #@int 读写超时 (ms)
+    timeout_ms = 100
+    #@int 断线重连间隔 (ms)
+    reconnect_interval_ms = 1000
+    #@int 最大重连次数, -1 表示无限重连
+    max_reconnect_attempts = -1
 
 [Serial.fake_data]
     # 虚拟串口数据配置

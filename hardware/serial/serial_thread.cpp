@@ -5,8 +5,10 @@
 #include <thread>
 
 #include "plugin/debug/logger.hpp"
+#include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "protocol/uart_protocol.hpp"
+#include "protocol/usb_bulk_protocol.hpp"
 #include "serial_thread.hpp"
 
 // UMT相关头文件
@@ -137,15 +139,146 @@ public:
     static constexpr int RETRY_INTERVAL_MS = 2000;
 
     /**
-     * @brief 启动串口收发线程（共享同一个串口实例）
-     * @param port_path 串口设备路径
-     * @param baud_rate 波特率
+     * @brief 根据配置文件创建协议实例
+     * @param config 解析后的配置
+     * @return 协议实例，失败返回 nullptr
+     */
+    static std::shared_ptr<ProtocolInterface> create_protocol_from_config(const toml::table& config) {
+        std::string protocol_type = static_param::get_param<std::string>(config, "Serial", "protocol");
+
+        if (protocol_type == "uart") {
+            return create_uart_protocol(config);
+        } else if (protocol_type == "usb_bulk") {
+            return create_usb_bulk_protocol(config);
+        } else {
+            debug::print(debug::PrintMode::ERROR, "SerialManager",
+                "Unknown protocol type: {}", protocol_type);
+            return nullptr;
+        }
+    }
+
+    /**
+     * @brief 创建 UART 协议
+     */
+    static std::shared_ptr<ProtocolInterface> create_uart_protocol(const toml::table& config) {
+        std::string port_name = static_param::get_param<std::string>(config, "Serial.uart", "port_name");
+        int64_t baudrate = static_param::get_param<int64_t>(config, "Serial.uart", "baudrate");
+
+        debug::print(debug::PrintMode::INFO, "SerialManager",
+            "Creating UART: {} @ {}", port_name, baudrate);
+
+        return std::make_shared<UartProtocol>(port_name, static_cast<int>(baudrate));
+    }
+
+    /**
+     * @brief 创建 USB Bulk 协议
+     */
+    static std::shared_ptr<ProtocolInterface> create_usb_bulk_protocol(const toml::table& config) {
+        std::string vendor_id = static_param::get_param<std::string>(config, "Serial.usb_bulk", "vendor_id");
+        std::string product_id = static_param::get_param<std::string>(config, "Serial.usb_bulk", "product_id");
+        std::string serial_number = static_param::get_param<std::string>(config, "Serial.usb_bulk", "serial_number");
+        int64_t interface_number = static_param::get_param<int64_t>(config, "Serial.usb_bulk", "interface_number");
+        std::string bulk_in = static_param::get_param<std::string>(config, "Serial.usb_bulk", "bulk_in_endpoint");
+        std::string bulk_out = static_param::get_param<std::string>(config, "Serial.usb_bulk", "bulk_out_endpoint");
+        int64_t timeout_ms = static_param::get_param<int64_t>(config, "Serial.usb_bulk", "timeout_ms");
+
+        debug::print(debug::PrintMode::INFO, "SerialManager",
+            "Creating USB Bulk: VID={} PID={}", vendor_id, product_id.empty() ? "(any)" : product_id);
+
+        return UsbBulkProtocol::create_from_config(
+            vendor_id,
+            product_id,
+            serial_number,
+            static_cast<int>(interface_number),
+            bulk_in,
+            bulk_out,
+            static_cast<int>(timeout_ms)
+        );
+    }
+
+    /**
+     * @brief 启动串口收发线程（从配置文件读取设置）
      *
-     * 如果串口打开失败，会重试 MAX_RETRY_COUNT 次
+     * 如果串口打开失败，会重试
      * 重试全部失败后程序退出
      */
-    static void start_serial_threads(const std::string& port_path = "/dev/ttyUSB0", int baud_rate = 115200) {
-        debug::print(debug::PrintMode::INFO, "SerialManager", "Starting: {} @ {}", port_path, baud_rate);
+    static void start_serial_threads() {
+        // 加载配置
+        auto config = static_param::parse_file("hardware.toml");
+
+        std::shared_ptr<ProtocolInterface> protocol = nullptr;
+        int retry_count = 0;
+        int64_t reconnect_interval_ms = RETRY_INTERVAL_MS;
+        int64_t max_reconnect = MAX_RETRY_COUNT;
+
+        // USB Bulk 使用配置的重连参数
+        std::string protocol_type = static_param::get_param<std::string>(config, "Serial", "protocol");
+        if (protocol_type == "usb_bulk") {
+            reconnect_interval_ms = static_param::get_param<int64_t>(config, "Serial.usb_bulk", "reconnect_interval_ms");
+            max_reconnect = static_param::get_param<int64_t>(config, "Serial.usb_bulk", "max_reconnect_attempts");
+        }
+
+        // 重试打开串口
+        while (max_reconnect < 0 || retry_count < max_reconnect) {
+            try {
+                protocol = create_protocol_from_config(config);
+
+                if (protocol && protocol->open()) {
+                    debug::print(debug::PrintMode::INFO, "SerialManager", "Protocol opened successfully");
+                    break;
+                }
+
+                if (protocol) {
+                    debug::print(debug::PrintMode::WARNING, "SerialManager",
+                        "Open failed ({}/{}): {}", retry_count + 1,
+                        max_reconnect < 0 ? "inf" : std::to_string(max_reconnect),
+                        protocol->error_message());
+                }
+
+            } catch (const std::exception& e) {
+                debug::print(debug::PrintMode::WARNING, "SerialManager",
+                    "Exception ({}/{}): {}", retry_count + 1,
+                    max_reconnect < 0 ? "inf" : std::to_string(max_reconnect), e.what());
+            }
+
+            retry_count++;
+            debug::print(debug::PrintMode::INFO, "SerialManager",
+                "Retry in {} ms...", reconnect_interval_ms);
+            std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_interval_ms));
+        }
+
+        // 重试全部失败，退出程序
+        if (!protocol || !protocol->is_open()) {
+            debug::print(debug::PrintMode::FATAL, "SerialManager",
+                "Protocol open failed after {} retries, exiting", retry_count);
+            std::exit(1);
+        }
+
+        try {
+            // 创建TransceiverManager（共享）
+            auto transceiver = std::make_shared<TransceiverManager<16>>(protocol);
+
+            // 启动发送线程
+            std::thread([transceiver]() { serial_sender_run(transceiver); }).detach();
+
+            // 启动接收线程
+            std::thread([transceiver]() { serial_receiver_run(transceiver); }).detach();
+
+            debug::print(debug::PrintMode::INFO, "SerialManager", "TX/RX threads started");
+
+        } catch (const std::exception& e) {
+            debug::print(debug::PrintMode::FATAL, "SerialManager", "Start failed: {}", e.what());
+            std::exit(1);
+        }
+    }
+
+    /**
+     * @brief 启动串口收发线程（指定端口和波特率，向后兼容）
+     * @param port_path 串口设备路径
+     * @param baud_rate 波特率
+     */
+    static void start_serial_threads(const std::string& port_path, int baud_rate) {
+        debug::print(debug::PrintMode::INFO, "SerialManager", "Starting UART: {} @ {}", port_path, baud_rate);
 
         std::shared_ptr<UartProtocol> uart = nullptr;
         int retry_count = 0;
@@ -201,6 +334,13 @@ public:
         }
     }
 };
+
+/**
+ * @brief 启动串口通信（从配置文件读取设置）
+ */
+void start_serial_communication() {
+    SerialManager::start_serial_threads();
+}
 
 /**
  * @brief 启动串口通信（同时启动发送和接收线程，共享串口实例）
