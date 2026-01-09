@@ -1,5 +1,6 @@
 // C++ system headers
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <thread>
@@ -167,6 +168,19 @@ int main(int argc, char* argv[]) {
             "                     WEB DEBUG MODE - 网页调试模式                    \n"
             "                     http://localhost:5000                            \n"
             "======================================================================\n");
+
+        // 监控线程：当 app_running 变为 false 时强制退出
+        // (因为 Py_Main 会阻塞，无法响应信号)
+        std::thread exit_monitor([&app_running]() {
+            while (app_running->get()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            // 等待其他线程有时间清理
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+            fmt::print(fmt::fg(fmt::color::yellow), "[INFO] 强制退出 Web 模式\n");
+            std::exit(0);
+        });
+        exit_monitor.detach();
 
         // 设置Python路径
         std::string app_path = std::string(WEB_DIR) + "/app.py";
