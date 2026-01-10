@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# RMCV 看门狗脚本 v2.0
+# RMCV 看门狗脚本 v2.1
 # 综合 FYT2024 (systemd + 心跳) 和 sp_vision_25 (screen) 的优点
 #
 # 功能:
@@ -8,6 +8,7 @@
 #   2. 心跳文件监控 (检测线程卡死)
 #   3. 进程优先级设置 (实时调度 + nice)
 #   4. 自动重启和会话目录管理
+#   5. 资源监控 (CPU/内存/虚拟内存)
 #
 # 用法:
 #   ./watchdog.sh              # 普通模式
@@ -18,6 +19,9 @@
 TIMEOUT=15                       # 心跳超时 (秒), 需 > C++ watchdog_node (5s超时 + 10s等待)
 MAX_RETRY=100                    # 最大重启次数
 SCREEN_NAME="rmcv"               # screen 会话名
+
+# 资源监控配置
+RESOURCE_LOG_INTERVAL=5          # 资源记录间隔 (秒)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RMCV_DIR="$(dirname "$SCRIPT_DIR")"
@@ -38,6 +42,8 @@ ENABLE_COREDUMP=true             # 启用 coredump (崩溃时生成 core 文件)
 # 运行时变量
 RETRY_COUNT=0
 SESSION_DIR=""    # 当前会话目录 (由 create_session_dir 设置)
+RESOURCE_LOG=""   # 资源日志文件路径
+LAST_RESOURCE_LOG_TIME=0  # 上次资源记录时间
 
 # ========== 工具函数 ==========
 
@@ -186,6 +192,125 @@ check_heartbeat() {
     return 0
 }
 
+# ========== 资源监控 ==========
+
+# 初始化资源日志文件
+init_resource_log() {
+    if [ -z "$SESSION_DIR" ]; then
+        return
+    fi
+
+    RESOURCE_LOG="$SESSION_DIR/resources.csv"
+
+    # 写入 CSV 头
+    echo "timestamp,rmcv_cpu%,rmcv_rss_mb,rmcv_vsz_mb,sys_cpu%,sys_mem_used_mb,sys_mem_total_mb,sys_swap_used_mb,sys_swap_total_mb,cpu_temp_c" > "$RESOURCE_LOG"
+    log_msg "Resource log: $RESOURCE_LOG"
+}
+
+# 记录资源使用情况
+log_resources() {
+    local current_time=$(date +%s)
+
+    # 检查是否到达记录间隔
+    if [ $((current_time - LAST_RESOURCE_LOG_TIME)) -lt "$RESOURCE_LOG_INTERVAL" ]; then
+        return
+    fi
+    LAST_RESOURCE_LOG_TIME=$current_time
+
+    if [ -z "$RESOURCE_LOG" ] || [ ! -f "$RESOURCE_LOG" ]; then
+        init_resource_log
+        if [ -z "$RESOURCE_LOG" ]; then
+            return
+        fi
+    fi
+
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local rmcv_cpu=0
+    local rmcv_rss=0
+    local rmcv_vsz=0
+    local sys_cpu=0
+    local sys_mem_used=0
+    local sys_mem_total=0
+    local sys_swap_used=0
+    local sys_swap_total=0
+    local cpu_temp=0
+
+    # 获取 RMCV 进程资源
+    local pid=$(pgrep -x RMCV2026 | head -1)
+    if [ -n "$pid" ]; then
+        # ps 输出: %CPU RSS VSZ (RSS/VSZ 单位 KB)
+        local ps_output=$(ps -p "$pid" -o %cpu=,rss=,vsz= 2>/dev/null | tr -s ' ')
+        if [ -n "$ps_output" ]; then
+            rmcv_cpu=$(echo "$ps_output" | awk '{print $1}')
+            rmcv_rss=$(echo "$ps_output" | awk '{printf "%.1f", $2/1024}')  # KB -> MB
+            rmcv_vsz=$(echo "$ps_output" | awk '{printf "%.1f", $3/1024}')  # KB -> MB
+        fi
+    fi
+
+    # 获取系统资源 (区分 Linux 和 macOS)
+    if [ "$(uname)" = "Linux" ]; then
+        # Linux: 使用 /proc/stat 和 free
+        # 系统 CPU (简化: 取 1 秒采样的 idle 差值)
+        local cpu_line=$(head -1 /proc/stat)
+        local cpu_idle=$(echo "$cpu_line" | awk '{print $5}')
+        local cpu_total=$(echo "$cpu_line" | awk '{print $2+$3+$4+$5+$6+$7+$8}')
+        # 简化处理: 用 top 的瞬时值
+        sys_cpu=$(top -bn1 | grep "Cpu(s)" | awk '{print 100-$8}' 2>/dev/null || echo "0")
+
+        # 内存信息
+        local mem_info=$(free -m 2>/dev/null)
+        if [ -n "$mem_info" ]; then
+            sys_mem_total=$(echo "$mem_info" | awk '/^Mem:/ {print $2}')
+            sys_mem_used=$(echo "$mem_info" | awk '/^Mem:/ {print $3}')
+            sys_swap_total=$(echo "$mem_info" | awk '/^Swap:/ {print $2}')
+            sys_swap_used=$(echo "$mem_info" | awk '/^Swap:/ {print $3}')
+        fi
+    else
+        # macOS: 使用 vm_stat 和 sysctl
+        local page_size=$(pagesize 2>/dev/null || echo 4096)
+
+        # 内存信息
+        local vm_stat_output=$(vm_stat 2>/dev/null)
+        if [ -n "$vm_stat_output" ]; then
+            local pages_free=$(echo "$vm_stat_output" | awk '/Pages free:/ {gsub(/\./,"",$3); print $3}')
+            local pages_active=$(echo "$vm_stat_output" | awk '/Pages active:/ {gsub(/\./,"",$3); print $3}')
+            local pages_inactive=$(echo "$vm_stat_output" | awk '/Pages inactive:/ {gsub(/\./,"",$3); print $3}')
+            local pages_wired=$(echo "$vm_stat_output" | awk '/Pages wired down:/ {gsub(/\./,"",$4); print $4}')
+            local pages_compressed=$(echo "$vm_stat_output" | awk '/Pages occupied by compressor:/ {gsub(/\./,"",$5); print $5}')
+
+            sys_mem_total=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f", $1/1024/1024}')
+            local used_pages=$((pages_active + pages_wired + pages_compressed))
+            sys_mem_used=$((used_pages * page_size / 1024 / 1024))
+
+            # Swap
+            local swap_info=$(sysctl -n vm.swapusage 2>/dev/null)
+            if [ -n "$swap_info" ]; then
+                sys_swap_total=$(echo "$swap_info" | awk -F'[ M=]+' '{print int($2)}')
+                sys_swap_used=$(echo "$swap_info" | awk -F'[ M=]+' '{print int($4)}')
+            fi
+        fi
+
+        # CPU (使用 ps 获取系统总 CPU)
+        sys_cpu=$(ps -A -o %cpu | awk '{s+=$1} END {printf "%.1f", s}' 2>/dev/null || echo "0")
+    fi
+
+    # 获取 CPU 温度
+    if [ "$(uname)" = "Linux" ]; then
+        # Linux: 读取 thermal_zone (毫摄氏度)
+        if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+            cpu_temp=$(awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo "0")
+        fi
+    else
+        # macOS: 需要 osx-cpu-temp 工具，没有则跳过
+        if command -v osx-cpu-temp &>/dev/null; then
+            cpu_temp=$(osx-cpu-temp 2>/dev/null | awk '{print $1}' || echo "0")
+        fi
+    fi
+
+    # 写入 CSV
+    echo "$timestamp,$rmcv_cpu,$rmcv_rss,$rmcv_vsz,$sys_cpu,$sys_mem_used,$sys_mem_total,$sys_swap_used,$sys_swap_total,$cpu_temp" >> "$RESOURCE_LOG"
+}
+
 # ========== 启动/重启 ==========
 
 bringup() {
@@ -239,7 +364,7 @@ exec > >(tee -a "$WATCHDOG_LOG") 2>&1
 
 echo ""
 echo "============================================"
-echo "  RMCV Watch Dog v2.0"
+echo "  RMCV Watch Dog v2.1"
 echo "============================================"
 log_msg "RMCV Dir:    $RMCV_DIR"
 log_msg "Executable:  $EXECUTABLE"
@@ -248,6 +373,7 @@ log_msg "Timeout:     ${TIMEOUT}s"
 log_msg "Max Retry:   $MAX_RETRY"
 log_msg "Screen:      $SCREEN_NAME"
 log_msg "Realtime:    $ENABLE_REALTIME (nice=$NICE_LEVEL, rt=$RT_PRIORITY)"
+log_msg "Resource:    every ${RESOURCE_LOG_INTERVAL}s"
 echo ""
 
 # 首次启动
@@ -278,6 +404,9 @@ while true; do
         restart
         continue
     fi
+
+    # 4. 记录资源使用
+    log_resources
 
     # 一切正常
     RETRY_COUNT=0

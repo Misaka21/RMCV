@@ -91,6 +91,12 @@ RT_PRIORITY=50          # 实时调度优先级 (1-99)
                         # - 绑定到特定核心，提高缓存命中
                         # - 格式: "0-3" 或 "0,2,4"
                         # - NUC 通常 4-8 核，可绑定一半
+
+# ========== 资源监控 (可选) ==========
+RESOURCE_LOG_INTERVAL=5 # 资源记录间隔 (秒)
+                        # - 记录 CPU/内存/虚拟内存到 resources.csv
+                        # - 用于赛后分析内存泄漏、性能瓶颈
+                        # - 建议: 5-15 秒
 ```
 
 ### 3. 录制配置 (config/recorder.toml)
@@ -196,10 +202,28 @@ log/
 └── 20240101_120000/               # 会话目录
     ├── console.log                # RMCV 输出
     ├── heartbeat                  # 心跳文件
+    ├── resources.csv              # 资源监控 (CPU/内存)
     ├── raw.mkv                    # 原始视频
     ├── debug.mkv                  # 调试视频
     └── imu.csv                    # IMU 数据
 ```
+
+### resources.csv 格式
+
+```csv
+timestamp,rmcv_cpu%,rmcv_rss_mb,rmcv_vsz_mb,sys_cpu%,sys_mem_used_mb,sys_mem_total_mb,sys_swap_used_mb,sys_swap_total_mb,cpu_temp_c
+2024-01-01 12:00:00,45.2,512.3,1024.5,60.1,8192,16384,128,2048,65.0
+```
+
+| 字段 | 说明 |
+|------|------|
+| rmcv_cpu% | RMCV 进程 CPU 占用 |
+| rmcv_rss_mb | RMCV 物理内存 (MB) |
+| rmcv_vsz_mb | RMCV 虚拟内存 (MB) |
+| sys_cpu% | 系统总 CPU 占用 |
+| sys_mem_used/total | 系统内存使用/总量 (MB) |
+| sys_swap_used/total | 交换分区使用/总量 (MB) |
+| cpu_temp_c | CPU 温度 (°C) |
 
 ## 架构图
 
