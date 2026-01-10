@@ -7,8 +7,6 @@
     # 录制内容选择
     #@bool 录制原始视频
     record_raw_video = true
-    #@bool 录制调试视频
-    record_debug_video = false
     #@bool 录制IMU数据
     record_imu_csv = true
 

@@ -4,11 +4,9 @@
  *
  * 订阅:
  *   - Message<hardware::SyncFrame> "sync_frame" (原始帧 + 串口数据)
- *   - Message<cv::Mat> "predictor_vis" (predictor可视化输出)
  *
  * 输出文件 (保存到会话目录):
  *   - raw.mkv: 原始相机帧
- *   - debug.mkv: predictor 可视化帧
  *   - imu.csv: 串口 IMU 数据
  */
 

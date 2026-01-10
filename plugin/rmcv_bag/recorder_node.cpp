@@ -30,7 +30,6 @@ using SteadyClock = std::chrono::steady_clock;
 struct RecorderConfig {
     bool enable_recording = false;  // 是否启用录制
     bool record_raw_video = true;
-    bool record_debug_video = true;
     bool record_imu_csv = true;
     double camera_fps = 200.0;
     std::string video_codec = "MJPG";
@@ -45,7 +44,6 @@ struct RecorderConfig {
         auto table = static_param::parse_file("recorder.toml");
         cfg.enable_recording = static_param::get_param<bool>(table, "Recorder", "enable_recording");
         cfg.record_raw_video = static_param::get_param<bool>(table, "Recorder", "record_raw_video");
-        cfg.record_debug_video = static_param::get_param<bool>(table, "Recorder", "record_debug_video");
         cfg.record_imu_csv = static_param::get_param<bool>(table, "Recorder", "record_imu_csv");
         cfg.camera_fps = static_param::get_param<double>(table, "Recorder", "camera_fps");
         cfg.video_codec = static_param::get_param<std::string>(table, "Recorder", "video_codec");
@@ -144,15 +142,16 @@ void start_recorder_node() {
 
     // 加载配置 (启动时读取一次)
     RecorderConfig config = RecorderConfig::load();
-    // 检查是否为比赛模式
-    auto match_mode = umt::BasicObjManager<bool>::find("match_mode");
-    bool force_record = match_mode && match_mode->get();
-    
+
+    // 获取比赛模式指针 (循环外获取，循环内只读值)
+    auto match_mode_obj = umt::BasicObjManager<bool>::find("match_mode");
+    auto is_match_mode = [&]() { return match_mode_obj && match_mode_obj->get(); };
+
     debug::print(debug::PrintMode::INFO, "RecorderNode",
-        "Config: raw={} debug={} imu={} fps={:.1f} codec={} sample=1/{}{}",
-        config.record_raw_video, config.record_debug_video, config.record_imu_csv,
+        "Config: raw={} imu={} fps={:.1f} codec={} sample=1/{}{}",
+        config.record_raw_video, config.record_imu_csv,
         config.get_record_fps(), config.video_codec, config.sample_interval,
-        force_record ? " [MATCH MODE - 强制 raw+imu]" : "");
+        is_match_mode() ? " [MATCH MODE - 强制 raw+imu]" : "");
 
     // 获取会话路径
     std::string session_path = debug::get_session_path();
@@ -164,14 +163,12 @@ void start_recorder_node() {
 
     // 订阅消息 (fifo_size=1 只保留最新帧)
     umt::Subscriber<hardware::SyncFrame> sync_sub("sync_frame", 1);
-    umt::Subscriber<cv::Mat> vis_sub("predictor_vis", 1);
 
     // 运行状态
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     // 录制器资源
     std::unique_ptr<VideoWriterWrapper> raw_writer;
-    std::unique_ptr<VideoWriterWrapper> debug_writer;
     std::unique_ptr<CsvWriter> imu_writer;
 
     bool was_recording = false;
@@ -185,18 +182,17 @@ void start_recorder_node() {
 
     while (running->get()) {
         try {
-            // 检查录制开关
-            // 比赛模式: 强制录制 raw + imu，debug 按配置决定
-            auto match_mode = umt::BasicObjManager<bool>::find("match_mode");
-            bool is_match_mode = match_mode && match_mode->get();
-            bool enable_recording = config.enable_recording || is_match_mode;
+            // 检查录制开关 (比赛模式强制录制 raw + imu)
+            bool match_mode = is_match_mode();
+            bool enable_recording = config.enable_recording || match_mode;
 
             // ========== 状态转换: 开始录制 ==========
             if (enable_recording && !was_recording) {
-                debug::print(debug::PrintMode::INFO, "RecorderNode", "Recording started");
+                debug::print(debug::PrintMode::INFO, "RecorderNode", "Recording started{}",
+                    match_mode ? " [MATCH MODE]" : "");
 
-                // 初始化 CSV writer
-                if (config.record_imu_csv) {
+                // 初始化 CSV writer (比赛模式强制)
+                if (config.record_imu_csv || match_mode) {
                     imu_writer = std::make_unique<CsvWriter>(session_path + "/imu.csv");
                     imu_writer->write_header({
                         "timestamp_us", "frame_id",
@@ -208,13 +204,9 @@ void start_recorder_node() {
                     csv_row_count = 0;
                 }
 
-                // VideoWriter 延迟初始化 (需要知道帧尺寸)
-                if (config.record_raw_video) {
+                // VideoWriter 延迟初始化 (比赛模式强制 raw)
+                if (config.record_raw_video || match_mode) {
                     raw_writer = std::make_unique<VideoWriterWrapper>();
-                }
-                // debug 视频: 比赛模式下仍按配置决定，不强制
-                if (config.record_debug_video) {
-                    debug_writer = std::make_unique<VideoWriterWrapper>();
                 }
 
                 frame_count = 0;
@@ -230,10 +222,6 @@ void start_recorder_node() {
                 if (raw_writer) {
                     raw_writer->release();
                     raw_writer.reset();
-                }
-                if (debug_writer) {
-                    debug_writer->release();
-                    debug_writer.reset();
                 }
                 if (imu_writer) {
                     imu_writer->flush();
@@ -251,35 +239,22 @@ void start_recorder_node() {
                 sync_frame = sync_sub.pop_for(50);  // 50ms 超时
                 has_sync = true;
             } catch (const umt::MessageError_Timeout&) {
-                // 超时，继续尝试其他
-            }
-
-            // 尝试获取 predictor_vis
-            cv::Mat vis_frame;
-            bool has_vis = false;
-            try {
-                vis_frame = vis_sub.pop_for(10);  // 10ms 超时
-                has_vis = true;
-            } catch (const umt::MessageError_Timeout&) {
-                // 超时
+                // 超时，继续
             }
 
             if (!enable_recording) continue;
-            if (!has_sync && !has_vis) continue;
+            if (!has_sync) continue;
 
             // 采样判断 (视频和CSV同步)
             sample_counter++;
             bool should_record = (sample_counter % config.sample_interval == 0);
             if (!should_record) continue;
 
-            // 使用 sync_frame 的原始时间戳
-            int64_t timestamp_us = sync_frame.timestamp_us;
-
             // 开始计时
             auto write_start = SteadyClock::now();
 
             // 判断 sync_frame 是否完整 (image + serial 都有效)
-            bool sync_valid = has_sync && !sync_frame.image.empty() && sync_frame.serial_valid;
+            bool sync_valid = !sync_frame.image.empty() && sync_frame.serial_valid;
 
             // ========== 写入原始视频 ==========
             if (sync_valid && raw_writer) {
@@ -287,12 +262,16 @@ void start_recorder_node() {
                 if (!raw_writer->is_opened()) {
                     cv::Size frame_size = sync_frame.image.size();
                     std::string filepath = session_path + "/raw.mkv";
-                    raw_writer->open(filepath,
-                        config.get_record_fps(), frame_size, config.video_codec);
-                    debug::print(debug::PrintMode::INFO, "RecorderNode",
-                        "Raw video: {}x{} @ {:.1f}fps [{}]",
-                        frame_size.width, frame_size.height,
-                        config.get_record_fps(), config.video_codec);
+                    if (raw_writer->open(filepath,
+                            config.get_record_fps(), frame_size, config.video_codec)) {
+                        debug::print(debug::PrintMode::INFO, "RecorderNode",
+                            "Raw video: {}x{} @ {:.1f}fps [{}]",
+                            frame_size.width, frame_size.height,
+                            config.get_record_fps(), config.video_codec);
+                    } else {
+                        debug::print(debug::PrintMode::ERROR, "RecorderNode",
+                            "Failed to open raw video: {}", filepath);
+                    }
                 }
 
                 if (raw_writer->is_opened()) {
@@ -301,30 +280,11 @@ void start_recorder_node() {
                 }
             }
 
-            // ========== 写入调试视频 ==========
-            if (has_vis && debug_writer) {
-                // 延迟初始化
-                if (!debug_writer->is_opened() && !vis_frame.empty()) {
-                    cv::Size frame_size = vis_frame.size();
-                    std::string filepath = session_path + "/debug.mkv";
-                    debug_writer->open(filepath,
-                        config.get_record_fps(), frame_size, config.video_codec);
-                    debug::print(debug::PrintMode::INFO, "RecorderNode",
-                        "Debug video: {}x{} @ {:.1f}fps [{}]",
-                        frame_size.width, frame_size.height,
-                        config.get_record_fps(), config.video_codec);
-                }
-
-                if (debug_writer->is_opened() && !vis_frame.empty()) {
-                    debug_writer->write(vis_frame);
-                }
-            }
-
             // ========== 写入 IMU CSV ==========
             if (sync_valid && imu_writer) {
                 const auto& s = sync_frame.serial_data;
                 imu_writer->write_row({
-                    std::to_string(timestamp_us),
+                    std::to_string(sync_frame.timestamp_us),
                     std::to_string(sync_frame.frame_id),
                     fmt::format("{:.4f}", s.yaw),
                     fmt::format("{:.4f}", s.pitch),
@@ -350,7 +310,7 @@ void start_recorder_node() {
                 write_end - write_start).count() / 1000.0f;
 
             // 更新统计
-            stats.update(latency_ms, has_sync || has_vis);
+            stats.update(latency_ms, has_sync);
 
         } catch (const umt::MessageError_Stopped&) {
             // 发布者断开，等待重连
@@ -363,7 +323,6 @@ void start_recorder_node() {
 
     // 清理资源
     if (raw_writer) raw_writer->release();
-    if (debug_writer) debug_writer->release();
     if (imu_writer) imu_writer->flush();
 
     debug::print(debug::PrintMode::INFO, "RecorderNode", "Recorder node stopped");

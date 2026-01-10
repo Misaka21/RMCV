@@ -107,18 +107,16 @@ enable_recording = false    # 调试模式下是否录制
                             # 比赛模式会忽略此项，强制录制
 
 record_raw_video = true     # 录制原始画面
-record_debug_video = true   # 录制调试画面 (比赛模式也按此配置)
 record_imu_csv = true       # 录制 IMU 数据
 
 camera_fps = 200.0          # 相机帧率
-sample_interval = 3         # 采样间隔 (3 = 每3帧录1帧 = 66fps)
+sample_interval = 4         # 采样间隔 (4 = 每4帧录1帧 = 50fps)
 video_codec = "MJPG"        # 编码格式
 ```
 
 **比赛模式强制录制规则:**
 - `raw.mkv` - 强制录制 ✅
 - `imu.csv` - 强制录制 ✅
-- `debug.mkv` - 按配置决定 (不强制)
 
 ---
 
@@ -138,9 +136,8 @@ RT_PRIORITY=50
 # recorder.toml
 enable_recording = false   # 会被 --match 覆盖
 record_raw_video = true
-record_debug_video = false # 比赛时关闭，节省性能
 record_imu_csv = true
-sample_interval = 3        # 66fps 足够回放
+sample_interval = 4        # 50fps 足够回放
 ```
 
 ### 调试场景
@@ -205,7 +202,6 @@ log/
     ├── resources.csv              # 资源监控 (CPU/内存)
     ├── core.RMCV2026.12345        # 崩溃 core dump (如有)
     ├── raw.mkv                    # 原始视频
-    ├── debug.mkv                  # 调试视频
     └── imu.csv                    # IMU 数据
 ```
 
