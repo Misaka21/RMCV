@@ -9,6 +9,7 @@
 // C system headers
 
 // C++ system headers
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -192,7 +193,7 @@ private:
     libusb_device_handle* _handle { nullptr };
 
     bool _is_open { false };
-    bool _disconnected { false };  // 断线标志
+    std::atomic<bool> _disconnected { false }; 
     std::string _error_message;
 
     int _read_timeout_ms;
