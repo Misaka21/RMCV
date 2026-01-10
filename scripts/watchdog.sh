@@ -313,6 +313,44 @@ log_resources() {
 
 # ========== 启动/重启 ==========
 
+# 检测并保存 core dump 文件
+save_coredump() {
+    if ! $ENABLE_COREDUMP || [ -z "$SESSION_DIR" ]; then
+        return
+    fi
+
+    # 常见的 core 文件位置
+    local core_files=""
+
+    # 1. 当前目录 (build/)
+    core_files=$(find "$BUILD_DIR" -maxdepth 1 -name "core*" -mmin -5 2>/dev/null)
+
+    # 2. /tmp 或 /var/crash (某些系统配置)
+    if [ -z "$core_files" ]; then
+        core_files=$(find /tmp -maxdepth 1 -name "core*" -mmin -5 2>/dev/null)
+    fi
+
+    # 3. systemd-coredump 位置 (Ubuntu 等)
+    if [ -z "$core_files" ] && [ -d /var/lib/systemd/coredump ]; then
+        core_files=$(find /var/lib/systemd/coredump -name "*RMCV*" -mmin -5 2>/dev/null)
+    fi
+
+    # 移动找到的 core 文件
+    for core_file in $core_files; do
+        if [ -f "$core_file" ]; then
+            local dest="$SESSION_DIR/$(basename "$core_file")"
+            if mv "$core_file" "$dest" 2>/dev/null; then
+                log_msg "  Core dump saved: $dest"
+            else
+                # 没有权限移动，尝试复制
+                if cp "$core_file" "$dest" 2>/dev/null; then
+                    log_msg "  Core dump copied: $dest"
+                fi
+            fi
+        fi
+    done
+}
+
 bringup() {
     kill_screen
     # 先发 SIGTERM 让进程优雅退出，等待 2 秒后再强制杀死
@@ -325,6 +363,10 @@ bringup() {
 
 restart() {
     log_msg "Restarting RMCV..."
+
+    # 保存崩溃产生的 core dump
+    save_coredump
+
     RETRY_COUNT=$((RETRY_COUNT + 1))
 
     if [ "$RETRY_COUNT" -gt "$MAX_RETRY" ]; then

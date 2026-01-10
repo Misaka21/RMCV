@@ -203,6 +203,7 @@ log/
     ├── console.log                # RMCV 输出
     ├── heartbeat                  # 心跳文件
     ├── resources.csv              # 资源监控 (CPU/内存)
+    ├── core.RMCV2026.12345        # 崩溃 core dump (如有)
     ├── raw.mkv                    # 原始视频
     ├── debug.mkv                  # 调试视频
     └── imu.csv                    # IMU 数据
