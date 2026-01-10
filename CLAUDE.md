@@ -964,12 +964,12 @@ Eigen::Vector3d predict_armor_pos(int slot, double dt) const {
 
 与 rm.cv.fans（Predictor和火控在同一线程）不同，本项目分线程的原因：
 
-1. **火控需要更高频率**: Predictor 约 30Hz（受相机帧率限制），火控想 100Hz 插值
-2. **火控计算很重**: 弹道解算/MPC 耗时长，不想阻塞 Predictor
+1. **火控需要更高频率**: Predictor 200Hz（受相机帧率限制），火控 500Hz 控制更顺滑
+2. **解耦设计**: Predictor 和火控可以独立优化
 
 ### 核心设计：时间戳 + 速度 → 插值
 
-火控在 Predictor 两次更新之间（~33ms）需要自己做短期预测：
+火控在 Predictor 两次更新之间（~5ms）需要自己做短期预测：
 
 ```cpp
 // 火控插值逻辑
@@ -1120,14 +1120,14 @@ SyncFrame (image + serial_data)
     ↓
 Detector → DetectionResult (含 RobotState)
     ↓
-Predictor (30Hz)
+Predictor (200Hz)
     ↓
 ┌───────────────────────────────────────────────────────────────┐
 │ BasicObjManager<BattlefieldSnapshot>("battlefield")           │
 │   - vehicles[]: 敌方状态                                       │
 │   - self_state: 检测时刻的自身状态                              │
 │                                                               │
-│   火控 (100Hz) 多次读取同一帧数据做插值:                        │
+│   火控 (500Hz) 多次读取同一帧数据做插值:                        │
 │   dt = now - snapshot.timestamp                               │
 │   pos' = pos + vel * dt                                       │
 └───────────────────────────────────────────────────────────────┘
@@ -1138,7 +1138,7 @@ Predictor (30Hz)
 > **注意**: 当前 predictor_node.cpp 仍使用 `Publisher`，待改为 `BasicObjManager`
 
 ```cpp
-// ========== Predictor (30Hz) ==========
+// ========== Predictor (200Hz) ==========
 auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find_or_create("battlefield");
 
 void predictor_update(const DetectionResult& detection) {
@@ -1148,7 +1148,7 @@ void predictor_update(const DetectionResult& detection) {
     battlefield->get() = snapshot;
 }
 
-// ========== 火控 (100Hz) ==========
+// ========== 火控 (500Hz) ==========
 auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find("battlefield");
 
 void fire_control_loop() {
