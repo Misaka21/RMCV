@@ -1,3 +1,69 @@
+# 1.12
+
+## fire_control 模块独立重构
+
+完成了火控模块的架构重构，目标是让火控代码可以被 autoaim（自瞄）和未来的 autobuff（能量机关）共用。
+
+### 新架构
+
+```
+aimer/
+├── fire_control/                      # 通用火控模块 (NEW)
+│   ├── interface/
+│   │   ├── target_interface.hpp       # 目标抽象接口
+│   │   └── target_snapshot.hpp        # 快照抽象接口
+│   ├── core/
+│   │   ├── types.hpp                  # 通用类型
+│   │   └── trajectory/                # 弹道解算
+│   │       ├── trajectory_solver.hpp/cpp   # Ceres 解析解
+│   │       ├── rk4_trajectory_solver.hpp/cpp  # RK4 数值解
+│   │       └── solver_factory.hpp
+│   └── CMakeLists.txt
+│
+└── auto_aim/fire_control/             # AutoAim 专用
+    ├── types.hpp                      # 重新导出 + TargetSelection
+    ├── trajectory/*.hpp               # 重新导出 (兼容层)
+    ├── autoaim_target_adapter.hpp     # VehicleState → TargetInterface
+    ├── mpc/, pid/, target_selector/   # AutoAim 专用逻辑
+    └── CMakeLists.txt
+```
+
+### 核心设计: 适配器模式
+
+```cpp
+// TargetInterface - 目标抽象接口
+class TargetInterface {
+    virtual bool is_valid() const = 0;
+    virtual Eigen::Vector3d position() const = 0;
+    virtual Eigen::Vector3d velocity() const = 0;
+    virtual bool is_rotating() const { return false; }
+    virtual int sub_target_count() const { return 1; }
+    virtual Eigen::Vector3d predict_sub_target_position(int idx, double dt) const;
+    // ...
+};
+
+// VehicleTargetAdapter - 将 VehicleState 适配为 TargetInterface
+class VehicleTargetAdapter : public TargetInterface {
+    const predictor::VehicleState* vehicle_;
+    // 实现所有接口方法...
+};
+```
+
+### CMake 依赖
+
+- `fire_control_interface`: header-only 接口库
+- `fire_control_core`: 弹道解算 (需要 Ceres)
+- `autoaim_fire_control`: 依赖 fire_control_core
+
+### 后续扩展
+
+未来 autobuff 只需要:
+```cpp
+class BladeTargetAdapter : public fire_control::TargetInterface {
+    // 实现扇叶 → TargetInterface 的适配
+};
+```
+
 # 1.10
 通过 TTL 发送出来的串口，除了稳态误差，随机误差很大。原因是数据在 Linux 的 tty 层会经过缓冲，不会立即发送/接收，而是等缓冲区满或超时（通常 1-10ms）才触发系统调用。加上 USB 转 TTL 芯片（CH340/CP2102 等）本身有 USB 轮询间隔（1ms），以及 Linux 非实时调度的抖动，导致收发时刻的随机误差可达数毫秒级别。
 准备改用USB Bulk 协议绕过 tty 层，降低抖动
