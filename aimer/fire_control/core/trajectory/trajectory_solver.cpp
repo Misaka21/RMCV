@@ -15,22 +15,12 @@
 
 #include "plugin/param/runtime_parameter.hpp"
 
-namespace autoaim::fire_control {
+namespace fire_control {
 
 // ============================================================================
 // Ceres 残差函数: 2D 线性阻力模型 (静打动)
 // ============================================================================
 
-/**
- * @brief 2D 弹道残差函数 (垂直平面内)
- *
- * 物理推导:
- *   水平: dvx/dt = -k*vx  =>  x(t) = v0*cos(α)/k * (1 - exp(-k*t))
- *   垂直: dvz/dt = -g - k*vz
- *         =>  z(t) = (v0*sin(α) + g/k)/k * (1 - exp(-k*t)) - g*t/k
- *
- * 消去 t，得到 z 关于 x 的隐式方程
- */
 class ResistanceFuncLinear2D {
 public:
     ResistanceFuncLinear2D(double w, double h, double v0, double g, double k)
@@ -58,7 +48,7 @@ public:
             return true;
         }
 
-        // 精确弹道方程 (rm.cv.fans)
+        // 精确弹道方程
         T term1 = (k * v0 * sin_a + g) * k * w / (k * k * v0 * cos_a);
         T term2 = g * ceres::log(T(1.0) - ratio) / (k * k);
         residual[0] = term1 + term2 - h;
@@ -122,10 +112,10 @@ private:
 };
 
 // ============================================================================
-// TrajectorySolver 实现
+// LinearResistanceTrajectorySolver 实现
 // ============================================================================
 
-AimResult TrajectorySolver::solve(
+AimResult LinearResistanceTrajectorySolver::solve(
     const Eigen::Vector3d& target_pos,
     double bullet_speed,
     const Eigen::Vector3d& vehicle_velocity) const
@@ -137,7 +127,7 @@ AimResult TrajectorySolver::solve(
     return solve(input);
 }
 
-AimResult TrajectorySolver::solve(const TrajectoryInput& input) const {
+AimResult LinearResistanceTrajectorySolver::solve(const TrajectoryInput& input) const {
     // 根据车辆速度自动选择求解方式
     if (input.vehicle_velocity.norm() > 0.1) {
         return solve_3d(input);  // 动打动
@@ -145,7 +135,7 @@ AimResult TrajectorySolver::solve(const TrajectoryInput& input) const {
     return solve_2d(input);  // 静打动 (更快)
 }
 
-AimResult TrajectorySolver::solve_2d(const TrajectoryInput& input) const {
+AimResult LinearResistanceTrajectorySolver::solve_2d(const TrajectoryInput& input) const {
     // 读取参数
     double g = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.gravity");
     double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
@@ -156,7 +146,9 @@ AimResult TrajectorySolver::solve_2d(const TrajectoryInput& input) const {
     double v0 = input.bullet_speed;
     double horiz_dist = horizontal_distance(target);
 
-    if (horiz_dist < 0.1 || v0 < 5.0) return result;
+    if (horiz_dist < 0.1 || v0 < 5.0) {
+        return result;
+    }
 
     result.yaw = std::atan2(target.y(), target.x());
     result.distance = target.norm();
@@ -187,7 +179,7 @@ AimResult TrajectorySolver::solve_2d(const TrajectoryInput& input) const {
     return result;
 }
 
-AimResult TrajectorySolver::solve_3d(const TrajectoryInput& input) const {
+AimResult LinearResistanceTrajectorySolver::solve_3d(const TrajectoryInput& input) const {
     // 读取参数
     double g = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.gravity");
     double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
@@ -197,7 +189,9 @@ AimResult TrajectorySolver::solve_3d(const TrajectoryInput& input) const {
     const auto& target = input.target_pos;
     double v0 = input.bullet_speed;
 
-    if (target.norm() < 0.1 || v0 < 5.0) return result;
+    if (target.norm() < 0.1 || v0 < 5.0) {
+        return result;
+    }
 
     double angles[2] = {
         std::atan2(target.y(), target.x()),
@@ -231,15 +225,17 @@ AimResult TrajectorySolver::solve_3d(const TrajectoryInput& input) const {
     return result;
 }
 
-double TrajectorySolver::estimate_fly_time(double distance, double bullet_speed) const {
+double LinearResistanceTrajectorySolver::estimate_fly_time(double distance, double bullet_speed) const {
     double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
 
-    if (bullet_speed < 1.0) return 0;
+    if (bullet_speed < 1.0) {
+        return 0;
+    }
     double t = distance / bullet_speed;
     return t * (1.0 + k * distance / (2.0 * bullet_speed));
 }
 
-Eigen::Vector3d TrajectorySolver::compute_hit_point(
+Eigen::Vector3d LinearResistanceTrajectorySolver::compute_hit_point(
     double yaw, double pitch, double bullet_speed,
     const Eigen::Vector3d& vehicle_velocity, double fly_time) const
 {
@@ -260,4 +256,4 @@ Eigen::Vector3d TrajectorySolver::compute_hit_point(
     );
 }
 
-}  // namespace autoaim::fire_control
+}  // namespace fire_control

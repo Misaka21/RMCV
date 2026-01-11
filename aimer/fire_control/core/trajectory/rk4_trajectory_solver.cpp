@@ -10,10 +10,10 @@
 
 #include "plugin/param/runtime_parameter.hpp"
 
-namespace autoaim::fire_control {
+namespace fire_control {
 
 // ============================================================================
-// 内部参数结构 (避免多次读取配置)
+// 内部参数结构
 // ============================================================================
 
 struct Rk4Params {
@@ -26,14 +26,12 @@ struct Rk4Params {
     static Rk4Params from_config() {
         Rk4Params p;
 
-        // 阻力模型
         std::string model_str = runtime_param::get_param<std::string>(
             "AutoAim.FireControl.Trajectory.drag_model");
         p.drag.model = (model_str == "linear") ? DragModel::LINEAR : DragModel::QUADRATIC;
         p.drag.k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
         p.drag.g = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.gravity");
 
-        // RK4参数
         p.dt = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.rk4_dt");
         p.max_iter = static_cast<int>(runtime_param::get_param<int64_t>("AutoAim.FireControl.Trajectory.rk4_max_iter"));
         p.tolerance = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.rk4_tolerance");
@@ -50,7 +48,6 @@ TrajectoryState Rk4TrajectorySolver::derivative(
     const TrajectoryState& state,
     const DragParams& params) const
 {
-    // state: [x, y, z, vx, vy, vz]
     double vx = state[3];
     double vy = state[4];
     double vz = state[5];
@@ -58,12 +55,10 @@ TrajectoryState Rk4TrajectorySolver::derivative(
     double ax, ay, az;
 
     if (params.model == DragModel::LINEAR) {
-        // 线性阻力: a = -k * v
         ax = -params.k * vx;
         ay = -params.k * vy;
         az = -params.g - params.k * vz;
     } else {
-        // 二次阻力: a = -k * v * |v|
         double v_mag = std::sqrt(vx * vx + vy * vy + vz * vz);
         ax = -params.k * vx * v_mag;
         ay = -params.k * vy * v_mag;
@@ -78,7 +73,6 @@ TrajectoryState Rk4TrajectorySolver::rk4_step(
     double dt,
     const DragParams& params) const
 {
-    // RK4: y_{n+1} = y_n + dt/6 * (k1 + 2*k2 + 2*k3 + k4)
     auto k1 = derivative(state, params);
 
     TrajectoryState state2;
@@ -99,7 +93,6 @@ TrajectoryState Rk4TrajectorySolver::rk4_step(
     }
     auto k4 = derivative(state4, params);
 
-    // 合并
     TrajectoryState next;
     for (int i = 0; i < 6; ++i) {
         next[i] = state[i] + dt / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
@@ -118,11 +111,9 @@ TrajectoryResult Rk4TrajectorySolver::integrate(
     TrajectoryState state = initial_state;
     double t = 0;
 
-    // 积分直到水平距离超过目标或超时
     while (t < max_fly_time_) {
         double horiz_dist = std::hypot(state[0], state[1]);
 
-        // 到达目标水平距离
         if (horiz_dist >= target_distance) {
             result.hit = true;
             result.fly_time = t;
@@ -131,7 +122,6 @@ TrajectoryResult Rk4TrajectorySolver::integrate(
             return result;
         }
 
-        // 落地检测 (z < -10m 视为落地)
         if (state[2] < -10.0) {
             break;
         }
@@ -140,7 +130,6 @@ TrajectoryResult Rk4TrajectorySolver::integrate(
         t += dt_;
     }
 
-    // 未命中，返回最终状态
     result.fly_time = t;
     result.hit_point = Eigen::Vector3d(state[0], state[1], state[2]);
     result.hit_velocity = Eigen::Vector3d(state[3], state[4], state[5]);
@@ -148,7 +137,7 @@ TrajectoryResult Rk4TrajectorySolver::integrate(
 }
 
 // ============================================================================
-// 内部辅助函数 (带参数版本)
+// 内部辅助函数
 // ============================================================================
 
 namespace {
@@ -266,37 +255,29 @@ AimResult Rk4TrajectorySolver::solve(
     AimResult result;
     result.valid = false;
 
-    // 参数检查
     double horiz_dist = std::hypot(target_pos.x(), target_pos.y());
     if (horiz_dist < 0.1 || bullet_speed < 5.0) {
         return result;
     }
 
-    // 从配置读取所有参数
     Rk4Params p = Rk4Params::from_config();
 
-    // 计算 yaw (水平方向直接指向)
     double yaw = std::atan2(target_pos.y(), target_pos.x());
     result.yaw = yaw;
     result.distance = target_pos.norm();
 
-    // 二分法求 pitch
-    double pitch_low = -M_PI / 4;   // -45°
-    double pitch_high = M_PI / 3;   // 60° (吊射可能需要大仰角)
+    double pitch_low = -M_PI / 4;
+    double pitch_high = M_PI / 3;
 
-    // 初始猜测
     double pitch_guess = std::atan2(target_pos.z(), horiz_dist);
     pitch_guess = std::clamp(pitch_guess, pitch_low, pitch_high);
 
-    // 检查边界
     double err_low = compute_height_error_with_params(
         pitch_low, yaw, bullet_speed, vehicle_velocity, target_pos, p, *this);
     double err_high = compute_height_error_with_params(
         pitch_high, yaw, bullet_speed, vehicle_velocity, target_pos, p, *this);
 
-    // 确保 pitch_low 打低, pitch_high 打高
     if (err_low > 0 || err_high < 0) {
-        // 尝试扩大范围
         pitch_low = -M_PI / 3;
         pitch_high = M_PI / 2.5;
         err_low = compute_height_error_with_params(
@@ -305,14 +286,12 @@ AimResult Rk4TrajectorySolver::solve(
             pitch_high, yaw, bullet_speed, vehicle_velocity, target_pos, p, *this);
 
         if (err_low > 0 || err_high < 0) {
-            // 不可达
             result.pitch = pitch_guess;
             result.valid = false;
             return result;
         }
     }
 
-    // 二分法迭代
     double pitch = pitch_guess;
     for (int iter = 0; iter < p.max_iter; ++iter) {
         double err = compute_height_error_with_params(
@@ -334,7 +313,6 @@ AimResult Rk4TrajectorySolver::solve(
     result.pitch = pitch;
     result.valid = true;
 
-    // 计算飞行时间
     double cos_p = std::cos(pitch);
     double sin_p = std::sin(pitch);
     double cos_y = std::cos(yaw);
@@ -353,4 +331,47 @@ AimResult Rk4TrajectorySolver::solve(
     return result;
 }
 
-}  // namespace autoaim::fire_control
+double Rk4TrajectorySolver::estimate_fly_time(double distance, double bullet_speed) const {
+    // 简单估计: 考虑阻力的粗略估计
+    if (bullet_speed < 5.0) return 0;
+    double k = runtime_param::get_param<double>("AutoAim.FireControl.Trajectory.air_resistance_k");
+    if (k < 0.001) {
+        return distance / bullet_speed;
+    }
+    // 线性阻力近似: t ≈ -ln(1 - k*d/v0) / k
+    double ratio = k * distance / bullet_speed;
+    if (ratio >= 0.9) ratio = 0.9;
+    return -std::log(1.0 - ratio) / k;
+}
+
+Eigen::Vector3d Rk4TrajectorySolver::compute_hit_point(
+    double yaw,
+    double pitch,
+    double bullet_speed,
+    const Eigen::Vector3d& vehicle_velocity,
+    double fly_time) const
+{
+    Rk4Params p = Rk4Params::from_config();
+
+    double cos_p = std::cos(pitch);
+    double sin_p = std::sin(pitch);
+    double cos_y = std::cos(yaw);
+    double sin_y = std::sin(yaw);
+
+    double vx0 = bullet_speed * cos_p * cos_y + vehicle_velocity.x();
+    double vy0 = bullet_speed * cos_p * sin_y + vehicle_velocity.y();
+    double vz0 = bullet_speed * sin_p + vehicle_velocity.z();
+
+    TrajectoryState state = {0, 0, 0, vx0, vy0, vz0};
+    double t = 0;
+
+    while (t < fly_time) {
+        double dt = std::min(p.dt, fly_time - t);
+        state = rk4_step(state, dt, p.drag);
+        t += dt;
+    }
+
+    return Eigen::Vector3d(state[0], state[1], state[2]);
+}
+
+}  // namespace fire_control

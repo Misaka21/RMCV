@@ -1,6 +1,7 @@
 # 火控模块 CMakeLists.txt
+# AutoAim 专用火控，依赖 fire_control 通用模块
 
-# Ceres 依赖 (弹道解算)
+# Ceres 依赖 (通过 fire_control_core)
 find_package(Ceres REQUIRED)
 
 # TinyMPC 库
@@ -15,11 +16,9 @@ target_link_libraries(tinympc PUBLIC
     Eigen3::Eigen
 )
 
-# 火控库
-add_library(fire_control STATIC
-    # 共享模块
-    trajectory/trajectory_solver.cpp
-    trajectory/rk4_trajectory_solver.cpp
+# AutoAim 火控库
+add_library(autoaim_fire_control STATIC
+    # AutoAim 专用模块
     target_selector/target_selector.cpp
     fire_decision.cpp
 
@@ -34,15 +33,18 @@ add_library(fire_control STATIC
     fire_controller_node.cpp
 )
 
-target_include_directories(fire_control PUBLIC
+target_include_directories(autoaim_fire_control PUBLIC
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CERES_INCLUDE_DIRS}
 )
 
-target_link_libraries(fire_control PUBLIC
+target_link_libraries(autoaim_fire_control PUBLIC
+    fire_control_core      # 通用火控 (弹道解算)
+    fire_control_interface # 接口定义
     tinympc
     Eigen3::Eigen
     plugin
-    ${CERES_LIBRARIES}
 )
+
+# 保留旧名称以兼容
+add_library(fire_control ALIAS autoaim_fire_control)
