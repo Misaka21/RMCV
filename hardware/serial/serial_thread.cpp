@@ -28,7 +28,8 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
 
         debug::print(debug::PrintMode::INFO, "SerialSender", "Sender thread started");
 
-        stats::FpsStats fps_stats("SerialSender");
+        // FPS 统计: FPS=循环次数, sent=实际发送成功次数
+        stats::FpsStats fps_stats("SerialSender", "sent");
 
         while (app_running->get()) {
             try {
@@ -41,18 +42,17 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                 // 从ObjManager获取视觉数据
                 VisionData_t vision_data = vision_transmit->get();
 
-                // 转换为数据包
+                // 转换为数据包并发送
+                bool sent = false;
                 FixedPacket<16> packet;
                 if (SerialUtils::vision_data_to_packet(vision_data, packet)) {
-                    // 发送数据包
-                    if (!transceiver->send_packet(packet)) {
-                        debug::print(debug::PrintMode::WARNING, "SerialSender", "Failed to send packet");
-                    } else {
-                        fps_stats.update();
+                    if (transceiver->send_packet(packet)) {
+                        sent = true;
                     }
-                } else {
-                    debug::print(debug::PrintMode::WARNING, "SerialSender", "Failed to convert vision data");
                 }
+
+                // 更新统计: 每次循环计数，发送成功时 secondary_hit=true
+                fps_stats.update(0, sent);
 
                 // 短暂休眠避免过度占用CPU
                 std::this_thread::sleep_for(1ms);
@@ -79,6 +79,9 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
 
         debug::print(debug::PrintMode::INFO, "SerialReceiver", "Receiver thread started");
 
+        // FPS 统计: FPS=循环次数, received=实际收到数据次数
+        stats::FpsStats fps_stats("SerialReceiver", "received");
+
         while (app_running->get()) {
             try {
                 // 检查接收是否启用
@@ -89,7 +92,9 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
 
                 // 接收数据包
                 FixedPacket<16> packet;
-                if (transceiver->recv_packet(packet)) {
+                bool received = transceiver->recv_packet(packet);
+
+                if (received) {
                     // 立即记录接收时间戳 (关键: 减少延迟抖动)
                     auto recv_time = std::chrono::steady_clock::now();
                     int64_t recv_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -113,6 +118,9 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                 } else {
                     std::this_thread::sleep_for(1ms);
                 }
+
+                // 更新统计: 每次循环计数，收到数据时 secondary_hit=true
+                fps_stats.update(0, received);
 
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "SerialReceiver", "Exception: {}", e.what());
