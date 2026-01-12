@@ -196,9 +196,12 @@ bool TransceiverManager<Capacity>::recv_packet(PacketType& packet) {
                 // 表明断帧，或错误帧
                 return false;
             }
-        } else {
-            // 线程安全的重连
+        } else if (recv_len < 0) {
+            // 真正的读取错误，尝试重连
             safe_reconnect();
+            return false;
+        } else {
+            // recv_len == 0: 超时无数据，正常情况
             return false;
         }
     } catch (const std::exception& e) {
