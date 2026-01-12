@@ -12,6 +12,7 @@
 //   SPACE - 拍照采样
 //   'c'   - 开始标定
 //   'g'   - 只用网格搜索 (调试用)
+//   'm'   - 多轮迭代搜索 (大角度范围)
 //   'r'   - 重置所有采样
 //   'd'   - 删除最后一个采样
 //   's'   - 保存采样到文件
@@ -272,6 +273,7 @@ int main() {
         "  SPACE - 拍照采样 (保持标定板静止, 转动云台)\n"
         "  'c'   - 开始标定 (网格搜索 + Ceres)\n"
         "  'g'   - 只用网格搜索\n"
+        "  'm'   - 多轮迭代搜索 (覆盖 ±90°, 大偏差时用)\n"
         "  'r'   - 重置所有采样\n"
         "  'd'   - 删除最后一个采样\n"
         "  's'   - 保存采样到文件\n"
@@ -614,6 +616,40 @@ int main() {
                 debug::print("info", "ExtrinsicCalib", "最终标准差: {:.4f} m", result.final_std);
                 debug::print("info", "ExtrinsicCalib", "平移 (m): x={:.4f}, y={:.4f}, z={:.4f}",
                     result.params.offset_x, result.params.offset_y, result.params.offset_z);
+                debug::print("info", "ExtrinsicCalib", "偏差 (deg): roll={:.2f}, pitch={:.2f}, yaw={:.2f}",
+                    result.params.delta_roll * 180.0 / M_PI,
+                    result.params.delta_pitch * 180.0 / M_PI,
+                    result.params.delta_yaw * 180.0 / M_PI);
+
+            } else if (key == 'm' || key == 'M') {
+                // 多轮迭代搜索 (覆盖大角度范围)
+                std::vector<extrinsic_calib::CalibSample> samples_copy;
+                {
+                    std::lock_guard lock(g_samples_mutex);
+                    samples_copy = g_samples;
+                }
+
+                if (samples_copy.size() < MIN_SAMPLES) {
+                    fmt::print(fmt::fg(fmt::color::red),
+                        "样本数不足! 当前 {} 个，需要 >= {} 个\n",
+                        samples_copy.size(), MIN_SAMPLES);
+                    continue;
+                }
+
+                fmt::print("\n\n开始多轮迭代搜索 (覆盖 ±90°)...\n");
+                auto result = extrinsic_calib::multi_iteration_search(samples_copy, base_extrinsic, 5, true);
+                result.print();
+
+                // 如果有 Ceres，用结果作为初值继续优化
+#if HAS_CERES
+                fmt::print("\n使用 Ceres 精修...\n");
+                auto ceres_result = extrinsic_calib::ceres_optimize(samples_copy, base_extrinsic, &result.params, true);
+                ceres_result.print();
+#endif
+
+                // 记录结果到日志
+                debug::print("info", "ExtrinsicCalib", "========== 多轮迭代结果 ==========");
+                debug::print("info", "ExtrinsicCalib", "最终标准差: {:.4f} m", result.final_std);
                 debug::print("info", "ExtrinsicCalib", "偏差 (deg): roll={:.2f}, pitch={:.2f}, yaw={:.2f}",
                     result.params.delta_roll * 180.0 / M_PI,
                     result.params.delta_pitch * 180.0 / M_PI,

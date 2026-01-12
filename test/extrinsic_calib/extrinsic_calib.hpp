@@ -478,6 +478,213 @@ inline CalibResult two_stage_search(
     return result;
 }
 
+// ============================================================================
+// 方法3: 多轮迭代搜索 (覆盖大角度范围)
+// ============================================================================
+
+inline CalibResult multi_iteration_search(
+    const std::vector<CalibSample>& samples,
+    const BaseExtrinsic& base,
+    int max_iterations = 5,
+    bool verbose = true)
+{
+    if (verbose) {
+        fmt::print("\n========== 多轮迭代搜索 ==========\n");
+        fmt::print("样本数: {}, 最大迭代: {}\n\n", samples.size(), max_iterations);
+    }
+
+    auto start_time = std::chrono::steady_clock::now();
+    int total_iterations = 0;
+
+    // 初始外参
+    ExtrinsicParams initial_params;
+    double initial_std = compute_std(samples, base, initial_params);
+
+    // 全局最优
+    ExtrinsicParams global_best_params;
+    double global_best_variance = 1e10;
+
+    // 多个初始点搜索 (覆盖 ±90° 范围)
+    // 对 roll, pitch, yaw 各尝试 -90°, -45°, 0°, 45°, 90°
+    std::vector<double> angle_starts = {-M_PI/2, -M_PI/4, 0, M_PI/4, M_PI/2};
+
+    if (verbose) {
+        fmt::print("阶段1: 多起点粗搜 (覆盖 ±90°)\n");
+        fmt::print("  每个角度测试 {} 个起点, 共 {}³ = {} 个起点\n",
+            angle_starts.size(), angle_starts.size(),
+            angle_starts.size() * angle_starts.size() * angle_starts.size());
+    }
+
+    // 粗搜配置 (小范围，用于快速评估每个起点)
+    SearchConfig quick_config;
+    quick_config.offset_range = 0.08;   // ±8cm
+    quick_config.offset_step = 0.04;    // 4cm → 5 steps
+    quick_config.angle_range = 0.3;     // ±17°
+    quick_config.angle_step = 0.15;     // ~8.6° → 5 steps
+    // 每个起点: 5^6 = 15625 点, 约 0.01 秒
+
+    // 测试所有起点组合
+    for (double start_roll : angle_starts) {
+        for (double start_pitch : angle_starts) {
+            for (double start_yaw : angle_starts) {
+                ExtrinsicParams best_params;
+                double best_variance = 1e10;
+
+                // 在该起点附近搜索
+                for (double ox = -quick_config.offset_range; ox <= quick_config.offset_range; ox += quick_config.offset_step) {
+                    for (double oy = -quick_config.offset_range; oy <= quick_config.offset_range; oy += quick_config.offset_step) {
+                        for (double oz = -quick_config.offset_range; oz <= quick_config.offset_range; oz += quick_config.offset_step) {
+                            for (double dr = start_roll - quick_config.angle_range;
+                                 dr <= start_roll + quick_config.angle_range;
+                                 dr += quick_config.angle_step) {
+                                for (double dp = start_pitch - quick_config.angle_range;
+                                     dp <= start_pitch + quick_config.angle_range;
+                                     dp += quick_config.angle_step) {
+                                    for (double dy = start_yaw - quick_config.angle_range;
+                                         dy <= start_yaw + quick_config.angle_range;
+                                         dy += quick_config.angle_step) {
+                                        ExtrinsicParams params;
+                                        params.offset_x = ox;
+                                        params.offset_y = oy;
+                                        params.offset_z = oz;
+                                        params.delta_roll = dr;
+                                        params.delta_pitch = dp;
+                                        params.delta_yaw = dy;
+
+                                        double var = compute_variance(samples, base, params);
+                                        total_iterations++;
+
+                                        if (var < best_variance) {
+                                            best_variance = var;
+                                            best_params = params;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 更新全局最优
+                if (best_variance < global_best_variance) {
+                    global_best_variance = best_variance;
+                    global_best_params = best_params;
+                    if (verbose) {
+                        fmt::print("  发现更优解: std={:.4f}m @ (roll={:.1f}°, pitch={:.1f}°, yaw={:.1f}°)\n",
+                            std::sqrt(best_variance),
+                            best_params.delta_roll * 180 / M_PI,
+                            best_params.delta_pitch * 180 / M_PI,
+                            best_params.delta_yaw * 180 / M_PI);
+                    }
+                }
+            }
+        }
+    }
+
+    if (verbose) {
+        fmt::print("\n粗搜最优: std={:.4f}m\n", std::sqrt(global_best_variance));
+        global_best_params.print();
+    }
+
+    // 阶段2: 多轮细化迭代
+    if (verbose) {
+        fmt::print("\n阶段2: 迭代细化 (最多 {} 轮)\n", max_iterations);
+    }
+
+    for (int iter = 0; iter < max_iterations; iter++) {
+        ExtrinsicParams center = global_best_params;
+        ExtrinsicParams iter_best = center;
+        double iter_best_var = global_best_variance;
+
+        // 细搜配置 (逐轮缩小范围)
+        double shrink = std::pow(0.5, iter);  // 每轮缩小一半
+        SearchConfig fine_config;
+        fine_config.offset_range = 0.02 * shrink;   // 初始 ±2cm
+        fine_config.offset_step = 0.004 * shrink;   // 初始 4mm
+        fine_config.angle_range = 0.1 * shrink;     // 初始 ±5.7°
+        fine_config.angle_step = 0.02 * shrink;     // 初始 1.1°
+
+        // 在当前最优解附近细搜
+        for (double ox = center.offset_x - fine_config.offset_range;
+             ox <= center.offset_x + fine_config.offset_range;
+             ox += fine_config.offset_step) {
+            for (double oy = center.offset_y - fine_config.offset_range;
+                 oy <= center.offset_y + fine_config.offset_range;
+                 oy += fine_config.offset_step) {
+                for (double oz = center.offset_z - fine_config.offset_range;
+                     oz <= center.offset_z + fine_config.offset_range;
+                     oz += fine_config.offset_step) {
+                    for (double dr = center.delta_roll - fine_config.angle_range;
+                         dr <= center.delta_roll + fine_config.angle_range;
+                         dr += fine_config.angle_step) {
+                        for (double dp = center.delta_pitch - fine_config.angle_range;
+                             dp <= center.delta_pitch + fine_config.angle_range;
+                             dp += fine_config.angle_step) {
+                            for (double dy = center.delta_yaw - fine_config.angle_range;
+                                 dy <= center.delta_yaw + fine_config.angle_range;
+                                 dy += fine_config.angle_step) {
+                                ExtrinsicParams params;
+                                params.offset_x = ox;
+                                params.offset_y = oy;
+                                params.offset_z = oz;
+                                params.delta_roll = dr;
+                                params.delta_pitch = dp;
+                                params.delta_yaw = dy;
+
+                                double var = compute_variance(samples, base, params);
+                                total_iterations++;
+
+                                if (var < iter_best_var) {
+                                    iter_best_var = var;
+                                    iter_best = params;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 检查是否有改进
+        double improvement = (global_best_variance - iter_best_var) / global_best_variance;
+        global_best_variance = iter_best_var;
+        global_best_params = iter_best;
+
+        if (verbose) {
+            fmt::print("  迭代 {}: std={:.4f}m, 改进={:.2f}%\n",
+                iter + 1, std::sqrt(global_best_variance), improvement * 100);
+        }
+
+        // 收敛判断
+        if (improvement < 0.001) {  // < 0.1% 改进就停止
+            if (verbose) {
+                fmt::print("  已收敛，提前终止\n");
+            }
+            break;
+        }
+    }
+
+    auto end_time = std::chrono::steady_clock::now();
+    double solve_time = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+    // 构建结果
+    CalibResult result;
+    result.success = (global_best_variance < initial_std * initial_std);
+    result.params = global_best_params;
+    result.initial_std = initial_std;
+    result.final_std = std::sqrt(global_best_variance);
+    compute_std(samples, base, global_best_params, &result.world_center);
+    result.iterations = total_iterations;
+    result.solve_time_ms = solve_time;
+    result.R_cam2gimbal_base = base.R_cam2gimbal;
+
+    if (verbose) {
+        fmt::print("\n多轮迭代完成:\n");
+    }
+
+    return result;
+}
+
 } // namespace extrinsic_calib
 
 #endif // RMCV_EXTRINSIC_CALIB_HPP
