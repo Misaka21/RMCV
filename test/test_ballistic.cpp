@@ -190,7 +190,7 @@ int main() {
 
             // 获取 IMU 数据
             Eigen::Quaterniond q_imu;
-            float serial_bullet_speed;
+            float serial_bullet_speed = 0;
             bool imu_ok = false;
             {
                 std::lock_guard lock(g_imu_mutex);
