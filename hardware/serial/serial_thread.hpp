@@ -83,16 +83,6 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver);
 void start_serial_communication();
 
 /**
- * @brief 启动串口通信（指定端口和波特率，向后兼容）
- * @param port_path 串口设备路径
- * @param baud_rate 波特率
- *
- * 该函数会创建一个串口实例，并同时启动发送和接收线程
- * 确保发送和接收共享同一个串口设备
- */
-void start_serial_communication(const std::string& port_path, int baud_rate);
-
-/**
  * @brief 串口工具类，用于包转换和底层操作
  */
 class SerialUtils {

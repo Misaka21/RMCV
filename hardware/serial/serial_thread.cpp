@@ -280,67 +280,6 @@ public:
         }
     }
 
-    /**
-     * @brief 启动串口收发线程（指定端口和波特率，向后兼容）
-     * @param port_path 串口设备路径
-     * @param baud_rate 波特率
-     */
-    static void start_serial_threads(const std::string& port_path, int baud_rate) {
-        debug::print(debug::PrintMode::INFO, "SerialManager", "Starting UART: {} @ {}", port_path, baud_rate);
-
-        std::shared_ptr<UartProtocol> uart = nullptr;
-        int retry_count = 0;
-
-        // 重试打开串口
-        while (retry_count < MAX_RETRY_COUNT) {
-            try {
-                uart = std::make_shared<UartProtocol>(port_path, baud_rate);
-
-                if (uart->open()) {
-                    debug::print(debug::PrintMode::INFO, "SerialManager", "Port {} opened", port_path);
-                    break;
-                }
-
-                debug::print(debug::PrintMode::WARNING, "SerialManager",
-                    "Open failed ({}/{}): {}", retry_count + 1, MAX_RETRY_COUNT, uart->error_message());
-
-            } catch (const std::exception& e) {
-                debug::print(debug::PrintMode::WARNING, "SerialManager",
-                    "Exception ({}/{}): {}", retry_count + 1, MAX_RETRY_COUNT, e.what());
-            }
-
-            retry_count++;
-            if (retry_count < MAX_RETRY_COUNT) {
-                debug::print(debug::PrintMode::INFO, "SerialManager",
-                    "Retry in {} seconds...", RETRY_INTERVAL_MS / 1000);
-                std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_INTERVAL_MS));
-            }
-        }
-
-        // 重试全部失败，退出程序
-        if (!uart || !uart->is_open()) {
-            debug::print(debug::PrintMode::FATAL, "SerialManager",
-                "Port {} open failed after {} retries, exiting", port_path, MAX_RETRY_COUNT);
-            std::exit(1);
-        }
-
-        try {
-            // 创建TransceiverManager（共享）
-            auto transceiver = std::make_shared<TransceiverManager<16>>(uart);
-
-            // 启动发送线程
-            std::thread([transceiver]() { serial_sender_run(transceiver); }).detach();
-
-            // 启动接收线程
-            std::thread([transceiver]() { serial_receiver_run(transceiver); }).detach();
-
-            debug::print(debug::PrintMode::INFO, "SerialManager", "TX/RX threads started");
-
-        } catch (const std::exception& e) {
-            debug::print(debug::PrintMode::FATAL, "SerialManager", "Start failed: {}", e.what());
-            std::exit(1);
-        }
-    }
 };
 
 /**
@@ -348,15 +287,6 @@ public:
  */
 void start_serial_communication() {
     SerialManager::start_serial_threads();
-}
-
-/**
- * @brief 启动串口通信（同时启动发送和接收线程，共享串口实例）
- * @param port_path 串口设备路径
- * @param baud_rate 波特率
- */
-void start_serial_communication(const std::string& port_path, int baud_rate) {
-    SerialManager::start_serial_threads(port_path, baud_rate);
 }
 
 // SerialUtils实现

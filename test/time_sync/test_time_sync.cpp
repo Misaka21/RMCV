@@ -161,12 +161,10 @@ std::vector<time_sync::ImuSample> g_imu_samples;
 // 串口接收线程 (记录独立时间戳)
 // ============================================================================
 
-void imu_receiver_thread(const std::string& port_name, int baudrate) {
-    fmt::print("串口线程启动: {} @ {}\n", port_name, baudrate);
-
+void imu_receiver_thread() {
     try {
-        // 启动串口通信
-        serial::start_serial_communication(port_name, baudrate);
+        // 启动串口通信 (从配置文件读取)
+        serial::start_serial_communication();
 
         // 等待接收队列就绪
         std::this_thread::sleep_for(100ms);
@@ -245,8 +243,6 @@ int main() {
 
     // 加载配置
     auto config = static_param::parse_file("hardware.toml");
-    std::string port_name = static_param::get_param<std::string>(config, "Serial", "port_name");
-    int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
 
     // IMU符号配置 (标定时使用原始数据，不需要修正)
     // 注: 最终运行时由 hardware_node 应用符号修正
@@ -262,7 +258,7 @@ int main() {
     fmt::print("外参加载完成\n");
 
     // 启动串口线程 (独立记录IMU时间戳)
-    std::thread imu_thread(imu_receiver_thread, port_name, static_cast<int>(baudrate));
+    std::thread imu_thread(imu_receiver_thread);
 
     // 等待串口就绪
     std::this_thread::sleep_for(500ms);

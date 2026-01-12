@@ -49,11 +49,9 @@ bool g_imu_valid = false;
 // IMU 接收线程
 // ============================================================================
 
-void imu_receiver_thread(const std::string& port_name, int baudrate) {
-    fmt::print("串口线程启动: {} @ {}\n", port_name, baudrate);
-
+void imu_receiver_thread() {
     try {
-        serial::start_serial_communication(port_name, baudrate);
+        serial::start_serial_communication();  // 从配置文件读取
         std::this_thread::sleep_for(100ms);
 
         auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
@@ -114,8 +112,6 @@ int main() {
 
     // 加载配置
     auto config = static_param::parse_file("hardware.toml");
-    std::string port_name = static_param::get_param<std::string>(config, "Serial", "port_name");
-    int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
 
     // 初始化参数系统 (在单独线程中运行，因为是阻塞函数)
     std::thread param_thread([]() {
@@ -131,7 +127,7 @@ int main() {
     }
 
     // 启动串口线程
-    std::thread imu_thread(imu_receiver_thread, port_name, static_cast<int>(baudrate));
+    std::thread imu_thread(imu_receiver_thread);
     std::this_thread::sleep_for(500ms);
 
     // 检查串口
