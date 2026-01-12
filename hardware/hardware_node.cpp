@@ -211,9 +211,7 @@ void start_hardware_node() {
         // Load config
         auto config = static_param::parse_file("hardware.toml");
 
-        // Serial config
-        std::string port_name = static_param::get_param<std::string>(config, "Serial", "port_name");
-        int64_t baudrate = static_param::get_param<int64_t>(config, "Serial", "baudrate");
+        // Time sync config
         int64_t delta_t_us = static_param::get_param<int64_t>(config, "TimeSync", "delta_t_us");
 
         // IMU pitch/roll取反配置
@@ -242,13 +240,12 @@ void start_hardware_node() {
             fake_data.aiming_lock = static_param::get_param<bool>(config, "Serial.fake_data", "aiming_lock");
         }
 
-        debug::print(debug::PrintMode::INFO, "HardwareNode", "Serial: {} @ {}", port_name, baudrate);
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Delta_t: {} us", delta_t_us);
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Use fake serial: {}", use_fake_serial);
 
         // 1. Start serial communication (only if not using fake)
         if (!use_fake_serial) {
-            serial::start_serial_communication(port_name, static_cast<int>(baudrate));
+            serial::start_serial_communication();  // 从配置文件读取
             std::this_thread::sleep_for(100ms);  // Wait for serial threads to start
         } else {
             debug::print(debug::PrintMode::WARNING, "HardwareNode",
