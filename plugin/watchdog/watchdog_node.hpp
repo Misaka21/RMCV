@@ -182,8 +182,8 @@ inline void start_watchdog_node(const std::string& heartbeat_file,
     // 运行标志
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
-    // 等待所有节点初始化
-    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms * 2));
+    // 等待节点初始化（减少等待时间）
+    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
 
     debug::print(debug::PrintMode::INFO, "WatchdogNode",
         "启动监控, 超时={}ms, 心跳文件={}", timeout_ms, heartbeat_file);

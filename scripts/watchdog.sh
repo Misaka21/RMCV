@@ -155,28 +155,75 @@ check_screen() {
 check_heartbeat() {
     # 使用当前会话目录的心跳文件
     if [ -z "$SESSION_DIR" ]; then
-        log_msg "  Session dir not set, waiting..."
         return 0
     fi
 
     local heartbeat_file="$SESSION_DIR/heartbeat"
 
     if [ ! -f "$heartbeat_file" ]; then
-        # 心跳文件不存在，等待 WatchdogNode 创建
-        log_msg "  Heartbeat not found, waiting..."
-        return 0
+        return 0  # 等待心跳文件创建
     fi
 
     # 检查文件修改时间
     local file_age=$(($(date +%s) - $(stat -c %Y "$heartbeat_file" 2>/dev/null || echo 0)))
 
     if [ "$file_age" -gt "$TIMEOUT" ]; then
-        log_msg "  Heartbeat TIMEOUT: ${file_age}s > ${TIMEOUT}s"
         return 1
     fi
 
-    log_msg "  Heartbeat OK (age: ${file_age}s)"
     return 0
+}
+
+# 显示状态（更友好的格式，带颜色）
+show_status() {
+    local screen_ok=false
+    local process_ok=false
+    local heartbeat_ok=false
+    local heartbeat_age="-"
+    local heartbeat_content=""
+
+    # 颜色定义
+    local RED='\033[0;31m'
+    local GREEN='\033[0;32m'
+    local YELLOW='\033[0;33m'
+    local CYAN='\033[0;36m'
+    local NC='\033[0m'  # No Color
+
+    # 检查各项状态
+    check_screen && screen_ok=true
+    check_process && process_ok=true
+
+    local heartbeat_file="$SESSION_DIR/heartbeat"
+    if [ -f "$heartbeat_file" ]; then
+        heartbeat_age=$(($(date +%s) - $(stat -c %Y "$heartbeat_file" 2>/dev/null || echo 0)))
+        [ "$heartbeat_age" -le "$TIMEOUT" ] && heartbeat_ok=true
+        # 读取心跳文件内容（节点状态）
+        heartbeat_content=$(tail -n +4 "$heartbeat_file" 2>/dev/null | head -5)
+    fi
+
+    # 状态符号（带颜色）
+    local sym_screen="${RED}✗${NC}" sym_process="${RED}✗${NC}" sym_heartbeat="${RED}✗${NC}"
+    $screen_ok && sym_screen="${GREEN}✓${NC}"
+    $process_ok && sym_process="${GREEN}✓${NC}"
+    $heartbeat_ok && sym_heartbeat="${GREEN}✓${NC}"
+
+    # 输出
+    echo -e "${CYAN}──────────────────────────────────────${NC}"
+    echo -e "[$(date '+%H:%M:%S')] screen: $sym_screen  process: $sym_process  heartbeat: $sym_heartbeat (${heartbeat_age}s)"
+
+    # 显示节点状态
+    if [ -n "$heartbeat_content" ]; then
+        echo "$heartbeat_content" | while read line; do
+            # 根据状态着色
+            if echo "$line" | grep -q "TIMEOUT\|none"; then
+                echo -e "    ${RED}$line${NC}"
+            elif echo "$line" | grep -q "not started"; then
+                echo -e "    ${YELLOW}$line${NC}"
+            else
+                echo -e "    ${GREEN}$line${NC}"
+            fi
+        done
+    fi
 }
 
 # ========== 资源监控 ==========
@@ -408,29 +455,32 @@ echo ""
 
 # 首次启动
 bringup
-sleep $((TIMEOUT * 2))
+sleep 3  # 等待进程启动
 
 # 监控循环
+CHECK_INTERVAL=2  # 检查间隔 (秒)
+
 while true; do
-    log_msg "--- Health Check ---"
+    # 显示状态
+    show_status
 
     # 1. 检查 screen 会话
     if ! check_screen; then
-        log_msg "  Screen session lost!"
+        log_msg "[ERROR] Screen session lost!"
         restart
         continue
     fi
 
     # 2. 检查进程
     if ! check_process; then
-        log_msg "  RMCV process not running!"
+        log_msg "[ERROR] RMCV process not running!"
         restart
         continue
     fi
 
     # 3. 检查心跳
     if ! check_heartbeat; then
-        log_msg "  Heartbeat check failed!"
+        log_msg "[ERROR] Heartbeat timeout!"
         restart
         continue
     fi
@@ -440,5 +490,5 @@ while true; do
 
     # 一切正常
     RETRY_COUNT=0
-    sleep $TIMEOUT
+    sleep $CHECK_INTERVAL
 done
