@@ -6,6 +6,7 @@
 #define SERIAL_THREAD_HPP
 
 // C++ system headers
+#include <cstdint>
 #include <string>
 #include <queue>
 
@@ -16,6 +17,10 @@
 #include "fixed_packet.hpp"
 
 namespace serial {
+
+// ============================================================================
+// 数据结构
+// ============================================================================
 
 // 视觉数据结构体（示例，可根据实际需求修改）
 struct VisionData_t {
@@ -44,7 +49,7 @@ struct SerialReceiveData {
     float bullet_speed;   // 弹速 (m/s)
 
     // 模式控制
-    uint8_t aim_mode;     // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
+    uint8_t aim_mode;     // 自瞄模式 (原始字节: 0=关闭, 1=自瞄, 2=小符, 3=大符)
     bool allow_fire;      // 是否允许射击
     bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 

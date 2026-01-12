@@ -273,9 +273,49 @@ debug::print("info", "module", "message: {}", data);
 - `UartProtocol` - 标准UART串口通信
 - `UsbBulkProtocol` - USB Bulk传输协议（需要libusb-1.0）
 
+#### ⚠️ 层次分离原则 (重要!)
+
+**"Serial 层只关心字节，业务含义在 aimer 层定义"**
+
+```
+Layer 0: 硬件层 (hardware/serial/)
+         - 只管字节传输
+         - SerialReceiveData.aim_mode = uint8_t (原始值)
+         - 不理解业务含义
+                    ↓
+                 转换边界
+                    ↓
+Layer 1: 业务层 (aimer/)
+         - 定义业务含义
+         - AimMode 枚举在 aimer/common/robot_state.hpp
+         - RobotState.aim_mode = AimMode (类型安全)
+```
+
+**数据流：**
+```
+电控 uint8_t (0/1/2/3)
+       ↓
+[serial_thread.cpp] packet_to_receive_data()
+       ↓
+SerialReceiveData { aim_mode: uint8_t }   ← 原始字节
+       ↓
+[detector_helpers.hpp] build_robot_state()
+[robot_state.hpp] from_sync_frame()       ← 转换边界: to_aim_mode(uint8_t)
+       ↓
+RobotState { aim_mode: AimMode }          ← 业务类型
+       ↓
+fire_control (只依赖 aimer/common/)
+```
+
+**关键文件：**
+- `hardware/serial/serial_thread.hpp` - 原始字节 `uint8_t aim_mode`
+- `aimer/common/robot_state.hpp` - 业务枚举 `AimMode` + `to_aim_mode()`
+- `aimer/auto_aim/detector/detector_helpers.hpp` - 转换调用点
+
 #### 数据类型定义
 ```cpp
 // hardware/serial/serial_thread.hpp
+// 注意：此层只包含原始字节，不包含业务枚举
 
 // 接收数据结构
 struct SerialReceiveData {
@@ -291,13 +331,31 @@ struct SerialReceiveData {
     // 射击参数
     float bullet_speed;   // 弹速 (m/s)
 
-    // 模式控制
-    uint8_t aim_mode;     // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
+    // 模式控制 (原始字节，业务含义由 aimer 层定义)
+    uint8_t aim_mode;     // 原始值 (0/1/2/3)，转换见 aimer::to_aim_mode()
     bool allow_fire;      // 是否允许射击
+    bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 
     // 时间戳 (上位机接收时刻，微秒)
     int64_t recv_time_us = 0;
 };
+
+// aimer/common/robot_state.hpp
+// 业务层定义瞄准模式含义
+
+enum class AimMode : uint8_t {
+    DISABLED = 0,       // 关闭自瞄
+    AUTOAIM = 1,        // 自瞄 (装甲板)
+    ENERGY_SMALL = 2,   // 小符 (能量机关)
+    ENERGY_LARGE = 3,   // 大符 (能量机关)
+};
+
+inline AimMode to_aim_mode(uint8_t raw) {
+    if (raw <= static_cast<uint8_t>(AimMode::ENERGY_LARGE)) {
+        return static_cast<AimMode>(raw);
+    }
+    return AimMode::DISABLED;
+}
 ```
 
 #### 串口使用方法

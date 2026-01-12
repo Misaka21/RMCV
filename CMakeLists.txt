@@ -116,11 +116,11 @@ if(ENABLE_WEBVIEW)
     target_link_libraries(RMCV2026
         ${OpenCV_LIBS} fmt::fmt
         -Wl,--whole-archive plugin -Wl,--no-whole-archive
-        hardware detector predictor rmcv_bag
+        hardware detector predictor fire_control_node rmcv_bag
         ${Python_LIBRARIES}
     )
 else()
-    target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor rmcv_bag)
+    target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor fire_control_node rmcv_bag)
 endif()
 
 add_executable(test_param test/test_param.cpp)

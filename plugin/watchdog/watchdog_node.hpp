@@ -174,9 +174,10 @@ inline void start_watchdog_node(const std::string& heartbeat_file,
                                  int check_interval_ms = 1000) {
     // 监控的节点列表
     std::vector<NodeConfig> nodes = {
-        {"hardware", true},    // 需要检查串口数据心跳
-        {"detector", false},   // 只检查存活
-        {"predictor", false},  // 只检查存活
+        {"hardware", true},      // 需要检查串口数据心跳
+        {"detector", false},     // 只检查存活
+        {"predictor", false},    // 只检查存活
+        {"fire_control", false}, // 只检查存活
     };
 
     // 运行标志

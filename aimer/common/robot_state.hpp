@@ -15,6 +15,35 @@
 
 namespace aimer {
 
+// ============================================================================
+// AimMode 枚举 (业务层定义瞄准模式含义)
+// ============================================================================
+
+enum class AimMode : uint8_t {
+    DISABLED = 0,       // 关闭自瞄
+    AUTOAIM = 1,        // 自瞄 (装甲板)
+    ENERGY_SMALL = 2,   // 小符 (能量机关)
+    ENERGY_LARGE = 3,   // 大符 (能量机关)
+};
+
+inline const char* aim_mode_name(AimMode mode) {
+    switch (mode) {
+        case AimMode::DISABLED: return "DISABLED";
+        case AimMode::AUTOAIM: return "AUTOAIM";
+        case AimMode::ENERGY_SMALL: return "ENERGY_SMALL";
+        case AimMode::ENERGY_LARGE: return "ENERGY_LARGE";
+        default: return "UNKNOWN";
+    }
+}
+
+// 从串口原始字节转换为 AimMode 枚举
+inline AimMode to_aim_mode(uint8_t raw) {
+    if (raw <= static_cast<uint8_t>(AimMode::ENERGY_LARGE)) {
+        return static_cast<AimMode>(raw);
+    }
+    return AimMode::DISABLED;
+}
+
 /**
  * @brief 机器人状态 - 从 hardware::SyncFrame 提取
  */
@@ -31,8 +60,8 @@ struct RobotState {
     // 敌方颜色 (0=未知, 1=红, 2=蓝)
     uint8_t enemy_color = 0;
 
-    // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
-    uint8_t aim_mode = 0;
+    // 自瞄模式
+    AimMode aim_mode = AimMode::DISABLED;
 
     // 是否允许射击
     bool allow_fire = false;
@@ -53,7 +82,7 @@ struct RobotState {
             state.set_euler(s.yaw, s.pitch, s.roll);
             state.bullet_speed = s.bullet_speed;
             state.enemy_color = s.enemy_color;
-            state.aim_mode = s.aim_mode;
+            state.aim_mode = to_aim_mode(s.aim_mode);  // uint8_t → AimMode
             state.allow_fire = s.allow_fire;
             state.aiming_lock = s.aiming_lock;
         }

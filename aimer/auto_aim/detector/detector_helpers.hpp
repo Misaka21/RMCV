@@ -39,7 +39,7 @@ inline aimer::RobotState build_robot_state(
     state.set_euler(s.yaw, s.pitch, s.roll);
     state.bullet_speed = s.bullet_speed;
     state.enemy_color = s.enemy_color;
-    state.aim_mode = s.aim_mode;
+    state.aim_mode = aimer::to_aim_mode(s.aim_mode);  // uint8_t → AimMode
     state.allow_fire = s.allow_fire;
     state.timestamp_us = timestamp_us;
     return state;

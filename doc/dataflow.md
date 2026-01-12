@@ -58,9 +58,10 @@ struct SerialReceiveData {
     // 射击参数
     float bullet_speed;   // 弹速 (m/s)
 
-    // 模式控制
-    uint8_t aim_mode;     // 自瞄模式 (0=关闭, 1=自瞄, 2=小符, 3=大符)
+    // 模式控制 (原始字节，业务含义见 aimer::AimMode)
+    uint8_t aim_mode;     // 原始值 (0/1/2/3)，转换见 aimer::to_aim_mode()
     bool allow_fire;      // 是否允许射击
+    bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 
     // 时间戳
     uint32_t timestamp;   // 下位机时间戳 (ms)
@@ -245,9 +246,10 @@ auto data = find_closest_serial_data(serial_buffer, target);
     enemy_color = 1        # 0=未知, 1=红, 2=蓝
     # 射击参数
     bullet_speed = 15.0    # m/s
-    # 模式控制
-    aim_mode = 1           # 0=关闭, 1=自瞄, 2=小符, 3=大符
+    # 模式控制 (原始值，对应 aimer::AimMode 枚举)
+    aim_mode = 1           # 0=DISABLED, 1=AUTOAIM, 2=ENERGY_SMALL, 3=ENERGY_LARGE
     allow_fire = true
+    aiming_lock = false
 ```
 
 启用后，HardwareNode 会跳过串口初始化，直接使用配置的虚拟数据填充 `SyncFrame.serial_data`。
