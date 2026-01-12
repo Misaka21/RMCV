@@ -68,18 +68,7 @@ create_session_dir() {
     SESSION_DIR="$LOG_DIR/${timestamp}${suffix}"
     mkdir -p "$SESSION_DIR"
 
-    # 更新 latest 链接
-    rm -f "$LOG_DIR/latest"
-    ln -sf "$SESSION_DIR" "$LOG_DIR/latest"
-
     log_msg "Session: $SESSION_DIR"
-}
-
-update_session_link() {
-    if [ -n "$SESSION_DIR" ]; then
-        rm -f "$LOG_DIR/latest"
-        ln -sf "$SESSION_DIR" "$LOG_DIR/latest"
-    fi
 }
 
 # ========== 进程优先级 ==========
@@ -126,9 +115,6 @@ kill_screen() {
 start_screen() {
     log_msg "Starting RMCV in screen session '$SCREEN_NAME'..."
     cd "$BUILD_DIR"
-
-    # 创建会话目录 (watchdog 先创建，再传给 RMCV)
-    create_session_dir
 
     # 启用 coredump (崩溃时生成 core 文件到会话目录)
     if $ENABLE_COREDUMP; then
@@ -393,15 +379,16 @@ trap cleanup SIGINT SIGTERM
 
 # 检查可执行文件
 if [ ! -x "$EXECUTABLE" ]; then
-    log_msg "Error: Executable not found: $EXECUTABLE"
+    echo "Error: Executable not found: $EXECUTABLE"
     exit 1
 fi
 
-# 创建日志目录
+# 创建日志目录和会话目录
 mkdir -p "$LOG_DIR"
+create_session_dir
 
-# 看门狗日志
-WATCHDOG_LOG="$LOG_DIR/watchdog_$(date '+%Y%m%d_%H%M%S').log"
+# 看门狗日志 (放到会话目录里)
+WATCHDOG_LOG="$SESSION_DIR/watchdog.log"
 exec > >(tee -a "$WATCHDOG_LOG") 2>&1
 
 echo ""

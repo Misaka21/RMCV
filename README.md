@@ -233,6 +233,7 @@ barrel_offset_z = 0.0
 将 `YYYY-MM-DD_HH-MM-SS` 格式的录制文件夹按日期归类：
 
 ```bash
+cd log/
 for dir in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_*; do date="${dir:0:10}"; mkdir -p "$date"; mv "$dir" "$date/"; done
 ```
 

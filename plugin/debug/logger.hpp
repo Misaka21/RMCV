@@ -124,13 +124,16 @@ inline std::string get_timestamp_for_filename() {
 
 /**
  * @brief Initialize a new session
- * @param session_dir 外部指定的会话目录 (如果为空则自动创建)
- * @param suffix 文件夹后缀，比赛模式传 "match" 等 (仅在 session_dir 为空时使用)
+ * @param session_or_suffix 会话目录或后缀
+ *   - 包含 '/' 时当作完整路径 (watchdog 传入)
+ *   - 不包含 '/' 时当作后缀 (测试程序用)
+ *   - 为空时自动创建无后缀目录
  * @return Session directory path
  *
  * 使用方式:
- *   1. 自动创建: init_session("", "match") -> log/2024-01-01_12-00-00_match/
- *   2. 外部指定: init_session("/path/to/session") -> 使用指定目录
+ *   1. 自动创建: init_session() -> log/2024-01-01_12-00-00/
+ *   2. 带后缀:   init_session("test_param") -> log/2024-01-01_12-00-00_test_param/
+ *   3. 完整路径: init_session("/path/to/session") -> /path/to/session/
  *
  * Directory structure:
  *   - run.log: debug::print 输出
@@ -139,7 +142,7 @@ inline std::string get_timestamp_for_filename() {
  *   - config/: 配置文件快照
  *   - raw.mkv, debug.mkv, imu.csv: 录制文件
  */
-inline std::string init_session(const std::string& session_dir = "", const std::string& suffix = "") {
+inline std::string init_session(const std::string& session_or_suffix = "") {
     auto& state = LoggerState::instance();
     std::lock_guard<std::mutex> lock(state.file_mutex);
 
@@ -147,17 +150,18 @@ inline std::string init_session(const std::string& session_dir = "", const std::
         state.log_file.close();
     }
 
-    // 使用外部指定的目录，或自动创建
-    if (!session_dir.empty()) {
-        state.session_path = session_dir;
-        // 从路径提取时间戳 (可选)
-        state.session_timestamp = fs::path(session_dir).filename().string();
+    // 智能判断：包含 '/' 当作路径，否则当作后缀
+    if (!session_or_suffix.empty() && session_or_suffix.find('/') != std::string::npos) {
+        // 完整路径 (watchdog 传入)
+        state.session_path = session_or_suffix;
+        state.session_timestamp = fs::path(session_or_suffix).filename().string();
     } else {
+        // 后缀模式 (测试程序用)
         state.session_timestamp = get_timestamp_for_filename();
-        if (suffix.empty()) {
+        if (session_or_suffix.empty()) {
             state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp;
         } else {
-            state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp + "_" + suffix;
+            state.session_path = std::string(LOG_DIR) + "/" + state.session_timestamp + "_" + session_or_suffix;
         }
     }
 

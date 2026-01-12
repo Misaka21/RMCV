@@ -470,9 +470,11 @@ bool UsbBulkProtocol::configure_device() {
         return false;
     }
 
+    int result;
+
     // Linux: 自动卸载内核驱动
 #ifdef __linux__
-    int result = libusb_set_auto_detach_kernel_driver(_handle, 1);
+    result = libusb_set_auto_detach_kernel_driver(_handle, 1);
     if (result != LIBUSB_SUCCESS && result != LIBUSB_ERROR_NOT_SUPPORTED) {
         debug::print(debug::PrintMode::WARNING, "UsbBulk",
             "Failed to set auto detach kernel driver: {}", get_libusb_error(result));
@@ -480,7 +482,7 @@ bool UsbBulkProtocol::configure_device() {
 #else
     // 非Linux: 手动检查并卸载
     if (libusb_kernel_driver_active(_handle, _descriptor.interface_number) == 1) {
-        int result = libusb_detach_kernel_driver(_handle, _descriptor.interface_number);
+        result = libusb_detach_kernel_driver(_handle, _descriptor.interface_number);
         if (result != LIBUSB_SUCCESS) {
             _error_message = "Failed to detach kernel driver: " + get_libusb_error(result);
             return false;
@@ -489,7 +491,7 @@ bool UsbBulkProtocol::configure_device() {
 #endif
 
     // 声明接口
-    int result = libusb_claim_interface(_handle, _descriptor.interface_number);
+    result = libusb_claim_interface(_handle, _descriptor.interface_number);
     if (result != LIBUSB_SUCCESS) {
         _error_message = "Failed to claim interface: " + get_libusb_error(result);
         return false;

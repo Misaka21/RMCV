@@ -1,6 +1,8 @@
 # fire_control 独立模块
 # 提供与具体目标类型无关的火控功能
 
+find_package(Ceres QUIET)
+
 # 接口库 (header-only)
 add_library(fire_control_interface INTERFACE)
 target_include_directories(fire_control_interface INTERFACE
@@ -16,9 +18,12 @@ if(Ceres_FOUND)
         core/trajectory/trajectory_solver.cpp
         core/trajectory/rk4_trajectory_solver.cpp
     )
+    target_include_directories(fire_control_core PUBLIC
+        ${CERES_INCLUDE_DIRS}
+    )
     target_link_libraries(fire_control_core PUBLIC
         fire_control_interface
-        Ceres::ceres
+        ${CERES_LIBRARIES}
         plugin  # runtime_param
     )
     message(STATUS "fire_control_core will be built (Ceres found)")

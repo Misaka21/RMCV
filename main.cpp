@@ -79,12 +79,11 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signal_handler);
 
     // 初始化日志系统
-    // 优先使用外部指定的目录 (watchdog 传入)，否则自动创建
+    // watchdog 模式: 传入 --log-dir，直接使用
+    // 直接运行模式: 自动创建带时间戳的目录
     std::string session_path;
     if (!log_dir.empty()) {
         session_path = debug::init_session(log_dir);
-    } else if (match_mode) {
-        session_path = debug::init_session("", "match");
     } else {
         session_path = debug::init_session();
     }
