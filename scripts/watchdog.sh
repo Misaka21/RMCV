@@ -45,7 +45,7 @@ SESSION_DIR=""    # 当前会话目录 (由 create_session_dir 设置)
 RESOURCE_LOG=""   # 资源日志文件路径
 LAST_RESOURCE_LOG_TIME=0  # 上次资源记录时间
 HEARTBEAT_WAIT_START=0    # 开始等待心跳的时间戳
-MAX_HEARTBEAT_WAIT=180    # 心跳文件最长等待时间 (秒), 需考虑 TensorRT 首次构建
+MAX_HEARTBEAT_WAIT=60     # 心跳文件最长等待时间 (秒)
 
 # ========== 工具函数 ==========
 
