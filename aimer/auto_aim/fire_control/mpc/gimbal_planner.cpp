@@ -10,7 +10,7 @@
 #include <tuple>
 
 #include "tinympc/tiny_api.hpp"
-#include "aimer/auto_aim/fire_control/trajectory/trajectory_solver_factory.hpp"
+#include "aimer/fire_control/core/trajectory/solver_factory.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
@@ -224,7 +224,7 @@ GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
         }
 
         // 弹道解算获取飞行时间
-        AimResult rough_aim = trajectory::solve(rough_pos, bullet_speed);
+        AimResult rough_aim = ::fire_control::trajectory::solve(rough_pos, bullet_speed);
         double fly_time = rough_aim.valid ? rough_aim.fly_time : 0.1;
 
         // 完整预测时间
@@ -242,7 +242,7 @@ GimbalPlanner::Trajectory GimbalPlanner::generate_reference(
         }
 
         // 弹道解算得到瞄准角度
-        AimResult aim = trajectory::solve(pos, bullet_speed);
+        AimResult aim = ::fire_control::trajectory::solve(pos, bullet_speed);
         if (!aim.valid) {
             if (i > 0) {
                 traj.col(i) = traj.col(i - 1);

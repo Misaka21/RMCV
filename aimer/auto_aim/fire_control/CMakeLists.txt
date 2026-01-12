@@ -30,7 +30,6 @@ add_library(autoaim_fire_control STATIC
 
     # 主类
     fire_controller.cpp
-    fire_controller_node.cpp
 )
 
 target_include_directories(autoaim_fire_control PUBLIC
