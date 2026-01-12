@@ -30,7 +30,7 @@ int main() {
         Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
         Eigen::Vector3d p_gimbal(1, 2, 3);
 
-        auto p_world = tf::point<tf::Frame::Gimbal, tf::Frame::World>(p_gimbal, q);
+        auto p_world = aimer::tf::point<aimer::tf::Frame::Gimbal, aimer::tf::Frame::World>(p_gimbal, q);
 
         // R_gimbal2imubody 默认是 Identity，所以 p_world == p_gimbal
         ASSERT_VEC_NEAR(p_world, p_gimbal, 1e-9);
@@ -45,7 +45,7 @@ int main() {
         Eigen::Quaterniond q(Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ()));
 
         Eigen::Vector3d p_gimbal(1, 0, 0);  // X方向
-        auto p_world = tf::point<tf::Frame::Gimbal, tf::Frame::World>(p_gimbal, q);
+        auto p_world = aimer::tf::point<aimer::tf::Frame::Gimbal, aimer::tf::Frame::World>(p_gimbal, q);
 
         // 旋转后应该变成 Y 方向 (0, 1, 0)
         // 注意: 这取决于 R_gimbal2imubody 的设置，默认 Identity
@@ -60,7 +60,7 @@ int main() {
         Eigen::Quaterniond q(Eigen::AngleAxisd(angle, Eigen::Vector3d::UnitZ()));
 
         Eigen::Vector3d v_gimbal(1, 0, 0);
-        auto v_world = tf::vector<tf::Frame::Gimbal, tf::Frame::World>(v_gimbal, q);
+        auto v_world = aimer::tf::vector<aimer::tf::Frame::Gimbal, aimer::tf::Frame::World>(v_gimbal, q);
 
         ASSERT_VEC_NEAR(v_world, Eigen::Vector3d(0, 1, 0), 1e-9);
         fmt::print(fmt::fg(fmt::color::green), "PASS\n");
@@ -73,8 +73,8 @@ int main() {
         Eigen::Vector3d p_original(1, 2, 3);
 
         // Gimbal -> World -> Gimbal 应该回到原点
-        auto p_world = tf::point<tf::Frame::Gimbal, tf::Frame::World>(p_original, q);
-        auto p_back = tf::point<tf::Frame::World, tf::Frame::Gimbal>(p_world, q);
+        auto p_world = aimer::tf::point<aimer::tf::Frame::Gimbal, aimer::tf::Frame::World>(p_original, q);
+        auto p_back = aimer::tf::point<aimer::tf::Frame::World, aimer::tf::Frame::Gimbal>(p_world, q);
 
         ASSERT_VEC_NEAR(p_back, p_original, 1e-9);
         fmt::print(fmt::fg(fmt::color::green), "PASS\n");
@@ -83,7 +83,7 @@ int main() {
     // 测试5: 里程计积分
     {
         fmt::print("Test 5: Odometry integration... ");
-        tf::reset_odometry();
+        aimer::tf::reset_odometry();
 
         Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
         Eigen::Vector3d v(1, 0, 0);  // 向右 1 m/s
@@ -91,10 +91,10 @@ int main() {
 
         // 积分10次，应该移动 1m
         for (int i = 0; i < 10; ++i) {
-            tf::update_odometry(v, dt, q);
+            aimer::tf::update_odometry(v, dt, q);
         }
 
-        auto pos = tf::get_robot_position();
+        auto pos = aimer::tf::get_robot_position();
         ASSERT_NEAR(pos.x(), 1.0, 1e-6);
         ASSERT_NEAR(pos.y(), 0.0, 1e-6);
         ASSERT_NEAR(pos.z(), 0.0, 1e-6);
@@ -104,7 +104,7 @@ int main() {
     // 测试6: 里程计 + 旋转
     {
         fmt::print("Test 6: Odometry with rotation... ");
-        tf::reset_odometry();
+        aimer::tf::reset_odometry();
 
         // 云台朝向Y轴正方向（绕Z旋转90度）
         Eigen::Quaterniond q(Eigen::AngleAxisd(M_PI / 2, Eigen::Vector3d::UnitZ()));
@@ -114,9 +114,9 @@ int main() {
         Eigen::Vector3d v_gimbal(0, 0, 1);  // 向前 1 m/s
         double dt = 1.0;
 
-        tf::update_odometry(v_gimbal, dt, q);
+        aimer::tf::update_odometry(v_gimbal, dt, q);
 
-        auto pos = tf::get_robot_position();
+        auto pos = aimer::tf::get_robot_position();
         // 向前走1秒，World下应该是 Y 方向移动
         // 具体方向取决于坐标系定义
         fmt::print("pos = ({}, {}, {}) ", pos.x(), pos.y(), pos.z());
@@ -129,7 +129,7 @@ int main() {
         Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
         Eigen::Vector3d p_cam(0, 0, 5);  // 相机前方5m
 
-        auto p_barrel = tf::cam_to_barrel(p_cam, q);
+        auto p_barrel = aimer::tf::cam_to_barrel(p_cam, q);
 
         // 如果 camera_offset 和 barrel_offset 都是0，应该相等
         // 实际值取决于 TOML 配置

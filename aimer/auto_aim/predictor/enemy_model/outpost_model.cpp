@@ -37,7 +37,7 @@ void OutpostModel::update(const std::vector<ArmorObservation>& observations, dou
     double best_z_to_v = 1e9;
     for (const auto& armor : armors_with_id) {
         // 过滤顶部装甲板: pitch > 45° (朝上)
-        if (armor.observation.z[obs::PITCH] > outpost::TOP_ARMOR_PITCH_THRESHOLD) {
+        if (armor.observation.z[obs::PITCH] > outpost_motion::TOP_ARMOR_PITCH_THRESHOLD) {
             continue;
         }
         if (armor.z_to_v() < best_z_to_v) {
@@ -79,7 +79,7 @@ VehicleState OutpostModel::predict(double timestamp) const {
     vs.spin.active = true;
     vs.spin.omega = omega;
     vs.spin.phase = theta;
-    vs.spin.radius = outpost::RADIUS;
+    vs.spin.radius = outpost_motion::RADIUS;
     vs.spin.level = SpinLevel::HIGH;  // 前哨站始终高速
 
     // 生成 3 块装甲板位置

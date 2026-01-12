@@ -59,7 +59,7 @@ int main(int argc, char* argv[]) {
     runtime_param::wait_for_param("ok");
 
     // 初始化坐标变换
-    tf::init("camera.yaml");
+    aimer::tf::init("camera.yaml");
 
     fmt::print(fmt::fg(fmt::color::gold),
         "====================================================================\n"

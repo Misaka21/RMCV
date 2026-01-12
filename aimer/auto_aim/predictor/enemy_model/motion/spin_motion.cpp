@@ -95,10 +95,10 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
 
     // 连续化 (把观测调整到离 EKF 预测最近，避免 ±π 跳变)
     VectorZ z;
-    z[spin_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
+    z[spin_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
     z[spin_model::PITCH] = obs.z[obs::PITCH];
     z[spin_model::DIS] = obs.z[obs::DIST];
-    z[spin_model::ARMOR_YAW] = math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
+    z[spin_model::ARMOR_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
 
     // 观测更新
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
@@ -194,10 +194,10 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 
     // 连续化 (把观测调整到离 EKF 预测最近，避免 ±π 跳变)
     VectorZ z;
-    z[spin_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
+    z[spin_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
     z[spin_model::PITCH] = obs.z[obs::PITCH];
     z[spin_model::DIS] = obs.z[obs::DIST];
-    z[spin_model::ARMOR_YAW] = math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
+    z[spin_model::ARMOR_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
 
     // 双装甲板时观测噪声更小（朝向角更可信）
     MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);

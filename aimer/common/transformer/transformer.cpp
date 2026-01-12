@@ -9,7 +9,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
-namespace tf {
+namespace aimer::tf {
 
 static cv::Mat g_camera_matrix;
 static cv::Mat g_distort_coeffs;
@@ -116,4 +116,4 @@ void reset_odometry() {
     g_has_last_v = false;
 }
 
-}  // namespace tf
+}  // namespace aimer::tf

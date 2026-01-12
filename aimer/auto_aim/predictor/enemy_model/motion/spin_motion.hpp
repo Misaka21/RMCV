@@ -185,7 +185,7 @@ struct SpinMeasure {
  */
 class SpinMotion {
 public:
-    using Ekf = filter::AdaptiveEkf<spin_model::N_X, spin_model::N_Z>;
+    using Ekf = aimer::filter::AdaptiveEkf<spin_model::N_X, spin_model::N_Z>;
     using VectorX = Eigen::Matrix<double, spin_model::N_X, 1>;
     using VectorZ = Eigen::Matrix<double, spin_model::N_Z, 1>;
     using MatrixXX = Eigen::Matrix<double, spin_model::N_X, spin_model::N_X>;

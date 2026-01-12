@@ -147,8 +147,8 @@ int main(int argc, char* argv[]) {
     runtime_param::wait_for_param("ok");
 
     // 初始化坐标变换
-    tf::init("camera.yaml");
-    auto K = CameraParams::from_matrix(tf::get_camera_matrix());
+    aimer::tf::init("camera.yaml");
+    auto K = CameraParams::from_matrix(aimer::tf::get_camera_matrix());
 
     auto hardware_ready = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
 

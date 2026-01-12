@@ -50,7 +50,7 @@ int main() {
     runtime_param::wait_for_param("ok");
 
     // 初始化坐标变换
-    tf::init("camera.yaml");
+    aimer::tf::init("camera.yaml");
 
     auto hardware_ready = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
 

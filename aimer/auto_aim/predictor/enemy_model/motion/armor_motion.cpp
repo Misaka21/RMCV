@@ -18,7 +18,7 @@ namespace autoaim::predictor {
 FilterThread::FilterThread(const ArmorData& armor, double timestamp, double credit_time)
     : armor_(armor), last_update_time_(timestamp), credit_time_(credit_time) {
     // XYZ → YPD
-    math::YpdCoord ypd = math::xyz_to_ypd(armor.pos());
+    aimer::math::YpdCoord ypd = aimer::math::xyz_to_ypd(armor.pos());
 
     // 初始化状态: [yaw, 0, pitch, 0, dis, 0]
     VectorX x0;
@@ -31,7 +31,7 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
     if (dt <= 0) return;
 
     // XYZ → YPD
-    math::YpdCoord ypd = math::xyz_to_ypd(armor.pos());
+    aimer::math::YpdCoord ypd = aimer::math::xyz_to_ypd(armor.pos());
 
     // 直接读取运行时参数
     double q_pos = runtime_param::get_param<double>("AutoAim.Predictor.EKF.q_pos");
@@ -54,8 +54,8 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
 
     // 处理角度±π跨越
     VectorX x = ekf_.get_x();
-    double yaw_close = math::get_closest_angle(ypd.yaw, x[0]);
-    double pitch_close = math::get_closest_angle(ypd.pitch, x[2]);
+    double yaw_close = aimer::math::get_closest_angle(ypd.yaw, x[0]);
+    double pitch_close = aimer::math::get_closest_angle(ypd.pitch, x[2]);
 
     // 观测更新
     VectorY y;
@@ -66,8 +66,8 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
 
     // 归一化角度
     VectorX x_new = ekf_.get_x();
-    x_new[0] = math::normalize_angle(x_new[0]);
-    x_new[2] = math::normalize_angle(x_new[2]);
+    x_new[0] = aimer::math::normalize_angle(x_new[0]);
+    x_new[2] = aimer::math::normalize_angle(x_new[2]);
     ekf_.set_x(x_new);
 
     // 保存
@@ -79,27 +79,27 @@ bool FilterThread::credit(double current_time) const {
     return (current_time - last_update_time_) <= credit_time_;
 }
 
-math::YpdCoord FilterThread::predict_ypd(double timestamp) const {
+aimer::math::YpdCoord FilterThread::predict_ypd(double timestamp) const {
     double dt = timestamp - last_update_time_;
     YpdCVPredict predict_func(dt);
     auto res = ekf_.predict(predict_func);
-    return math::YpdCoord(res.x_p[0], res.x_p[2], res.x_p[4]);
+    return aimer::math::YpdCoord(res.x_p[0], res.x_p[2], res.x_p[4]);
 }
 
-math::YpdCoord FilterThread::predict_ypd_v(double timestamp) const {
+aimer::math::YpdCoord FilterThread::predict_ypd_v(double timestamp) const {
     double dt = timestamp - last_update_time_;
     YpdCVPredict predict_func(dt);
     auto res = ekf_.predict(predict_func);
-    return math::YpdCoord(res.x_p[1], res.x_p[3], res.x_p[5]);
+    return aimer::math::YpdCoord(res.x_p[1], res.x_p[3], res.x_p[5]);
 }
 
 Eigen::Vector3d FilterThread::predict_pos(double timestamp) const {
-    return math::ypd_to_xyz(predict_ypd(timestamp));
+    return aimer::math::ypd_to_xyz(predict_ypd(timestamp));
 }
 
 Eigen::Vector3d FilterThread::predict_vel(double timestamp) const {
-    math::YpdCoord ypd = predict_ypd(timestamp);
-    math::YpdCoord ypd_v = predict_ypd_v(timestamp);
+    aimer::math::YpdCoord ypd = predict_ypd(timestamp);
+    aimer::math::YpdCoord ypd_v = predict_ypd_v(timestamp);
 
     // 雅可比矩阵 ∂xyz/∂ypd
     double cy = std::cos(ypd.yaw), sy = std::sin(ypd.yaw);
@@ -126,7 +126,7 @@ ArmorState FilterThread::get_armor_state(double timestamp) const {
     as.last_seen = last_update_time_;
 
     // 装甲板朝向: 用预测的方位角 + π (面向相机时法向与视线相反)
-    math::YpdCoord ypd = predict_ypd(timestamp);
+    aimer::math::YpdCoord ypd = predict_ypd(timestamp);
     as.yaw = ypd.yaw + M_PI;
 
     // 评分: z_to_v 越小越好

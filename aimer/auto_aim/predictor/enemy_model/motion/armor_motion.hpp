@@ -77,8 +77,8 @@ struct YpdDirectMeasure {
 // 角度处理工具 (已移到 math/math.hpp)
 // ============================================================================
 
-// 使用 math::normalize_angle()
-// 使用 math::get_closest_angle()
+// 使用 aimer::math::normalize_angle()
+// 使用 aimer::math::get_closest_angle()
 
 // ============================================================================
 // FilterThread - 单个装甲板滤波器
@@ -92,7 +92,7 @@ struct YpdDirectMeasure {
  */
 class FilterThread {
 public:
-    using Ekf = filter::AdaptiveEkf<6, 3>;
+    using Ekf = aimer::filter::AdaptiveEkf<6, 3>;
     using VectorX = Eigen::Matrix<double, 6, 1>;
     using VectorY = Eigen::Matrix<double, 3, 1>;
     using MatrixXX = Eigen::Matrix<double, 6, 6>;
@@ -129,12 +129,12 @@ public:
     /**
      * @brief 预测YPD坐标
      */
-    math::YpdCoord predict_ypd(double timestamp) const;
+    aimer::math::YpdCoord predict_ypd(double timestamp) const;
 
     /**
      * @brief 预测YPD速度
      */
-    math::YpdCoord predict_ypd_v(double timestamp) const;
+    aimer::math::YpdCoord predict_ypd_v(double timestamp) const;
 
     /**
      * @brief 获取装甲板状态

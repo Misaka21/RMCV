@@ -956,24 +956,24 @@ constexpr double DZ_STEP = 0.10;           // 高度差 10cm (固定)
 
 ```cpp
 // init(): 初始为0
-x0[outpost::OMEGA] = 0;
+x0[outpost_motion::OMEGA] = 0;
 
 // constrain_omega(): 达到阈值后锁定方向
 void OutpostMotion::constrain_omega() {
-    double omega = x[outpost::OMEGA];
+    double omega = x[outpost_motion::OMEGA];
 
     if (!omega_sign_determined_) {
         constexpr double OMEGA_THRESHOLD = 0.4 * M_PI;
         if (omega > OMEGA_THRESHOLD) {
-            x[outpost::OMEGA] = +0.8π;  // 逆时针
+            x[outpost_motion::OMEGA] = +0.8π;  // 逆时针
             omega_sign_determined_ = true;
         } else if (omega < -OMEGA_THRESHOLD) {
-            x[outpost::OMEGA] = -0.8π;  // 顺时针
+            x[outpost_motion::OMEGA] = -0.8π;  // 顺时针
             omega_sign_determined_ = true;
         }
     } else {
         // 已确定，只约束绝对值
-        x[outpost::OMEGA] = copysign(0.8π, omega);
+        x[outpost_motion::OMEGA] = copysign(0.8π, omega);
     }
 }
 ```

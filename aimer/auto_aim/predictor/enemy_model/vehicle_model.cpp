@@ -132,11 +132,11 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
                 double angle_step = 2.0 * M_PI / armor_num;
 
                 int best_index = 0;
-                double min_diff = std::abs(math::angle_diff(theta_pred, armor_yaw));
+                double min_diff = std::abs(aimer::math::angle_diff(theta_pred, armor_yaw));
 
                 for (int i = 1; i < armor_num; ++i) {
                     double possible_theta = theta_pred + i * angle_step;
-                    double diff = std::abs(math::angle_diff(possible_theta, armor_yaw));
+                    double diff = std::abs(aimer::math::angle_diff(possible_theta, armor_yaw));
                     if (diff < min_diff) {
                         min_diff = diff;
                         best_index = i;
@@ -228,7 +228,7 @@ std::vector<ArmorObservation> VehicleModel::filter(
     double max_area = 0;
     for (const auto& a : raw) {
         if (!a.valid) continue;
-        double area = math::get_area(a.pts);
+        double area = aimer::math::get_area(a.pts);
         if (area > max_area) max_area = area;
     }
 
@@ -242,7 +242,7 @@ std::vector<ArmorObservation> VehicleModel::filter(
             continue;
         }
 
-        double area = math::get_area(a.pts);
+        double area = aimer::math::get_area(a.pts);
 
         // 找到与上一帧最近的距离
         double closest = 1e9;
@@ -360,7 +360,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
             // 评分: 越正对越好 (用 cos(装甲板朝向 - 视线方向))
             double armor_yaw = as.yaw;
             double view_yaw = std::atan2(as.position.y(), as.position.x());
-            double angle_diff = std::abs(math::reduced_angle(armor_yaw - view_yaw - M_PI));
+            double angle_diff = std::abs(aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI));
             as.score = std::cos(angle_diff);
 
             // 装甲板类型和朝向角
@@ -482,7 +482,7 @@ void draw_armor_rect(cv::Mat& img, const Eigen::Vector3d& center, double yaw,
     bool all_valid = true;
     for (int i = 0; i < 4; ++i) {
         bool valid = false;
-        pts[i] = tf::world_to_pixel(corners[i], q_imu, valid);
+        pts[i] = aimer::tf::world_to_pixel(corners[i], q_imu, valid);
         if (!valid) all_valid = false;
     }
 
@@ -562,7 +562,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         if (prev_armors_.size() == 2) {
             double z0 = prev_armors_[0].z_to_v;
             double z1 = prev_armors_[1].z_to_v;
-            double angle_diff = std::abs(math::angle_diff(z0, z1)) * 180.0 / M_PI;
+            double angle_diff = std::abs(aimer::math::angle_diff(z0, z1)) * 180.0 / M_PI;
 
             // 在两块装甲板中间显示夹角差
             cv::Point2f mid = (prev_armors_[0].center_2d + prev_armors_[1].center_2d) * 0.5f;
@@ -584,7 +584,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             // 手动外推位置
             Eigen::Vector3d predicted_pos = as.position + as.velocity * draw_dt;
             bool valid = false;
-            cv::Point2f pt = tf::world_to_pixel(predicted_pos, q_imu, valid);
+            cv::Point2f pt = aimer::tf::world_to_pixel(predicted_pos, q_imu, valid);
             if (valid) {
                 // 近大远小: 半径 = base_size / distance
                 double distance = predicted_pos.norm();
@@ -626,7 +626,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
 
             // 标注序号
             bool valid = false;
-            cv::Point2f pt = tf::world_to_pixel(pos, q_imu, valid);
+            cv::Point2f pt = aimer::tf::world_to_pixel(pos, q_imu, valid);
             if (valid) {
                 cv::putText(img, std::to_string(i), pt + cv::Point2f(-5, 5),
                             cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_SPIN, 1);
@@ -638,7 +638,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             ? lmtd_motion_.predict_center(draw_dt)
             : spin_motion_.predict_center(draw_dt);
         bool valid = false;
-        cv::Point2f pt = tf::world_to_pixel(center, q_imu, valid);
+        cv::Point2f pt = aimer::tf::world_to_pixel(center, q_imu, valid);
         if (valid) {
             // 十字标记
             int s = 15;
@@ -694,7 +694,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
 
             // 标注序号
             bool valid = false;
-            cv::Point2f pt = tf::world_to_pixel(all_armors[i], q_imu, valid);
+            cv::Point2f pt = aimer::tf::world_to_pixel(all_armors[i], q_imu, valid);
             if (valid) {
                 cv::putText(img, "G" + std::to_string(i), pt + cv::Point2f(10, -10),
                             cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
@@ -711,7 +711,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             : spin_motion_.predict_center(0);
 
         bool valid = false;
-        cv::Point2f pt = tf::world_to_pixel(center, q_imu, valid);
+        cv::Point2f pt = aimer::tf::world_to_pixel(center, q_imu, valid);
         if (valid) {
             // 菱形标记
             int s = 10;

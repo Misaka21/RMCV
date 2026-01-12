@@ -38,7 +38,7 @@ namespace autoaim::predictor {
 // 前哨站常量 (规则固定)
 // ============================================================================
 
-namespace outpost {
+namespace outpost_motion {
 
 // 规则参数
 constexpr double OMEGA_ABS = 0.8 * M_PI;  // 角速度绝对值 (rad/s)
@@ -71,7 +71,7 @@ enum ObsIdx {
     ARMOR_YAW = 3
 };
 
-}  // namespace outpost
+}  // namespace outpost_motion
 
 // ============================================================================
 // 预测函数
@@ -86,17 +86,17 @@ struct OutpostCVPredict {
     explicit OutpostCVPredict(double delta_t) : dt(delta_t) {}
 
     template<typename T>
-    void operator()(const T x_in[outpost::N_X], T x_out[outpost::N_X]) const {
-        x_out[outpost::XC] = x_in[outpost::XC] + T(dt) * x_in[outpost::VX];
-        x_out[outpost::VX] = x_in[outpost::VX];
+    void operator()(const T x_in[outpost_motion::N_X], T x_out[outpost_motion::N_X]) const {
+        x_out[outpost_motion::XC] = x_in[outpost_motion::XC] + T(dt) * x_in[outpost_motion::VX];
+        x_out[outpost_motion::VX] = x_in[outpost_motion::VX];
 
-        x_out[outpost::YC] = x_in[outpost::YC] + T(dt) * x_in[outpost::VY];
-        x_out[outpost::VY] = x_in[outpost::VY];
+        x_out[outpost_motion::YC] = x_in[outpost_motion::YC] + T(dt) * x_in[outpost_motion::VY];
+        x_out[outpost_motion::VY] = x_in[outpost_motion::VY];
 
-        x_out[outpost::ZC] = x_in[outpost::ZC];  // 前哨站高度固定
+        x_out[outpost_motion::ZC] = x_in[outpost_motion::ZC];  // 前哨站高度固定
 
-        x_out[outpost::THETA] = x_in[outpost::THETA] + T(dt) * x_in[outpost::OMEGA];
-        x_out[outpost::OMEGA] = x_in[outpost::OMEGA];
+        x_out[outpost_motion::THETA] = x_in[outpost_motion::THETA] + T(dt) * x_in[outpost_motion::OMEGA];
+        x_out[outpost_motion::OMEGA] = x_in[outpost_motion::OMEGA];
     }
 };
 
@@ -118,14 +118,14 @@ struct OutpostMeasure {
     explicit OutpostMeasure(double height_diff = 0) : dz(height_diff) {}
 
     template<typename T>
-    void operator()(const T x[outpost::N_X], T y[outpost::N_Z]) const {
-        T xc = x[outpost::XC];
-        T yc = x[outpost::YC];
-        T zc = x[outpost::ZC];
-        T theta = x[outpost::THETA];
+    void operator()(const T x[outpost_motion::N_X], T y[outpost_motion::N_Z]) const {
+        T xc = x[outpost_motion::XC];
+        T yc = x[outpost_motion::YC];
+        T zc = x[outpost_motion::ZC];
+        T theta = x[outpost_motion::THETA];
 
         // 固定半径
-        T r = T(outpost::RADIUS);
+        T r = T(outpost_motion::RADIUS);
 
         // 装甲板位置
         T xa = xc - r * ceres::cos(theta);
@@ -137,10 +137,10 @@ struct OutpostMeasure {
         T rho = ceres::sqrt(rho_sq);
         T d = ceres::sqrt(rho_sq + za * za);
 
-        y[outpost::YAW] = ceres::atan2(ya, xa);
-        y[outpost::PITCH] = ceres::atan2(za, rho);
-        y[outpost::DIS] = d;
-        y[outpost::ARMOR_YAW] = theta;
+        y[outpost_motion::YAW] = ceres::atan2(ya, xa);
+        y[outpost_motion::PITCH] = ceres::atan2(za, rho);
+        y[outpost_motion::DIS] = d;
+        y[outpost_motion::ARMOR_YAW] = theta;
     }
 };
 
@@ -156,11 +156,11 @@ struct OutpostMeasure {
  */
 class OutpostMotion {
 public:
-    using Ekf = filter::AdaptiveEkf<outpost::N_X, outpost::N_Z>;
-    using VectorX = Eigen::Matrix<double, outpost::N_X, 1>;
-    using VectorZ = Eigen::Matrix<double, outpost::N_Z, 1>;
-    using MatrixXX = Eigen::Matrix<double, outpost::N_X, outpost::N_X>;
-    using MatrixZZ = Eigen::Matrix<double, outpost::N_Z, outpost::N_Z>;
+    using Ekf = aimer::filter::AdaptiveEkf<outpost_motion::N_X, outpost_motion::N_Z>;
+    using VectorX = Eigen::Matrix<double, outpost_motion::N_X, 1>;
+    using VectorZ = Eigen::Matrix<double, outpost_motion::N_Z, 1>;
+    using MatrixXX = Eigen::Matrix<double, outpost_motion::N_X, outpost_motion::N_X>;
+    using MatrixZZ = Eigen::Matrix<double, outpost_motion::N_Z, outpost_motion::N_Z>;
 
     OutpostMotion();
 
@@ -199,12 +199,12 @@ public:
     /**
      * @brief 获取角速度
      */
-    double get_omega() const { return ekf_.get_x()[outpost::OMEGA]; }
+    double get_omega() const { return ekf_.get_x()[outpost_motion::OMEGA]; }
 
     /**
      * @brief 获取相位
      */
-    double get_theta() const { return ekf_.get_x()[outpost::THETA]; }
+    double get_theta() const { return ekf_.get_x()[outpost_motion::THETA]; }
 
     /**
      * @brief 获取陀螺等级 (前哨站始终是 HIGH)

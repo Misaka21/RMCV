@@ -100,8 +100,8 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
     double min_yaw_diff = DBL_MAX;
 
     for (int i = 0; i < armor_num_; ++i) {
-        double possible_theta = math::normalize_angle(state_theta + i * (2.0 * M_PI / armor_num_));
-        double yaw_diff = std::abs(math::angle_diff(possible_theta, new_orient));
+        double possible_theta = aimer::math::normalize_angle(state_theta + i * (2.0 * M_PI / armor_num_));
+        double yaw_diff = std::abs(aimer::math::angle_diff(possible_theta, new_orient));
 
         if (yaw_diff < min_yaw_diff) {
             min_yaw_diff = yaw_diff;
@@ -170,7 +170,7 @@ int LmtdMotion::select_armor_to_track(const std::vector<ArmorData>& armors) cons
     int tracked_idx = -1;
 
     for (size_t i = 0; i < armors.size(); ++i) {
-        double area = math::get_area(armors[i].observation.pts);
+        double area = aimer::math::get_area(armors[i].observation.pts);
         if (area > max_area) {
             max_area = area;
             max_area_idx = static_cast<int>(i);
@@ -227,10 +227,10 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
     // 连续化 (LMTD trick: 位置 yaw 也要连续化!)
     // 把观测角度调整到离内部预测最近，避免 ±π 跳变
     VectorZ z;
-    z[lmtd_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[lmtd_model::YAW]);
+    z[lmtd_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[lmtd_model::YAW]);
     z[lmtd_model::PITCH] = obs.z[obs::PITCH];
     z[lmtd_model::DIS] = obs.z[obs::DIST];
-    z[lmtd_model::ORIENT_YAW] = math::get_closest_angle(orient_yaw, inner_z[lmtd_model::ORIENT_YAW]);
+    z[lmtd_model::ORIENT_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[lmtd_model::ORIENT_YAW]);
 
     // 观测更新
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
@@ -342,10 +342,10 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 
     // 连续化 (把观测调整到离预测最近)
     VectorZ z;
-    z[lmtd_model::YAW] = math::get_closest_angle(obs.z[obs::YAW], inner_z[lmtd_model::YAW]);
+    z[lmtd_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[lmtd_model::YAW]);
     z[lmtd_model::PITCH] = obs.z[obs::PITCH];
     z[lmtd_model::DIS] = obs.z[obs::DIST];
-    z[lmtd_model::ORIENT_YAW] = math::get_closest_angle(orient_yaw, inner_z[lmtd_model::ORIENT_YAW]);
+    z[lmtd_model::ORIENT_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[lmtd_model::ORIENT_YAW]);
 
     MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);
     ekf_.update_forward(measure_func, z, R);

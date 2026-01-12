@@ -100,7 +100,7 @@ void draw_world_ground_grid(
         for (double y = -range; y <= range; y += grid_size) {
             Eigen::Vector3d p_world(x, y, ground_z);
             bool valid = false;
-            cv::Point2f pixel = tf::world_to_pixel(p_world, q_imu, valid);
+            cv::Point2f pixel = aimer::tf::world_to_pixel(p_world, q_imu, valid);
 
             if (valid && pixel.x >= 0 && pixel.x < img.cols &&
                 pixel.y >= 0 && pixel.y < img.rows) {

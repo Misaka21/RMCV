@@ -169,8 +169,8 @@ std::optional<PnPResult> detect_chessboard_pnp(
     }
 
     // PnP求解
-    const cv::Mat& camera_matrix = tf::get_camera_matrix();
-    const cv::Mat& dist_coeffs = tf::get_distort_coeffs();
+    const cv::Mat& camera_matrix = aimer::tf::get_camera_matrix();
+    const cv::Mat& dist_coeffs = aimer::tf::get_distort_coeffs();
 
     cv::Mat rvec, tvec;
     bool success = cv::solvePnP(
@@ -309,7 +309,7 @@ int main() {
     runtime_param::wait_for_param("ok");
 
     // 初始化TF模块 (加载相机内参和基础外参)
-    if (!tf::init()) {
+    if (!aimer::tf::init()) {
         fmt::print(fmt::fg(fmt::color::red), "TF模块初始化失败!\n");
         return 1;
     }

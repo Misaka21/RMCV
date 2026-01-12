@@ -10,7 +10,7 @@
 #include <cmath>
 #include <opencv2/core/types.hpp>
 
-namespace math {
+namespace aimer::math {
 
 // ============================================================================
 // 1. 球坐标结构体
@@ -295,6 +295,6 @@ public:
     }
 };
 
-} // namespace math
+} // namespace aimer::math
 
 #endif //RMCV_MATH_HPP

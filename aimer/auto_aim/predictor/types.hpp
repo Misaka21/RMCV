@@ -390,11 +390,11 @@ struct BattlefieldSnapshot {
 // ==================== 辅助函数 ====================
 
 inline Eigen::Vector3d ypd_to_xyz(double yaw, double pitch, double dist) {
-    return math::ypd_to_xyz(math::YpdCoord{yaw, pitch, dist});
+    return aimer::math::ypd_to_xyz(aimer::math::YpdCoord{yaw, pitch, dist});
 }
 
 inline Eigen::Vector3d xyz_to_ypd(const Eigen::Vector3d& xyz) {
-    return math::xyz_to_ypd(xyz).to_vec();
+    return aimer::math::xyz_to_ypd(xyz).to_vec();
 }
 
 // normalize_angle 已移到 math/math.hpp

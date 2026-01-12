@@ -108,7 +108,7 @@ public:
     }
 
 private:
-    mutable filter::SingleFilter<1> predict_to_send_filter_;
+    mutable aimer::filter::SingleFilter<1> predict_to_send_filter_;
     double default_predict_to_send_ = 0.002;  // 2ms
 };
 

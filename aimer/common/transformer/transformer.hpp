@@ -14,9 +14,9 @@
 
 #include "aimer/common/math/math.hpp"
 
-namespace tf {
+namespace aimer::tf {
 
-using math::YpdCoord;
+using aimer::math::YpdCoord;
 
 // ============================================================================
 // 1. 坐标系定义
@@ -270,11 +270,11 @@ inline Eigen::Vector3d world_to_camera(const Eigen::Vector3d& p, const Eigen::Qu
 }
 
 inline YpdCoord cam_to_world_ypd(const Eigen::Vector3d& p_cam, const Eigen::Quaterniond& q) {
-    return math::xyz_to_ypd(cam_to_world(p_cam, q));
+    return aimer::math::xyz_to_ypd(cam_to_world(p_cam, q));
 }
 
 inline YpdCoord barrel_ypd(const Eigen::Vector3d& p_world, const Eigen::Quaterniond& q) {
-    return math::xyz_to_ypd(world_to_barrel(p_world, q));
+    return aimer::math::xyz_to_ypd(world_to_barrel(p_world, q));
 }
 
 /**
@@ -309,6 +309,6 @@ inline cv::Point2f world_to_pixel(const Eigen::Vector3d& p_world, const Eigen::Q
     return cv::Point2f(static_cast<float>(u), static_cast<float>(v));
 }
 
-} // namespace tf
+} // namespace aimer::tf
 
 #endif //RMCV_TRANSFORMER_HPP

@@ -48,7 +48,7 @@ void draw_armor_by_z_to_v(
     double pitch = -15.0 * M_PI / 180.0;
 
     // 相机 Z 轴在世界 XY 平面的投影 (归一化)
-    Eigen::Vector3d camera_z_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(
+    Eigen::Vector3d camera_z_world = aimer::tf::vector<aimer::tf::Frame::Camera, aimer::tf::Frame::World>(
         Eigen::Vector3d(0, 0, 1), q_imu
     );
     Eigen::Vector2d camera_z_i2(camera_z_world.x(), camera_z_world.y());
@@ -57,10 +57,10 @@ void draw_armor_by_z_to_v(
     else camera_z_i2 = Eigen::Vector2d(1.0, 0.0);
 
     // 装甲板法向量在世界 XY 平面的方向 = 相机前向旋转 z_to_v
-    Eigen::Vector2d radius_norm = math::rotate(camera_z_i2, z_to_v);
+    Eigen::Vector2d radius_norm = aimer::math::rotate(camera_z_i2, z_to_v);
 
     // 装甲板 X 轴 (水平方向，垂直于法向量)
-    Eigen::Vector2d x_2d = math::rotate(radius_norm, M_PI / 2);
+    Eigen::Vector2d x_2d = aimer::math::rotate(radius_norm, M_PI / 2);
     Eigen::Vector3d x_axis(x_2d.x(), x_2d.y(), 0.0);
 
     // 装甲板 Y 轴 (竖直方向，考虑俯仰角)
@@ -84,7 +84,7 @@ void draw_armor_by_z_to_v(
     bool all_valid = true;
     for (int i = 0; i < 4; ++i) {
         bool valid = false;
-        pts[i] = tf::world_to_pixel(corners[i], q_imu, valid);
+        pts[i] = aimer::tf::world_to_pixel(corners[i], q_imu, valid);
         if (!valid) all_valid = false;
     }
 
@@ -184,7 +184,7 @@ void draw_prediction(
             if (!obs.valid) continue;
 
             bool valid = false;
-            cv::Point2f obs_px = tf::world_to_pixel(obs.pos, q_imu, valid);
+            cv::Point2f obs_px = aimer::tf::world_to_pixel(obs.pos, q_imu, valid);
             if (!valid) continue;
 
             // 蓝色小圆圈标记观测位置
@@ -236,7 +236,7 @@ void draw_prediction(
             const auto& armor = vehicle.armors[j];
 
             bool valid = false;
-            cv::Point2f armor_px = tf::world_to_pixel(armor.position, q_imu, valid);
+            cv::Point2f armor_px = aimer::tf::world_to_pixel(armor.position, q_imu, valid);
             if (!valid) continue;
             if (armor_px.x < 0 || armor_px.x >= img.cols ||
                 armor_px.y < 0 || armor_px.y >= img.rows) continue;

@@ -71,8 +71,8 @@ std::optional<Eigen::Vector3d> armor_to_camera_point(const autoaim::DetectedArmo
     auto object_points = armor.object_points();
     std::vector<cv::Point2f> image_points(armor.landmarks.begin(), armor.landmarks.end());
 
-    const cv::Mat& camera_matrix = tf::get_camera_matrix();
-    const cv::Mat& dist_coeffs = tf::get_distort_coeffs();
+    const cv::Mat& camera_matrix = aimer::tf::get_camera_matrix();
+    const cv::Mat& dist_coeffs = aimer::tf::get_distort_coeffs();
 
     cv::Mat rvec, tvec;
     bool success = cv::solvePnP(
@@ -248,7 +248,7 @@ int main() {
     // 注: 最终运行时由 hardware_node 应用符号修正
 
     // 初始化TF模块 (加载相机内参)
-    if (!tf::init()) {
+    if (!aimer::tf::init()) {
         fmt::print(fmt::fg(fmt::color::red), "TF模块初始化失败!\n");
         return 1;
     }

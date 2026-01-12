@@ -111,7 +111,7 @@ const ArmorObservationTable& ArmorObserver::observe(
             // 用优化后的值检查几何约束
             double yaw_i = obs_i.z[3];
             double yaw_j = obs_j.z[3];
-            double yaw_diff = std::abs(math::angle_diff(yaw_i, yaw_j));
+            double yaw_diff = std::abs(aimer::math::angle_diff(yaw_i, yaw_j));
 
             // 检查1: 朝向角差是否接近 90°
             bool angle_ok = (yaw_diff > 70.0 * M_PI / 180.0 && yaw_diff < 110.0 * M_PI / 180.0);
@@ -199,8 +199,8 @@ ArmorObservation ArmorObserver::solve_pnp(
     std::vector<cv::Point2f> image_points(armor.landmarks.begin(), armor.landmarks.end());
 
     // 从 tf 模块获取相机内参
-    const cv::Mat& camera_matrix = tf::get_camera_matrix();
-    const cv::Mat& dist_coeffs = tf::get_distort_coeffs();
+    const cv::Mat& camera_matrix = aimer::tf::get_camera_matrix();
+    const cv::Mat& dist_coeffs = aimer::tf::get_distort_coeffs();
 
     // PnP 解算
     cv::Mat rvec, tvec;
@@ -235,11 +235,11 @@ ArmorObservation ArmorObserver::solve_pnp(
     );
 
     // ========== 坐标变换: 相机系 → 世界系 ==========
-    Eigen::Vector3d pos_world = tf::cam_to_world(pos_cam, q_imu);
+    Eigen::Vector3d pos_world = aimer::tf::cam_to_world(pos_cam, q_imu);
     // 装甲板"背面"法向量 (指向远离相机的方向, 即从装甲板指向车体中心)
     // 注: 这里取负号是为了让 z_to_v = 0 表示正对
     // armor_yaw 是从装甲板指向中心的方向 (INWARD)
-    Eigen::Vector3d normal_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(-normal_cam, q_imu);
+    Eigen::Vector3d normal_world = aimer::tf::vector<aimer::tf::Frame::Camera, aimer::tf::Frame::World>(-normal_cam, q_imu);
 
     // 畸变矫正四角点
     std::array<cv::Point2f, 4> pus = undistort_points(armor.landmarks);
@@ -317,8 +317,8 @@ std::array<cv::Point2f, 4> ArmorObserver::undistort_points(
     std::array<cv::Point2f, 4> result = {};
     if (pts.size() != 4) return result;
 
-    const cv::Mat& camera_matrix = tf::get_camera_matrix();
-    const cv::Mat& dist_coeffs = tf::get_distort_coeffs();
+    const cv::Mat& camera_matrix = aimer::tf::get_camera_matrix();
+    const cv::Mat& dist_coeffs = aimer::tf::get_distort_coeffs();
 
     std::vector<cv::Point2f> undistorted;
     cv::undistortPoints(pts, undistorted, camera_matrix, dist_coeffs, cv::noArray(), camera_matrix);
@@ -339,7 +339,7 @@ std::array<cv::Point2f, 4> ArmorObserver::undistort_points(
 Eigen::Vector2d ArmorObserver::get_camera_z_i2(const Eigen::Quaterniond& q_imu) {
     // 相机 Z 轴在相机坐标系是 (0, 0, 1)
     // 变换到世界坐标系
-    Eigen::Vector3d camera_z_world = tf::vector<tf::Frame::Camera, tf::Frame::World>(
+    Eigen::Vector3d camera_z_world = aimer::tf::vector<aimer::tf::Frame::Camera, aimer::tf::Frame::World>(
         Eigen::Vector3d(0, 0, 1), q_imu
     );
 
@@ -380,11 +380,11 @@ std::array<cv::Point2f, 4> ArmorObserver::project_armor_corners(
     Eigen::Vector2d camera_z_i2 = get_camera_z_i2(q_imu);
 
     // 装甲板法向量在世界 XY 平面的方向 = 相机前向旋转 z_to_v
-    Eigen::Vector2d radius_norm = math::rotate(camera_z_i2, z_to_v);
+    Eigen::Vector2d radius_norm = aimer::math::rotate(camera_z_i2, z_to_v);
 
     // 装甲板 X 轴 (水平方向，垂直于法向量)
     Eigen::Vector3d x_axis;
-    Eigen::Vector2d x_2d = math::rotate(radius_norm, M_PI / 2);
+    Eigen::Vector2d x_2d = aimer::math::rotate(radius_norm, M_PI / 2);
     x_axis << x_2d.x(), x_2d.y(), 0.0;
 
     // 装甲板 Y 轴 (竖直方向，考虑俯仰角)
@@ -403,7 +403,7 @@ std::array<cv::Point2f, 4> ArmorObserver::project_armor_corners(
     corners_world[3] = pos_world - x_axis * (w / 2) + y_axis * (h / 2);    // 右上
 
     // 变换到相机坐标系并投影
-    const cv::Mat& camera_matrix = tf::get_camera_matrix();
+    const cv::Mat& camera_matrix = aimer::tf::get_camera_matrix();
     double fx = camera_matrix.at<double>(0, 0);
     double fy = camera_matrix.at<double>(1, 1);
     double cx = camera_matrix.at<double>(0, 2);
@@ -412,7 +412,7 @@ std::array<cv::Point2f, 4> ArmorObserver::project_armor_corners(
     std::array<cv::Point2f, 4> result;
     for (int i = 0; i < 4; ++i) {
         // 世界坐标 → 相机坐标
-        Eigen::Vector3d p_cam = tf::world_to_camera(corners_world[i], q_imu);
+        Eigen::Vector3d p_cam = aimer::tf::world_to_camera(corners_world[i], q_imu);
 
         // 投影到像素 (相机坐标系: x右, y下, z前)
         if (p_cam.z() > 0.01) {
@@ -455,12 +455,12 @@ double ArmorObserver::compute_reprojection_cost(
             / ref_norm;
 
         // 角度差代价
-        double angular_dis = math::get_abs_angle(ref_d, pt_d);
+        double angular_dis = aimer::math::get_abs_angle(ref_d, pt_d);
 
         // 加权组合 (z_to_v 越小，越相信角度; 越大，越相信像素)
         double inclined = z_to_v;  // 作为权重
-        double cost_i = math::sq(pixel_dis * std::sin(inclined))
-                      + math::sq(angular_dis * std::cos(inclined)) * DETECTOR_ERROR_PIXEL_BY_SLOPE;
+        double cost_i = aimer::math::sq(pixel_dis * std::sin(inclined))
+                      + aimer::math::sq(angular_dis * std::cos(inclined)) * DETECTOR_ERROR_PIXEL_BY_SLOPE;
 
         cost += std::sqrt(cost_i);
     }

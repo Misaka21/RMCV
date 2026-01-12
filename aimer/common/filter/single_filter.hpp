@@ -10,7 +10,7 @@
 
 #include "adaptive_ekf.hpp"
 
-namespace filter {
+namespace aimer::filter {
 
 /**
  * @brief 多项式预测模型
@@ -172,6 +172,6 @@ private:
     double t_ = 0;
 };
 
-}  // namespace filter
+}  // namespace aimer::filter
 
 #endif  // AIMER_COMMON_FILTER_SINGLE_FILTER_HPP

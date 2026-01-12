@@ -121,7 +121,7 @@ int main() {
     std::this_thread::sleep_for(100ms);  // 等待参数加载
 
     // 初始化 TF 模块
-    if (!tf::init()) {
+    if (!aimer::tf::init()) {
         fmt::print(fmt::fg(fmt::color::red), "TF 模块初始化失败!\n");
         return 1;
     }

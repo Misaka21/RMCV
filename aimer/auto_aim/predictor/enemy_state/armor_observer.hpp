@@ -12,7 +12,7 @@
  * 数据流:
  *   DetectionResult → ArmorObserver → ArmorObservationTable (世界系)
  *
- * 注意: 相机内参直接从 tf 模块获取 (tf::get_camera_matrix())
+ * 注意: 相机内参直接从 tf 模块获取 (aimer::tf::get_camera_matrix())
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_STATE_ARMOR_OBSERVER_HPP__

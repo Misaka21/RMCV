@@ -17,7 +17,7 @@
 
 #include <Eigen/Dense>
 
-namespace filter {
+namespace aimer::filter {
 
 /**
  * @brief 自动微分扩展卡尔曼滤波器
@@ -255,6 +255,6 @@ public:
     }
 };
 
-}  // namespace filter
+}  // namespace aimer::filter
 
 #endif  // AIMER_COMMON_FILTER_ADAPTIVE_EKF_HPP
