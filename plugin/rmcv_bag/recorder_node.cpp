@@ -6,6 +6,7 @@
 #include "recorder_node.hpp"
 
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <thread>
@@ -22,6 +23,34 @@
 namespace rmcv_bag {
 
 using SteadyClock = std::chrono::steady_clock;
+namespace fs = std::filesystem;
+
+// ============================================================================
+// 工具函数
+// ============================================================================
+
+/**
+ * @brief 生成不重复的文件路径 (自动添加序号)
+ * @param dir 目录路径
+ * @param basename 基础文件名 (不含扩展名)
+ * @param ext 扩展名 (如 ".mkv", ".csv")
+ * @return 不重复的文件路径，如 "dir/basename_001.ext"
+ */
+std::string get_unique_filepath(const std::string& dir,
+                                const std::string& basename,
+                                const std::string& ext) {
+    for (int i = 1; i <= 999; ++i) {
+        std::string filepath = fmt::format("{}/{}_{:03d}{}", dir, basename, i, ext);
+        if (!fs::exists(filepath)) {
+            return filepath;
+        }
+    }
+    // 超过 999 个文件，返回带时间戳的
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::string timestamp = fmt::format("{:%H-%M-%S}", *std::localtime(&time_t_now));
+    return fmt::format("{}/{}_{}{}", dir, basename, timestamp, ext);
+}
 
 // ============================================================================
 // 配置结构体 (启动时加载一次)
@@ -193,7 +222,8 @@ void start_recorder_node() {
 
                 // 初始化 CSV writer (比赛模式强制)
                 if (config.record_imu_csv || match_mode) {
-                    imu_writer = std::make_unique<CsvWriter>(session_path + "/imu.csv");
+                    std::string imu_filepath = get_unique_filepath(session_path, "imu", ".csv");
+                    imu_writer = std::make_unique<CsvWriter>(imu_filepath);
                     imu_writer->write_header({
                         "timestamp_us", "frame_id",
                         "yaw", "pitch", "roll",
@@ -261,7 +291,7 @@ void start_recorder_node() {
                 // 延迟初始化 (首帧时获取尺寸)
                 if (!raw_writer->is_opened()) {
                     cv::Size frame_size = sync_frame.image.size();
-                    std::string filepath = session_path + "/raw.mkv";
+                    std::string filepath = get_unique_filepath(session_path, "raw", ".mkv");
                     if (raw_writer->open(filepath,
                             config.get_record_fps(), frame_size, config.video_codec)) {
                         debug::print(debug::PrintMode::INFO, "RecorderNode",
