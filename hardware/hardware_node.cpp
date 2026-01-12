@@ -271,6 +271,10 @@ void start_hardware_node() {
 
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Hardware node started");
 
+        // 串口同步超时配置 (30秒内必须同步，否则退出让看门狗重启)
+        constexpr int SYNC_TIMEOUT_SEC = 30;
+        auto sync_start_time = SteadyClock::now();
+
         // 串口数据缓冲区，用于时间同步匹配
         std::deque<TimestampedSerialData> serial_buffer;
         constexpr size_t max_buffer_size = 200;
@@ -338,6 +342,17 @@ void start_hardware_node() {
                 if (frame.serial_valid && !hardware_running->get()) {
                     hardware_running->get() = true;
                     debug::print(debug::PrintMode::INFO, "HardwareNode", "Serial synced, hardware ready");
+                }
+
+                // 检查同步超时 (只在未同步时检查)
+                if (!hardware_running->get() && !use_fake_serial) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        SteadyClock::now() - sync_start_time).count();
+                    if (elapsed >= SYNC_TIMEOUT_SEC) {
+                        debug::print(debug::PrintMode::FATAL, "HardwareNode",
+                            "Serial sync timeout after {}s, no data received", elapsed);
+                        std::exit(1);
+                    }
                 }
 
                 // 更新统计

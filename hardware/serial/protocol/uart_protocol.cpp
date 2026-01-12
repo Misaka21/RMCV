@@ -142,8 +142,11 @@ bool UartProtocol::set_param(int speed, int flow_ctrl, int databits, int stopbit
     options.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
 
     // 设置等待时间和最小接收字符
-    options.c_cc[VTIME] = 1; // 0.1秒超时
-    options.c_cc[VMIN] = 1; // 至少读取1字符
+    // VMIN=0: 不等待字符，立即返回（即使没有数据）
+    // VTIME=1: 最多等待 0.1 秒
+    // 这样即使没有数据，read() 也会在 0.1 秒后返回 0，不会永久阻塞
+    options.c_cc[VMIN] = 0;
+    options.c_cc[VTIME] = 1;
 
     if (tcflush(_fd, TCIFLUSH) != 0) {
         _error_message = "tcflush failed: " + std::string(strerror(errno));

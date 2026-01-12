@@ -44,6 +44,8 @@ RETRY_COUNT=0
 SESSION_DIR=""    # 当前会话目录 (由 create_session_dir 设置)
 RESOURCE_LOG=""   # 资源日志文件路径
 LAST_RESOURCE_LOG_TIME=0  # 上次资源记录时间
+HEARTBEAT_WAIT_START=0    # 开始等待心跳的时间戳
+MAX_HEARTBEAT_WAIT=60     # 心跳文件最长等待时间 (秒)
 
 # ========== 工具函数 ==========
 
@@ -162,9 +164,24 @@ check_heartbeat() {
     local heartbeat_file="$SESSION_DIR/heartbeat"
 
     if [ ! -f "$heartbeat_file" ]; then
-        log_msg "  Heartbeat file not found, waiting..."
-        return 0  # 还没启动完成
+        # 心跳文件还不存在，检查是否等待超时
+        local now=$(date +%s)
+        if [ "$HEARTBEAT_WAIT_START" -eq 0 ]; then
+            HEARTBEAT_WAIT_START=$now
+        fi
+
+        local wait_time=$((now - HEARTBEAT_WAIT_START))
+        if [ "$wait_time" -gt "$MAX_HEARTBEAT_WAIT" ]; then
+            log_msg "  Heartbeat not created after ${wait_time}s, startup failed!"
+            return 1  # 触发重启
+        fi
+
+        log_msg "  Heartbeat not found, waiting... (${wait_time}/${MAX_HEARTBEAT_WAIT}s)"
+        return 0  # 还在启动中
     fi
+
+    # 心跳文件存在，重置等待计时器
+    HEARTBEAT_WAIT_START=0
 
     # 检查文件修改时间
     local file_age=$(($(date +%s) - $(stat -c %Y "$heartbeat_file" 2>/dev/null || echo 0)))
@@ -338,6 +355,9 @@ save_coredump() {
 }
 
 bringup() {
+    # 重置心跳等待计时器
+    HEARTBEAT_WAIT_START=0
+
     kill_screen
     # 先发 SIGTERM 让进程优雅退出，等待 2 秒后再强制杀死
     pkill -TERM -x RMCV2026 2>/dev/null || true
