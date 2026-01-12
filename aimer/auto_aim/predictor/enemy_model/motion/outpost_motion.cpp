@@ -109,17 +109,17 @@ void OutpostMotion::init(const ArmorData& armor, double timestamp) {
     double armor_yaw = obs.z[obs::ARMOR_YAW];
 
     // 从装甲板位置反推旋转中心
-    double xc = xa + outpost_motion::RADIUS * std::cos(armor_yaw);
-    double yc = ya + outpost_motion::RADIUS * std::sin(armor_yaw);
+    double xc = xa + outpost_model::RADIUS * std::cos(armor_yaw);
+    double yc = ya + outpost_model::RADIUS * std::sin(armor_yaw);
     double zc = za;  // 初始假设 dz = 0
 
     // 初始化状态
     VectorX x0 = VectorX::Zero();
-    x0[outpost_motion::XC] = xc;
-    x0[outpost_motion::YC] = yc;
-    x0[outpost_motion::ZC] = zc;
-    x0[outpost_motion::THETA] = armor_yaw;
-    x0[outpost_motion::OMEGA] = 0;  // 初始为0，让 EKF 自己判断方向
+    x0[outpost_model::XC] = xc;
+    x0[outpost_model::YC] = yc;
+    x0[outpost_model::ZC] = zc;
+    x0[outpost_model::THETA] = armor_yaw;
+    x0[outpost_model::OMEGA] = 0;  // 初始为0，让 EKF 自己判断方向
 
     ekf_.init(x0);
 
@@ -164,15 +164,15 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
 
     // 连续化 yaw
     VectorX x = ekf_.get_x();
-    double theta_pred = x[outpost_motion::THETA];
+    double theta_pred = x[outpost_model::THETA];
     double yaw_continuous = theta_pred + aimer::math::angle_diff(theta_pred, armor_yaw);
 
     // 构建观测向量
     VectorZ z;
-    z[outpost_motion::YAW] = obs.z[obs::YAW];
-    z[outpost_motion::PITCH] = obs.z[obs::PITCH];
-    z[outpost_motion::DIS] = obs.z[obs::DIST];
-    z[outpost_motion::ARMOR_YAW] = yaw_continuous;
+    z[outpost_model::YAW] = obs.z[obs::YAW];
+    z[outpost_model::PITCH] = obs.z[obs::PITCH];
+    z[outpost_model::DIS] = obs.z[obs::DIST];
+    z[outpost_model::ARMOR_YAW] = yaw_continuous;
 
     // 观测更新
     OutpostMeasure measure_func(current_dz_);
@@ -184,15 +184,15 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
 
     // 更新当前槽位的高度差 (持续学习)
     x = ekf_.get_x();
-    double new_dz = obs.pos.z() - x[outpost_motion::ZC];
+    double new_dz = obs.pos.z() - x[outpost_model::ZC];
     slot_dz_[current_slot_] = new_dz;
     slot_known_[current_slot_] = true;
     current_dz_ = new_dz;
 
     // 强制速度清零 (前哨站定点旋转)
     if (get_force_zero_velocity()) {
-        x[outpost_motion::VX] = 0;
-        x[outpost_motion::VY] = 0;
+        x[outpost_model::VX] = 0;
+        x[outpost_model::VY] = 0;
         ekf_.set_x(x);
     }
 
@@ -208,14 +208,14 @@ bool OutpostMotion::handle_armor_switch(const ArmorData& armor) {
     // 装甲板切换了
     const auto& obs = armor.observation;
     VectorX x = ekf_.get_x();
-    double theta_pred = x[outpost_motion::THETA];
+    double theta_pred = x[outpost_model::THETA];
     double armor_yaw = obs.z[obs::ARMOR_YAW];
 
     // 计算角度差，判断槽位变化方向
     double theta_diff = aimer::math::angle_diff(theta_pred, armor_yaw);
 
     // 更新相位
-    x[outpost_motion::THETA] = theta_pred + theta_diff;
+    x[outpost_model::THETA] = theta_pred + theta_diff;
 
     // 通过角度差判断槽位变化 (相隔约120度)
     int new_slot = current_slot_;
@@ -229,7 +229,7 @@ bool OutpostMotion::handle_armor_switch(const ArmorData& armor) {
     }
 
     // 记录新槽位的高度差
-    double new_dz = obs.pos.z() - x[outpost_motion::ZC];
+    double new_dz = obs.pos.z() - x[outpost_model::ZC];
     slot_dz_[new_slot] = new_dz;
     slot_known_[new_slot] = true;
 
@@ -256,7 +256,7 @@ bool OutpostMotion::handle_armor_switch(const ArmorData& armor) {
 
 void OutpostMotion::constrain_omega() {
     VectorX x = ekf_.get_x();
-    double omega = x[outpost_motion::OMEGA];
+    double omega = x[outpost_model::OMEGA];
 
     // 阶段1: 判断方向 (只需一次)
     if (!omega_sign_determined_) {
@@ -269,8 +269,8 @@ void OutpostMotion::constrain_omega() {
     // 阶段2: 约束角速度 (如果开启锁定)
     if (omega_sign_determined_ && get_lock_omega()) {
         double tolerance = get_omega_tolerance();
-        if (std::abs(std::abs(omega) - outpost_motion::OMEGA_ABS) > tolerance) {
-            x[outpost_motion::OMEGA] = std::copysign(outpost_motion::OMEGA_ABS, omega);
+        if (std::abs(std::abs(omega) - outpost_model::OMEGA_ABS) > tolerance) {
+            x[outpost_model::OMEGA] = std::copysign(outpost_model::OMEGA_ABS, omega);
             ekf_.set_x(x);
         }
     }
@@ -289,13 +289,13 @@ OutpostMotion::MatrixXX OutpostMotion::build_Q(double dt) const {
         q_omega *= 0.01;  // 方向确定后，ω 几乎不变
     }
 
-    Q(outpost_motion::XC, outpost_motion::XC) = q_pos * dt;
-    Q(outpost_motion::VX, outpost_motion::VX) = q_vel * dt;
-    Q(outpost_motion::YC, outpost_motion::YC) = q_pos * dt;
-    Q(outpost_motion::VY, outpost_motion::VY) = q_vel * dt;
-    Q(outpost_motion::ZC, outpost_motion::ZC) = q_pos * dt * 0.1;  // Z 变化很小
-    Q(outpost_motion::THETA, outpost_motion::THETA) = q_theta * dt;
-    Q(outpost_motion::OMEGA, outpost_motion::OMEGA) = q_omega * dt;
+    Q(outpost_model::XC, outpost_model::XC) = q_pos * dt;
+    Q(outpost_model::VX, outpost_model::VX) = q_vel * dt;
+    Q(outpost_model::YC, outpost_model::YC) = q_pos * dt;
+    Q(outpost_model::VY, outpost_model::VY) = q_vel * dt;
+    Q(outpost_model::ZC, outpost_model::ZC) = q_pos * dt * 0.1;  // Z 变化很小
+    Q(outpost_model::THETA, outpost_model::THETA) = q_theta * dt;
+    Q(outpost_model::OMEGA, outpost_model::OMEGA) = q_omega * dt;
 
     return Q;
 }
@@ -314,10 +314,10 @@ OutpostMotion::MatrixZZ OutpostMotion::build_R(double distance, double z_to_v) c
     // 距离越远角度噪声越大
     double dist_factor = std::log(distance + 1) / 200 + 1;
 
-    R(outpost_motion::YAW, outpost_motion::YAW) = r_angle * dist_factor;
-    R(outpost_motion::PITCH, outpost_motion::PITCH) = r_angle * dist_factor;
-    R(outpost_motion::DIS, outpost_motion::DIS) = r_dis_k * distance * distance * side_factor;
-    R(outpost_motion::ARMOR_YAW, outpost_motion::ARMOR_YAW) = r_armor_yaw;
+    R(outpost_model::YAW, outpost_model::YAW) = r_angle * dist_factor;
+    R(outpost_model::PITCH, outpost_model::PITCH) = r_angle * dist_factor;
+    R(outpost_model::DIS, outpost_model::DIS) = r_dis_k * distance * distance * side_factor;
+    R(outpost_model::ARMOR_YAW, outpost_model::ARMOR_YAW) = r_armor_yaw;
 
     return R;
 }
@@ -325,20 +325,20 @@ OutpostMotion::MatrixZZ OutpostMotion::build_R(double distance, double z_to_v) c
 Eigen::Vector3d OutpostMotion::predict_center(double dt) const {
     VectorX x = ekf_.get_x();
     return Eigen::Vector3d(
-        x[outpost_motion::XC] + x[outpost_motion::VX] * dt,
-        x[outpost_motion::YC] + x[outpost_motion::VY] * dt,
-        x[outpost_motion::ZC]
+        x[outpost_model::XC] + x[outpost_model::VX] * dt,
+        x[outpost_model::YC] + x[outpost_model::VY] * dt,
+        x[outpost_model::ZC]
     );
 }
 
 Eigen::Vector3d OutpostMotion::predict_armor_pos(int slot, double dt) const {
     VectorX x = ekf_.get_x();
 
-    double xc = x[outpost_motion::XC] + x[outpost_motion::VX] * dt;
-    double yc = x[outpost_motion::YC] + x[outpost_motion::VY] * dt;
-    double zc = x[outpost_motion::ZC];
+    double xc = x[outpost_model::XC] + x[outpost_model::VX] * dt;
+    double yc = x[outpost_model::YC] + x[outpost_model::VY] * dt;
+    double zc = x[outpost_model::ZC];
 
-    double theta = x[outpost_motion::THETA] + x[outpost_motion::OMEGA] * dt;
+    double theta = x[outpost_model::THETA] + x[outpost_model::OMEGA] * dt;
 
     // 槽位角度偏移 (相隔120度)
     double angle_offset = slot * (2.0 * M_PI / 3);
@@ -347,8 +347,8 @@ Eigen::Vector3d OutpostMotion::predict_armor_pos(int slot, double dt) const {
     // 查表获取高度差 (已学习的槽位)
     double dz = slot_dz_[slot];
 
-    double xa = xc - outpost_motion::RADIUS * std::cos(armor_theta);
-    double ya = yc - outpost_motion::RADIUS * std::sin(armor_theta);
+    double xa = xc - outpost_model::RADIUS * std::cos(armor_theta);
+    double ya = yc - outpost_model::RADIUS * std::sin(armor_theta);
     double za = zc + dz;
 
     return Eigen::Vector3d(xa, ya, za);
@@ -360,7 +360,7 @@ Eigen::Vector3d OutpostMotion::get_armor_pos() const {
 
 Eigen::Vector3d OutpostMotion::get_velocity() const {
     VectorX x = ekf_.get_x();
-    return Eigen::Vector3d(x[outpost_motion::VX], x[outpost_motion::VY], 0);
+    return Eigen::Vector3d(x[outpost_model::VX], x[outpost_model::VY], 0);
 }
 
 void OutpostMotion::reset() {
