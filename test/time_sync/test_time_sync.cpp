@@ -45,9 +45,9 @@ using TimePoint = Clock::time_point;
 // ============================================================================
 // 配置参数
 // ============================================================================
-constexpr double COLLECT_DURATION_SEC = 5.0;   // 采集时长(秒)
+constexpr double COLLECT_DURATION_SEC = 10.0;   // 采集时长(秒)
 constexpr size_t MIN_CAM_SAMPLES = 50;         // 最少相机数据点
-constexpr size_t MAX_IMU_BUFFER = 2000;        // IMU缓冲区最大容量
+constexpr size_t MAX_IMU_BUFFER = 10000;        // IMU缓冲区最大容量
 
 // ============================================================================
 // 带时间戳的IMU数据 (串口接收时记录)
