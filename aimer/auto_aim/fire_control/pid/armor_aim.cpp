@@ -1,9 +1,9 @@
 /**
- * @file spin_aim.cpp
- * @brief 反陀螺瞄准逻辑实现
+ * @file armor_aim.cpp
+ * @brief 装甲板瞄准逻辑实现
  */
 
-#include "spin_aim.hpp"
+#include "armor_aim.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -14,13 +14,13 @@
 
 namespace autoaim::fire_control {
 
-SpinAimResult SpinAim::compute(
+ArmorAimResult ArmorAim::compute(
     const predictor::VehicleState& vehicle,
     double predict_dt
 ) const
 {
     if (!vehicle.valid) {
-        return SpinAimResult{};
+        return ArmorAimResult{};
     }
 
     // 根据陀螺状态选择瞄准方式
@@ -33,12 +33,12 @@ SpinAimResult SpinAim::compute(
     }
 }
 
-SpinAimResult SpinAim::compute_non_spin(
+ArmorAimResult ArmorAim::compute_non_spin(
     const predictor::VehicleState& vehicle,
     double predict_dt
 ) const
 {
-    SpinAimResult result;
+    ArmorAimResult result;
     result.mode = AimMode::DIRECT;
 
     // 使用推荐装甲板
@@ -52,11 +52,13 @@ SpinAimResult SpinAim::compute_non_spin(
     result.target_pos = armor->predict_position(predict_dt);
     result.target_vel = armor->velocity;
     result.z_to_v = armor->z_to_v;
+    result.armor_width = armor->width();
+    result.armor_height = armor->height();
 
     return result;
 }
 
-SpinAimResult SpinAim::compute_spin(
+ArmorAimResult ArmorAim::compute_spin(
     const predictor::VehicleState& vehicle,
     double predict_dt
 ) const
@@ -77,7 +79,7 @@ SpinAimResult SpinAim::compute_spin(
 
     if (!direct_indices.empty()) {
         // === DIRECT 模式 ===
-        SpinAimResult result;
+        ArmorAimResult result;
         result.valid = true;
         result.mode = AimMode::DIRECT;
 
@@ -89,6 +91,8 @@ SpinAimResult SpinAim::compute_spin(
         result.target_pos = vehicle.predict_armor_position(result.armor_idx, predict_dt);
         result.target_vel = compute_armor_velocity(vehicle, result.armor_idx);
         result.z_to_v = armor.z_to_v;
+        result.armor_width = armor.width();
+        result.armor_height = armor.height();
 
         return result;
 
@@ -98,7 +102,7 @@ SpinAimResult SpinAim::compute_spin(
     }
 }
 
-int SpinAim::choose_best_direct(
+int ArmorAim::choose_best_direct(
     const predictor::VehicleState& vehicle,
     const std::vector<int>& direct_indices
 ) const
@@ -118,12 +122,12 @@ int SpinAim::choose_best_direct(
     return best_idx;
 }
 
-SpinAimResult SpinAim::compute_indirect(
+ArmorAimResult ArmorAim::compute_indirect(
     const predictor::VehicleState& vehicle,
     double predict_dt
 ) const
 {
-    SpinAimResult result;
+    ArmorAimResult result;
     result.mode = AimMode::INDIRECT;
 
     // 读取参数 (每次调用都从 runtime_param 获取，支持热更新)
@@ -132,7 +136,6 @@ SpinAimResult SpinAim::compute_indirect(
     ) * M_PI / 180.0;
 
     double omega = vehicle.spin.omega;
-    double theta = vehicle.spin.phase;
     int armor_count = vehicle.armor_count;
 
     // 陀螺旋转方向
@@ -186,11 +189,13 @@ SpinAimResult SpinAim::compute_indirect(
     result.target_pos = vehicle.predict_armor_position(best_armor, total_dt);
     result.target_vel = compute_armor_velocity(vehicle, best_armor);
     result.z_to_v = target_z_to_v;  // 边界角度
+    result.armor_width = vehicle.armors[best_armor].width();
+    result.armor_height = vehicle.armors[best_armor].height();
 
     return result;
 }
 
-Eigen::Vector3d SpinAim::compute_armor_velocity(
+Eigen::Vector3d ArmorAim::compute_armor_velocity(
     const predictor::VehicleState& vehicle,
     int armor_idx
 ) const

@@ -39,20 +39,21 @@ constexpr double CONTROL_DT = 0.01;        // 控制周期 10ms (100Hz)
 /**
  * @brief 目标选择结果
  *
- * 包含指向 predictor 类型的指针，是 autoaim 专用类型
+ * 只包含敌人索引，不包含装甲板索引。
+ * 装甲板选择由 ArmorAim 负责。
+ *
+ * 职责边界:
+ * - TargetSelector: 选"打哪个敌人" → target_id
+ * - ArmorAim: 选"打这个敌人的哪块板" → armor_idx, target_pos
  */
 struct TargetSelection {
     bool has_target = false;
 
-    int target_id = -1;
-    int armor_idx = -1;
-
-    const predictor::VehicleState* vehicle = nullptr;
-    const predictor::ArmorState* armor = nullptr;
+    int target_id = -1;        // 敌人索引 (snapshot.vehicles[target_id])
 
     double priority = 0;       // 优先级评分
 
-    // 插值后的位置 (考虑延迟)
+    // 用于调试显示的预测位置 (使用 recommended_armor_idx)
     Eigen::Vector3d predicted_pos = Eigen::Vector3d::Zero();
 };
 

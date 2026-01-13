@@ -1,10 +1,12 @@
 /**
  * @file target_selector.hpp
- * @brief 目标选择器 - 从多个目标中选择最优打击对象
+ * @brief 目标选择器 - 从多个敌人中选择最优打击对象
+ *
+ * 职责: 只选"打哪个敌人"，不选装甲板
+ *       装甲板选择由 ArmorAim 负责
  *
  * 选择策略 (参考 rm.cv.fans):
- *   1. 选敌人：最靠近图像中心 (操作手意图)
- *   2. 选装甲板：电机转动代价最小 (swing_cost = √(Δyaw² + Δpitch²))
+ *   选敌人：最靠近图像中心 (操作手意图)
  *
  * 锁定机制:
  *   - 当有目标且可见时，保持当前目标
@@ -68,7 +70,7 @@ public:
     int current_target() const { return current_target_id_; }
 
 private:
-    // ==================== 新策略: rm.cv.fans 风格 ====================
+    // ==================== 辅助方法 ====================
 
     /**
      * @brief 计算装甲板到图像中心的距离 (用于选敌人)
@@ -82,25 +84,16 @@ private:
     ) const;
 
     /**
-     * @brief 计算电机转动代价 (用于选装甲板)
-     * swing_cost = √(Δyaw² + Δpitch²)
-     */
-    double compute_swing_cost(
-        const Eigen::Vector3d& pos,
-        const GimbalState& gimbal
-    ) const;
-
-    /**
      * @brief 从3D位置计算瞄准角度 (yaw, pitch)
      */
     std::pair<double, double> pos_to_yaw_pitch(const Eigen::Vector3d& pos) const;
 
     /**
-     * @brief 选择该敌人的最佳装甲板 (转动代价最小)
+     * @brief 检查该敌人是否有可打击的装甲板
      */
-    int select_best_armor(
+    bool has_visible_armor(
         const predictor::VehicleState& vehicle,
-        const GimbalState& gimbal,
+        double max_angle,
         double dt
     ) const;
 
@@ -109,17 +102,9 @@ private:
      */
     bool should_keep_target(int target_id, double current_time) const;
 
-    // ==================== 旧策略 (已注释) ====================
-    // double compute_projected_area(const predictor::ArmorState& armor) const;
-    // double compute_score(...) const;
-    // double get_type_priority(predictor::EnemyType type) const;
-    // bool should_switch_target(double new_score, double current_score) const;
-    // bool should_switch_armor(double new_score, double current_score) const;
-
     // ==================== 状态 ====================
 
     int current_target_id_ = -1;
-    int current_armor_idx_ = -1;
     int forced_target_id_ = -1;      // 预瞄锁定的目标
     double last_seen_time_ = 0;      // 上次看到当前目标的时间
 };

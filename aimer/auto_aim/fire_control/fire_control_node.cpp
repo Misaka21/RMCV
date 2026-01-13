@@ -9,8 +9,9 @@
 #include <thread>
 
 #include "aimer/common/robot_state.hpp"
+#include "aimer/common/latency/latency_estimator.hpp"
+#include "aimer/common/trajectory/solver_factory.hpp"
 #include "fire_controller.hpp"
-#include "common/latency_estimator.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/common/fire_control_types.hpp"
 #include "umt/BasicObjManager.hpp"
@@ -28,6 +29,63 @@ double get_current_time() {
     return std::chrono::duration<double>(duration).count();
 }
 
+// 从 snapshot 提取延迟构建所需参数
+::fire_control::LatencyInfo build_latency(
+    const aimer::LatencyEstimator& estimator,
+    const predictor::BattlefieldSnapshot& snapshot
+) {
+    // img_to_predict
+    double img_to_predict = (snapshot.predict_timestamp > 0)
+        ? (snapshot.predict_timestamp - snapshot.timestamp)
+        : 0.015;
+
+    // 目标距离
+    double distance = 5.0;
+    if (snapshot.get_primary()) {
+        const auto* armor = snapshot.get_primary()->get_recommended_armor();
+        if (armor) {
+            distance = armor->position.norm();
+        }
+    }
+
+    // 弹速
+    double bullet_speed = snapshot.self_state.bullet_speed;
+
+    return estimator.build(img_to_predict, distance, bullet_speed, "AutoAim.FireControl");
+}
+
+/**
+ * @brief 迭代更新 fire_to_hit (参考 rm.cv.fans filter_to_prediction_time)
+ *
+ * 问题: 弹道解算需要预测位置 → 预测位置需要 prediction_latency()
+ *       → prediction_latency() 需要 fire_to_hit → 鸡生蛋
+ *
+ * 解决: 迭代收敛，通常 2 次迭代即可
+ */
+void finalize_latency(
+    ::fire_control::LatencyInfo& latency,
+    const predictor::BattlefieldSnapshot& snapshot
+) {
+    const auto* target = snapshot.get_primary();
+    if (!target) return;
+
+    constexpr int NUM_ITERATIONS = 2;
+    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
+        double dt = latency.prediction_latency();
+        Eigen::Vector3d pos = target->predict_armor_position(
+            target->recommended_armor_idx, dt
+        );
+
+        ::fire_control::AimResult aim = ::fire_control::trajectory::solve(
+            pos, snapshot.self_state.bullet_speed
+        );
+
+        if (aim.valid) {
+            latency.set_fly_time(aim.fly_time);
+        }
+    }
+}
+
 }  // namespace
 
 void fire_control_run(const std::string& /* config_path */) {
@@ -41,8 +99,8 @@ void fire_control_run(const std::string& /* config_path */) {
     // 自瞄控制器
     FireController controller;
 
-    // 延迟估计器
-    LatencyEstimator latency_estimator;
+    // 延迟估计器 (通用)
+    aimer::LatencyEstimator latency_estimator;
 
     // 模式跟踪
     aimer::AimMode last_mode = aimer::AimMode::DISABLED;
@@ -86,7 +144,10 @@ void fire_control_run(const std::string& /* config_path */) {
         }
 
         // 构建延迟信息
-        LatencyInfo latency = latency_estimator.build(snapshot, current_time);
+        LatencyInfo latency = build_latency(latency_estimator, snapshot);
+
+        // 迭代更新 fire_to_hit (延迟准备在 node 层完成)
+        finalize_latency(latency, snapshot);
 
         // 根据模式处理
         ::fire_control::FireCommand cmd{};

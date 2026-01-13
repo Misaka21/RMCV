@@ -320,7 +320,7 @@ int main(int argc, char* argv[]) {
 
         // 绘制火控选择的目标
         const auto& selection = controller.last_selection();
-        if (selection.has_target && selection.armor) {
+        if (selection.has_target) {
             // 预测位置
             draw_armor(img, selection.predicted_pos, cv::Scalar(0, 255, 0), K, "PRED");
         }
@@ -333,10 +333,8 @@ int main(int argc, char* argv[]) {
         int y = 30;
         int dy = 25;
 
-        // 模式
-        std::string mode_str = (controller.current_mode() == autoaim::fire_control::ControlMode::MPC)
-            ? "MPC" : "PID";
-        cv::putText(img, fmt::format("Mode: {}", mode_str),
+        // 模式 (PID 模式)
+        cv::putText(img, "Mode: PID",
                     cv::Point(10, y), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
         y += dy;
 

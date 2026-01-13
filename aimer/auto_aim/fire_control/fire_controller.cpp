@@ -11,41 +11,25 @@
 
 namespace autoaim::fire_control {
 
-FireController::FireController()
-{
-    gimbal_planner_ = std::make_unique<GimbalPlanner>();
-}
-
-FireController::~FireController() = default;
-
-ControlMode FireController::current_mode() const {
-    return runtime_param::get_param<bool>("AutoAim.FireControl.use_mpc")
-        ? ControlMode::MPC : ControlMode::PID;
-}
-
 void FireController::reset()
 {
     target_selector_.clear_target();
-    gimbal_planner_->reset();
 
     last_selection_ = {};
     last_aim_ = {};
     last_plan_ = {};
-    last_spin_aim_ = {};
+    last_armor_aim_ = {};
     lost_count_ = 0;
 }
 
 FireCommand FireController::control(
     const predictor::BattlefieldSnapshot& snapshot,
     double current_time,
-    const LatencyInfo& latency_in
+    const LatencyInfo& latency
 )
 {
-    // 读取模式 (每次调用都从 runtime_param 获取，支持热更新)
-    const bool use_mpc = runtime_param::get_param<bool>("AutoAim.FireControl.use_mpc");
-
-    // 复制延迟信息 (需要迭代更新 fire_to_hit)
-    LatencyInfo latency = latency_in;
+    // 注意: latency 已由 fire_control_node.cpp 的 finalize_latency() 完成迭代更新
+    //       FireController 直接使用即可
 
     // 1. 更新云台状态
     double dt = (last_time_ > 0) ? (current_time - last_time_) : CONTROL_DT;
@@ -65,13 +49,13 @@ FireCommand FireController::control(
         }
     }
 
-    // 2. 目标选择 (用初始延迟估计)
+    // 2. 目标选择
     double prediction_dt = latency.prediction_latency();
     TargetSelection selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
     last_selection_ = selection;
 
     // 3. 无目标处理
-    if (!selection.has_target || !selection.vehicle) {
+    if (!selection.has_target) {
         lost_count_++;
         if (lost_count_ > MAX_LOST_COUNT) {
             reset();
@@ -80,107 +64,29 @@ FireCommand FireController::control(
     }
     lost_count_ = 0;
 
-    // 4. 迭代更新延迟 (参考 rm.cv.fans filter_to_prediction_time)
-    //    用弹道解算后的距离更新 fire_to_hit，然后重新预测位置
-    constexpr int NUM_ITERATIONS = 2;
-    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
-        // 预测位置
-        prediction_dt = latency.prediction_latency();
-        Eigen::Vector3d predicted_pos = selection.vehicle->predict_armor_position(
-            selection.armor_idx, prediction_dt
-        );
+    // 获取目标车辆的引用 (用索引访问，避免指针悬空问题)
+    const auto& vehicle = snapshot.vehicles[selection.target_id];
 
-        // 弹道解算
-        AimResult aim = ::fire_control::trajectory::solve(
-            predicted_pos, snapshot.self_state.bullet_speed
-        );
-
-        if (aim.valid) {
-            // 用瞄准点距离更新 fire_to_hit
-            latency.update_fire_to_hit(aim.distance);
-        }
-    }
-
-    // 更新选择结果的预测位置 (用最终的延迟)
-    selection.predicted_pos = selection.vehicle->predict_armor_position(
-        selection.armor_idx, latency.prediction_latency()
+    // 更新选择结果的预测位置 (用于调试显示)
+    selection.predicted_pos = vehicle.predict_armor_position(
+        vehicle.recommended_armor_idx, latency.prediction_latency()
     );
     last_selection_ = selection;
 
-    // 5. 分支处理
-    if (use_mpc) {
-        return process_mpc(selection, snapshot, latency);
-    } else {
-        return process_pid(selection, snapshot, latency);
-    }
-}
-
-FireCommand FireController::process_mpc(
-    const TargetSelection& selection,
-    const predictor::BattlefieldSnapshot& snapshot,
-    const LatencyInfo& latency
-)
-{
-    // MPC 规划
-    GimbalPlan plan = gimbal_planner_->plan(
-        *selection.vehicle,
-        gimbal_state_,
-        latency,
-        snapshot.self_state.bullet_speed
-    );
-    last_plan_ = plan;
-
-    if (!plan.valid) {
-        return no_target_command();
-    }
-
-    // 弹道解算 (用于开火判断)
-    AimResult aim = ::fire_control::trajectory::solve(
-        selection.predicted_pos,
-        snapshot.self_state.bullet_speed
-    );
-    last_aim_ = aim;
-
-    if (!aim.valid) {
-        return no_target_command();
-    }
-
-    // 开火判断 (使用规划后的位置)
-    // MPC 模式：使用规划结果作为瞄准角度
-    AimResult aim_for_fire = aim;
-    aim_for_fire.yaw = plan.yaw;
-    aim_for_fire.pitch = plan.pitch;
-
-    bool can_fire = fire_decision_.decide(
-        aim_for_fire,
-        selection.armor,
-        gimbal_state_,
-        selection.vehicle->confidence
-    );
-
-    return generate_command(selection, plan, aim, can_fire);
-}
-
-FireCommand FireController::process_pid(
-    const TargetSelection& selection,
-    const predictor::BattlefieldSnapshot& snapshot,
-    const LatencyInfo& latency
-)
-{
-    // 反陀螺瞄准
-    SpinAimResult spin_result = spin_aim_.compute(
-        *selection.vehicle,
+    // 4. 装甲板瞄准
+    ArmorAimResult armor_result = armor_aim_.compute(
+        vehicle,
         latency.now_to_hit()
     );
-    last_spin_aim_ = spin_result;
+    last_armor_aim_ = armor_result;
 
-    if (!spin_result.valid) {
+    if (!armor_result.valid) {
         return no_target_command();
     }
 
-    // 弹道解算
+    // 5. 弹道解算
     AimResult aim = ::fire_control::trajectory::solve(
-        spin_result.target_pos,
+        armor_result.target_pos,
         snapshot.self_state.bullet_speed
     );
     last_aim_ = aim;
@@ -189,46 +95,41 @@ FireCommand FireController::process_pid(
         return no_target_command();
     }
 
-    // 构造 GimbalPlan (PID 模式无速度/加速度前馈)
+    // 6. 构造 GimbalPlan
     GimbalPlan plan;
     plan.valid = true;
     plan.yaw = aim.yaw;
     plan.pitch = aim.pitch;
     last_plan_ = plan;
 
-    // 获取装甲板 (用于开火判断)
-    const predictor::ArmorState* armor = nullptr;
-    if (spin_result.armor_idx >= 0 && spin_result.armor_idx < selection.vehicle->armor_count) {
-        armor = &selection.vehicle->armors[spin_result.armor_idx];
-    }
-
-    // 开火判断
+    // 7. 开火判断 (使用 ArmorAimResult 中的装甲板信息)
     bool can_fire = fire_decision_.decide(
         aim,
-        armor,
+        armor_result,
         gimbal_state_,
-        selection.vehicle->confidence
+        vehicle.confidence
     );
 
     // INDIRECT 模式额外检查开火时机
-    if (can_fire && spin_result.mode == AimMode::INDIRECT) {
+    if (can_fire && armor_result.mode == AimMode::INDIRECT) {
         double fire_advance = runtime_param::get_param<double>(
             "AutoAim.FireControl.PID.fire_advance"
         );
         double now_to_hit = latency.now_to_hit();
-        if (spin_result.time_to_fire > now_to_hit + fire_advance) {
+        if (armor_result.time_to_fire > now_to_hit + fire_advance) {
             can_fire = false;
         }
     }
 
-    return generate_command(selection, plan, aim, can_fire);
+    return generate_command(selection, plan, aim, can_fire, vehicle.confidence);
 }
 
 FireCommand FireController::generate_command(
     const TargetSelection& selection,
     const GimbalPlan& plan,
     const AimResult& aim,
-    bool can_fire
+    bool can_fire,
+    double confidence
 )
 {
     FireCommand cmd;
@@ -252,9 +153,7 @@ FireCommand FireController::generate_command(
     cmd.tracking_error = static_cast<float>(
         fire_decision_.compute_tracking_error(aim, gimbal_state_)
     );
-    cmd.confidence = static_cast<float>(
-        selection.vehicle ? selection.vehicle->confidence : 0
-    );
+    cmd.confidence = static_cast<float>(confidence);
 
     return cmd;
 }

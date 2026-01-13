@@ -3,13 +3,13 @@
  * @brief 火控主类
  *
  * 职责:
- *   1. 目标选择 (共享 TargetSelector)
- *   2. 轨迹规划 (MPC 或 PID 模式)
- *   3. 弹道解算 (共享 TrajectorySolver)
- *   4. 开火判断 (共享 FireDecision)
+ *   1. 目标选择 (TargetSelector)
+ *   2. 装甲板瞄准 (ArmorAim)
+ *   3. 弹道解算 (TrajectorySolver)
+ *   4. 开火判断 (FireDecision)
  *
  * 数据流:
- *   BattlefieldSnapshot → 目标选择 → 规划 → 弹道解算 → 开火判断 → FireCommand
+ *   BattlefieldSnapshot → 目标选择 → 装甲板瞄准 → 弹道解算 → 开火判断 → FireCommand
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_FIRE_CONTROLLER_HPP__
@@ -21,30 +21,18 @@
 #include "fire_decision.hpp"
 #include "target_selector/target_selector.hpp"
 #include "aimer/common/trajectory/solver_factory.hpp"
-#include "mpc/gimbal_planner.hpp"
-#include "pid/spin_aim.hpp"
+#include "pid/armor_aim.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
 namespace autoaim::fire_control {
 
 /**
- * @brief 控制模式
- */
-enum class ControlMode {
-    MPC,    // MPC 轨迹规划模式 (输出 pos+vel+acc)
-    PID     // PID 跟踪模式 (仅输出 pos)
-};
-
-/**
  * @brief 火控主类
- *
- * 内部根据 use_mpc 参数选择 MPC 或 PID 模式
- * 共享组件只有一份实例，避免重复创建
  */
 class FireController {
 public:
-    FireController();
-    ~FireController();
+    FireController() = default;
+    ~FireController() = default;
 
     // 禁止拷贝
     FireController(const FireController&) = delete;
@@ -69,11 +57,6 @@ public:
      */
     void reset();
 
-    /**
-     * @brief 获取当前控制模式
-     */
-    ControlMode current_mode() const;
-
     // ==================== 调试接口 ====================
 
     const TargetSelection& last_selection() const { return last_selection_; }
@@ -82,45 +65,23 @@ public:
     const GimbalState& gimbal_state() const { return gimbal_state_; }
 
 private:
-    // ==================== MPC 模式处理 ====================
-
-    FireCommand process_mpc(
-        const TargetSelection& selection,
-        const predictor::BattlefieldSnapshot& snapshot,
-        const LatencyInfo& latency
-    );
-
-    // ==================== PID 模式处理 ====================
-
-    FireCommand process_pid(
-        const TargetSelection& selection,
-        const predictor::BattlefieldSnapshot& snapshot,
-        const LatencyInfo& latency
-    );
-
     // ==================== 辅助方法 ====================
 
     FireCommand generate_command(
         const TargetSelection& selection,
         const GimbalPlan& plan,
         const AimResult& aim,
-        bool can_fire
+        bool can_fire,
+        double confidence
     );
 
     FireCommand no_target_command();
 
-    // ==================== 共享组件 ====================
+    // ==================== 组件 ====================
 
     TargetSelector target_selector_;
     FireDecision fire_decision_;
-
-    // ==================== MPC 专用 ====================
-
-    std::unique_ptr<GimbalPlanner> gimbal_planner_;
-
-    // ==================== PID 专用 ====================
-
-    SpinAim spin_aim_;
+    ArmorAim armor_aim_;
 
     // ==================== 状态 ====================
 
@@ -132,7 +93,7 @@ private:
     TargetSelection last_selection_;
     AimResult last_aim_;
     GimbalPlan last_plan_;
-    SpinAimResult last_spin_aim_;
+    ArmorAimResult last_armor_aim_;
 
     int lost_count_ = 0;
     static constexpr int MAX_LOST_COUNT = 30;  // 300ms 后重置

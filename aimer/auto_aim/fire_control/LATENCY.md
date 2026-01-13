@@ -20,7 +20,7 @@ img → predict → send → control → fire → hit
 
 ### 1.1 fire_to_hit 的迭代计算
 
-`fire_to_hit = distance / bullet_speed`，但这里的 `distance` 应该用**弹道解算后的瞄准点距离**，而不是原始装甲板距离。
+`fire_to_hit` 由 **TrajectorySolver** 计算的 `fly_time` 提供，已包含空气阻力等因素。
 
 **问题**：弹道解算需要预测位置 → 预测位置需要 `prediction_latency()` → `prediction_latency()` 需要 `fire_to_hit` → 鸡生蛋
 
@@ -34,11 +34,11 @@ for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
     double dt = latency.prediction_latency();
     Eigen::Vector3d predicted_pos = target.predict_position(dt);
 
-    // 弹道解算
+    // 弹道解算 (含空气阻力)
     AimResult aim = trajectory_solver.solve(predicted_pos, bullet_speed);
 
-    // 用瞄准点距离更新 fire_to_hit
-    latency.update_fire_to_hit(aim.distance);
+    // 用弹道解算的飞行时间更新 fire_to_hit
+    latency.set_fly_time(aim.fly_time);
 }
 ```
 
@@ -211,11 +211,11 @@ struct LatencyInfo {
     double predict_to_send = 0;    // 预测→发送
     double send_to_control = 0;    // 发送→控制器响应
     double control_to_fire = 0;    // 控制器→出膛
-    double fire_to_hit = 0;        // 出膛→命中
-    double bullet_speed = 15.0;    // 弹速 (用于更新 fire_to_hit)
+    double fire_to_hit = 0;        // 出膛→命中 (TrajectorySolver fly_time)
+    double bullet_speed = 15.0;    // 弹速 (用于 latency_estimator 构建初始值)
 
-    // 更新 fire_to_hit (用弹道解算后的距离)
-    void update_fire_to_hit(double aim_distance);
+    // 设置 fire_to_hit (使用弹道解算器计算的飞行时间)
+    void set_fly_time(double fly_time);
 
     // 预测延迟 (不含 control_to_fire)
     double prediction_latency() const;
@@ -263,7 +263,7 @@ FireCommand FireController::control(...) {
     for (int i = 0; i < 2; ++i) {
         auto predicted_pos = target.predict(latency.prediction_latency());
         auto aim = trajectory_solver_.solve(predicted_pos, bullet_speed);
-        latency.update_fire_to_hit(aim.distance);
+        latency.set_fly_time(aim.fly_time);  // 使用弹道解算的飞行时间
     }
 
     // 后续处理用更新后的延迟

@@ -1,6 +1,6 @@
 /**
- * @file spin_aim.hpp
- * @brief 反陀螺瞄准逻辑 (参考 rm.cv.fans top_model)
+ * @file armor_aim.hpp
+ * @brief 装甲板瞄准逻辑 (统一处理陀螺/非陀螺)
  *
  * 两种瞄准模式:
  * - DIRECT: 装甲板可见 (|z_to_v| < max_angle)，直接跟踪
@@ -9,8 +9,8 @@
  * 适用于 PID 控制模式，不使用 MPC 的情况。
  */
 
-#ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_PID_SPIN_AIM_HPP__
-#define __AIMER_AUTO_AIM_FIRE_CONTROL_PID_SPIN_AIM_HPP__
+#ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__
+#define __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__
 
 #include <cmath>
 #include <vector>
@@ -30,9 +30,9 @@ enum class AimMode {
 };
 
 /**
- * @brief 反陀螺瞄准结果
+ * @brief 装甲板瞄准结果
  */
-struct SpinAimResult {
+struct ArmorAimResult {
     bool valid = false;
 
     AimMode mode = AimMode::DIRECT;
@@ -43,28 +43,32 @@ struct SpinAimResult {
 
     double z_to_v = 0;                  // 装甲板朝向角 (用于开火判断)
     double time_to_fire = 0;            // 到开火时机的时间 (s), INDIRECT 模式用
+
+    // 装甲板信息 (用于 FireDecision，避免传递 ArmorState* 指针)
+    double armor_width = 0;
+    double armor_height = 0;
 };
 
 /**
- * @brief 反陀螺瞄准器
+ * @brief 装甲板瞄准器
  *
  * 根据陀螺状态选择瞄准模式:
  * - 非陀螺: 直接跟踪推荐装甲板
  * - 陀螺 + 有可见板: DIRECT 模式
  * - 陀螺 + 无可见板: INDIRECT 模式 (预判)
  */
-class SpinAim {
+class ArmorAim {
 public:
-    SpinAim() = default;
+    ArmorAim() = default;
 
     /**
-     * @brief 计算反陀螺瞄准
+     * @brief 计算装甲板瞄准
      *
      * @param vehicle 目标车辆状态
      * @param predict_dt 预测时间 (弹道飞行时间)
      * @return 瞄准结果
      */
-    SpinAimResult compute(
+    ArmorAimResult compute(
         const predictor::VehicleState& vehicle,
         double predict_dt
     ) const;
@@ -73,7 +77,7 @@ private:
     /**
      * @brief 非陀螺瞄准 (直接跟踪推荐装甲板)
      */
-    SpinAimResult compute_non_spin(
+    ArmorAimResult compute_non_spin(
         const predictor::VehicleState& vehicle,
         double predict_dt
     ) const;
@@ -81,7 +85,7 @@ private:
     /**
      * @brief 陀螺瞄准 (DIRECT 或 INDIRECT)
      */
-    SpinAimResult compute_spin(
+    ArmorAimResult compute_spin(
         const predictor::VehicleState& vehicle,
         double predict_dt
     ) const;
@@ -101,7 +105,7 @@ private:
      *
      * 找到即将进入视野的装甲板，计算其"出现位置"
      */
-    SpinAimResult compute_indirect(
+    ArmorAimResult compute_indirect(
         const predictor::VehicleState& vehicle,
         double predict_dt
     ) const;
@@ -119,4 +123,4 @@ private:
 
 }  // namespace autoaim::fire_control
 
-#endif  // __AIMER_AUTO_AIM_FIRE_CONTROL_PID_SPIN_AIM_HPP__
+#endif  // __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__

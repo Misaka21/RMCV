@@ -1,29 +1,14 @@
 # 火控模块 CMakeLists.txt
 # AutoAim 专用火控
 
-# TinyMPC 库
-add_library(tinympc STATIC
-    mpc/tinympc/admm.cpp
-    mpc/tinympc/tiny_api.cpp
-)
-target_include_directories(tinympc PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/mpc
-)
-target_link_libraries(tinympc PUBLIC
-    Eigen3::Eigen
-)
-
 # AutoAim 火控库
 add_library(autoaim_fire_control STATIC
     # AutoAim 专用模块
     target_selector/target_selector.cpp
     fire_decision.cpp
 
-    # MPC 模式
-    mpc/gimbal_planner.cpp
-
     # PID 模式
-    pid/spin_aim.cpp
+    pid/armor_aim.cpp
 
     # 主类
     fire_controller.cpp
@@ -39,7 +24,6 @@ target_include_directories(autoaim_fire_control PUBLIC
 
 target_link_libraries(autoaim_fire_control PUBLIC
     aimer_common           # 弹道解算等通用功能
-    tinympc
     Eigen3::Eigen
     plugin
 )

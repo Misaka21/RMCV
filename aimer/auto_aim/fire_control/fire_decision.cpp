@@ -14,7 +14,7 @@ namespace autoaim::fire_control {
 
 bool FireDecision::decide(
     const AimResult& aim,
-    const predictor::ArmorState* armor,
+    const ArmorAimResult& armor_aim,
     const GimbalState& gimbal,
     double confidence
 ) const
@@ -36,12 +36,14 @@ bool FireDecision::decide(
     double hit_offset_yaw = distance * std::tan(std::abs(yaw_err));
     double hit_offset_pitch = distance * std::tan(std::abs(pitch_err));
 
-    // 4. 获取装甲板尺寸
-    double armor_width = armor ? armor->width() : SMALL_ARMOR_WIDTH;
-    double armor_height = armor ? armor->height() : SMALL_ARMOR_HEIGHT;
+    // 4. 获取装甲板尺寸 (从 ArmorAimResult)
+    double armor_width = (armor_aim.armor_width > 0)
+        ? armor_aim.armor_width : SMALL_ARMOR_WIDTH;
+    double armor_height = (armor_aim.armor_height > 0)
+        ? armor_aim.armor_height : SMALL_ARMOR_HEIGHT;
 
     // 5. 考虑装甲板朝向 (正对时有效区域最大)
-    double cos_inclined = armor ? std::abs(std::cos(armor->z_to_v)) : 1.0;
+    double cos_inclined = std::abs(std::cos(armor_aim.z_to_v));
 
     // 6. 开火判断: 落点偏移 < 装甲板有效区域
     double error_rate = runtime_param::get_param<double>(

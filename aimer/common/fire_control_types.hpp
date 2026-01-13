@@ -74,16 +74,19 @@ struct LatencyInfo {
     double predict_to_send = 0;    // 预测→发送 (卡尔曼滤波)
     double send_to_control = 0;    // 发送→控制器响应 (静态配置)
     double control_to_fire = 0;    // 控制器→出膛 (静态配置)
-    double fire_to_hit = 0;        // 出膛→命中 (distance/bullet_speed)
+    double fire_to_hit = 0;        // 出膛→命中 (TrajectorySolver fly_time)
 
-    // 缓存弹速，用于更新 fire_to_hit
+    // 缓存弹速 (用于 latency_estimator 构建初始值)
     double bullet_speed = 15.0;
 
     /**
-     * @brief 更新 fire_to_hit (用弹道解算后的距离)
+     * @brief 设置 fire_to_hit (使用弹道解算器计算的飞行时间)
+     *
+     * 注意: fly_time 由 TrajectorySolver 计算，已包含空气阻力等因素，
+     * 比简单的 distance/speed 更精确
      */
-    void update_fire_to_hit(double aim_distance) {
-        fire_to_hit = aim_distance / std::max(bullet_speed, 10.0);
+    void set_fly_time(double fly_time) {
+        fire_to_hit = fly_time;
     }
 
     /**
