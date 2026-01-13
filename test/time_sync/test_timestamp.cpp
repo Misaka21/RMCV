@@ -215,6 +215,165 @@ int main() {
     fmt::print("  最小: {} us\n", *std::min_element(call_durations.begin(), call_durations.end()));
     fmt::print("  最大: {} us\n", *std::max_element(call_durations.begin(), call_durations.end()));
 
+    // ========================================
+    // 5. 详细抖动分析
+    // ========================================
+    fmt::print(fmt::fg(fmt::color::cyan),
+        "\n==================================================\n"
+        "    详细抖动分析\n"
+        "==================================================\n\n"
+    );
+
+    // 5.1 分析 offset 是否随时间漂移 (判断是否同源)
+    fmt::print("5.1 时钟漂移分析:\n");
+    {
+        // 将数据分成 10 段，看每段的平均 offset 是否有趋势
+        int segment_size = samples.size() / 10;
+        std::vector<double> segment_means;
+        for (int seg = 0; seg < 10; ++seg) {
+            double sum = 0;
+            int start = seg * segment_size;
+            int end = (seg + 1) * segment_size;
+            for (int i = start; i < end; ++i) {
+                sum += offsets[i];
+            }
+            segment_means.push_back(sum / segment_size);
+        }
+
+        // 计算漂移 (最后一段 - 第一段)
+        double drift = segment_means.back() - segment_means.front();
+        double drift_rate = drift / (mean_steady_diff * samples.size() / 1e6);  // us/s
+
+        fmt::print("  各段平均 offset (us):\n    ");
+        for (int i = 0; i < 10; ++i) {
+            fmt::print("{:.1f} ", segment_means[i] - mean_offset);  // 相对于总平均
+        }
+        fmt::print("\n");
+        fmt::print("  总漂移: {:.1f} us (采集期间)\n", drift);
+        fmt::print("  漂移率: {:.2f} us/s = {:.1f} ppm\n", drift_rate, drift_rate);
+
+        if (std::abs(drift_rate) < 10) {
+            fmt::print(fmt::fg(fmt::color::green), "  → 漂移很小，时钟同源\n");
+        } else if (std::abs(drift_rate) < 100) {
+            fmt::print(fmt::fg(fmt::color::yellow), "  → 有轻微漂移，可能是晶振精度差异\n");
+        } else {
+            fmt::print(fmt::fg(fmt::color::red), "  → 漂移明显，可能不同源\n");
+        }
+    }
+
+    // 5.2 分析抖动来源：GetImageBuffer 延迟 vs offset 的相关性
+    fmt::print("\n5.2 抖动来源分析:\n");
+    {
+        // 计算 GetImageBuffer 延迟与 offset 的相关系数
+        std::vector<double> durations_f(call_durations.begin(), call_durations.end());
+
+        // 归一化
+        double mean_dur = mean_duration;
+        double mean_off = mean_offset;
+
+        double cov = 0, var_dur = 0, var_off = 0;
+        for (size_t i = 0; i < samples.size(); ++i) {
+            double d = durations_f[i] - mean_dur;
+            double o = offsets[i] - mean_off;
+            cov += d * o;
+            var_dur += d * d;
+            var_off += o * o;
+        }
+        double corr = cov / std::sqrt(var_dur * var_off);
+
+        fmt::print("  GetImageBuffer延迟 vs offset 相关系数: {:.3f}\n", corr);
+
+        if (std::abs(corr) > 0.7) {
+            fmt::print(fmt::fg(fmt::color::yellow),
+                "  → 强相关! 抖动主要来自 GetImageBuffer 调用时机不确定\n");
+            fmt::print("    建议: host_timestamp 应在 GetImageBuffer 返回时刻附近\n");
+        } else if (std::abs(corr) > 0.3) {
+            fmt::print(fmt::fg(fmt::color::yellow),
+                "  → 中等相关，GetImageBuffer 延迟贡献部分抖动\n");
+        } else {
+            fmt::print("  → 弱相关，抖动可能来自其他因素\n");
+        }
+
+        // 5.3 使用 steady_before 代替 steady_mid 计算 offset
+        fmt::print("\n5.3 不同参考点的 offset 标准差:\n");
+
+        // 用 before
+        std::vector<double> offsets_before;
+        for (const auto& s : samples) {
+            double host_us = s.host_timestamp / scale;
+            offsets_before.push_back(host_us - s.steady_before_us);
+        }
+        double mean_before = std::accumulate(offsets_before.begin(), offsets_before.end(), 0.0) / offsets_before.size();
+        double std_before = 0;
+        for (auto v : offsets_before) std_before += (v - mean_before) * (v - mean_before);
+        std_before = std::sqrt(std_before / offsets_before.size());
+
+        // 用 after
+        std::vector<double> offsets_after;
+        for (const auto& s : samples) {
+            double host_us = s.host_timestamp / scale;
+            offsets_after.push_back(host_us - s.steady_after_us);
+        }
+        double mean_after = std::accumulate(offsets_after.begin(), offsets_after.end(), 0.0) / offsets_after.size();
+        double std_after = 0;
+        for (auto v : offsets_after) std_after += (v - mean_after) * (v - mean_after);
+        std_after = std::sqrt(std_after / offsets_after.size());
+
+        fmt::print("  使用 steady_before 作参考: std = {:.1f} us\n", std_before);
+        fmt::print("  使用 steady_mid 作参考:    std = {:.1f} us\n", std_offset);
+        fmt::print("  使用 steady_after 作参考:  std = {:.1f} us\n", std_after);
+
+        // 找出最小的
+        double min_std = std::min({std_before, std_offset, std_after});
+        if (min_std == std_before) {
+            fmt::print(fmt::fg(fmt::color::green),
+                "  → host_timestamp 更接近 GetImageBuffer 调用前\n");
+        } else if (min_std == std_after) {
+            fmt::print(fmt::fg(fmt::color::green),
+                "  → host_timestamp 更接近 GetImageBuffer 返回后\n");
+        } else {
+            fmt::print(fmt::fg(fmt::color::green),
+                "  → host_timestamp 在 GetImageBuffer 调用中间\n");
+        }
+
+        // 5.4 帧间隔抖动分析
+        fmt::print("\n5.4 帧间隔抖动分析:\n");
+        double std_host_diff = 0;
+        for (auto v : host_diffs) std_host_diff += (v - mean_host_diff) * (v - mean_host_diff);
+        std_host_diff = std::sqrt(std_host_diff / host_diffs.size());
+
+        double std_steady_diff = 0;
+        for (auto v : steady_diffs) std_steady_diff += (v - mean_steady_diff) * (v - mean_steady_diff);
+        std_steady_diff = std::sqrt(std_steady_diff / steady_diffs.size());
+
+        // host_diff 转换为 us
+        double std_host_diff_us = std_host_diff / scale;
+
+        fmt::print("  host_timestamp 帧间隔标准差: {:.1f} (原始单位) = {:.1f} us\n",
+            std_host_diff, std_host_diff_us);
+        fmt::print("  steady_clock 帧间隔标准差:   {:.1f} us\n", std_steady_diff);
+
+        if (std_host_diff_us < std_steady_diff * 0.5) {
+            fmt::print(fmt::fg(fmt::color::green),
+                "  → host_timestamp 帧间隔更稳定，说明是硬件触发时间戳\n");
+        } else if (std_host_diff_us > std_steady_diff * 2) {
+            fmt::print(fmt::fg(fmt::color::red),
+                "  → host_timestamp 帧间隔抖动更大，可能不是精确时间戳\n");
+        } else {
+            fmt::print("  → 两者帧间隔抖动相近\n");
+        }
+    }
+
+    // 5.5 结论
+    fmt::print(fmt::fg(fmt::color::cyan),
+        "\n==================================================\n"
+        "    结论\n"
+        "==================================================\n\n"
+    );
+    fmt::print("GetImageBuffer 调用延迟抖动: {:.1f} us\n", std_duration);
+    fmt::print("offset 总抖动:              {:.1f} us\n", std_offset);
+    double unexplained = std::sqrt(std::max(0.0, std_offset * std_offset - std_duration * std_duration / 4));
+    fmt::print("除延迟外的残余抖动:         {:.1f} us (估算)\n", unexplained);
     fmt::print("\n");
 
     // 记录分析结果到日志
