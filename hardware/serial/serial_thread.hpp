@@ -22,6 +22,31 @@ namespace serial {
 // 数据结构
 // ============================================================================
 
+// TODO: RTT测量功能 (最简+序号方案)
+// ============================================================================
+// 目的: 实测串口延迟，替代火控里硬编码的 send_to_control = 0.003
+//
+// 协议改动:
+//   1. 扩大包: FixedPacket<16> → FixedPacket<24> 或 32
+//   2. 上行包增加: seq(2B) + timestamp_ms(4B)
+//   3. 下行包增加: echo_seq(2B) + echo_tick_ms(4B)
+//
+// 原理:
+//   上位机 --[seq, T1]--> MCU --[echo_seq, echo_T1]--> 上位机
+//   RTT = recv_time - echo_T1
+//   send_to_control = RTT / 2
+//
+// 电控配合:
+//   - 收到上行包时保存 seq 和 timestamp_ms
+//   - 下行包里原样回传 echo_seq 和 echo_tick_ms
+//
+// 实现步骤:
+//   1. VisionData_t 加 uint16_t seq, uint32_t timestamp_ms
+//   2. SerialReceiveData 加 uint16_t echo_seq, uint32_t echo_tick_ms
+//   3. 新建 RttStats 类统计 RTT 均值/标准差/丢包率
+//   4. LatencyEstimator::build() 用实测 RTT/2 替代 get_param("send_to_control")
+// ============================================================================
+
 // 视觉数据结构体（示例，可根据实际需求修改）
 struct VisionData_t {
     uint8_t  cmd_id;      // 数据类型，例如 0x01 = 自瞄数据
