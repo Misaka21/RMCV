@@ -49,9 +49,6 @@ public:
      */
     BattlefieldSnapshot predict(const DetectionResult& detection, double timestamp);
 
-    // 调试用
-    const ArmorObservationTable& get_observation_table() const { return observer_.table(); }
-
     /**
      * @brief 绘制所有模型的调试信息
      * @param img 输出图像
