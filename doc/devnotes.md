@@ -1,73 +1,28 @@
-
-
-
 # 1.12
+1. 发现 fire_control 反向依赖 hardware/serial 层，原因是 AimMode 枚举定义在 serial 层。依赖方向应该是 hardware → aimer，不能反过来。重构后 serial 层只保留 uint8_t aim_mode 原始字节，业务枚举 AimMode 定义在 aimer/common/，转换边界在 RobotState::from_sync_frame()。这样 fire_control 完全不知道 serial 层的存在。
+2. 串口超时导致 FPS 异常低的问题。之前 recv_len == 0（超时无数据）会触发断线重连，实际上这是正常情况，只有 recv_len < 0（读取错误）才需要重连。修复后 SerialReceiver FPS 从 71 恢复到 500+。另外 UART 配置 VMIN=1 会导致无数据时 read() 永久阻塞，改为 VMIN=0 后 0.1s 超时返回。
+3. 看门狗之前只能检测线程是否存活，无法区分"线程在跑但没有数据"。现在分离为 heartbeat() 和 heartbeat_data() 两种心跳，hardware 节点在串口有数据时才发 data 心跳。状态显示也改为 [OK 2ms] 形式，直观显示距上次心跳的时间。
+4. fire_control 模块独立。通用逻辑（弹道解算、目标接口）提取到 aimer/fire_control/，auto_aim 专用逻辑（反陀螺、目标选择）留在 auto_aim/fire_control/。autoaim 用 VehicleTargetAdapter 适配，后续 autobuff 用 BladeTargetAdapter 适配。这样弹道解算代码完全不知道具体目标类型。
+5. 命名空间加了 aimer:: 前缀（filter、math、tf、ballistic），避免与外部库冲突。之前 filter:: 和 Eigen 的 filter 模块冲突过。
+6. 标定工具新增 ±90° 大范围搜索，125 个起点粗搜后迭代细化。适用于相机安装角度偏差较大的情况。
+7. hardware 层应该只关心字节流，业务含义由上层定义。类似地，fire_control 应该只关心"目标在哪、速度多少"，不关心目标是装甲板还是扇叶。依赖方向错了会导致模块无法复用，改起来也很痛苦。
+# 1.11
+1. 完成 fire_control 模块独立重构，目的是让弹道解算、类型定义等通用代码可被 autoaim 和未来的 autobuff 共用。原先火控与 predictor 类型（VehicleState、ArmorState）紧耦合，导致能量机关无法复用弹道解算代码。
+2. 采用适配器模式解耦：新建 TargetInterface 抽象接口，定义目标的通用属性（position、velocity、is_rotating 等）。autoaim 通过 VehicleTargetAdapter 将 VehicleState 适配为 TargetInterface。未来 autobuff 只需实现 BladeTargetAdapter 即可复用全部火控逻辑。
+3. 目录结构调整：
+3.1. 新建 aimer/fire_control/ 通用模块，包含 interface/（抽象接口）、core/types.hpp（通用类型）、core/trajectory/（弹道解算）
+3.2. aimer/auto_aim/fire_control/ 保留 autoaim 专用逻辑（MPC、PID反陀螺、目标选择），其 types.hpp 改为重新导出通用类型 + autoaim 专用的 TargetSelection
+3.3. trajectory/*.hpp 改为兼容层，重新导出 fire_control 版本
+4. CMake 依赖链：fire_control_interface（header-only）→ fire_control_core（弹道解算，需 Ceres）→ autoaim_fire_control。旧的 fire_control target 保留为 alias 以兼容现有代码。
+5. TargetInterface 扩展了多子目标支持：sub_target_count()、predict_sub_target_position(int idx, double dt)、predict_center(double dt)。这些方法原本是为 MPC 规划器设计的，但 MPC 模块暂未迁移，接口已预留。
 
-## fire_control 模块独立重构
-
-完成了火控模块的架构重构，目标是让火控代码可以被 autoaim（自瞄）和未来的 autobuff（能量机关）共用。
-
-### 新架构
-
-```
-aimer/
-├── fire_control/                      # 通用火控模块 (NEW)
-│   ├── interface/
-│   │   ├── target_interface.hpp       # 目标抽象接口
-│   │   └── target_snapshot.hpp        # 快照抽象接口
-│   ├── core/
-│   │   ├── types.hpp                  # 通用类型
-│   │   └── trajectory/                # 弹道解算
-│   │       ├── trajectory_solver.hpp/cpp   # Ceres 解析解
-│   │       ├── rk4_trajectory_solver.hpp/cpp  # RK4 数值解
-│   │       └── solver_factory.hpp
-│   └── CMakeLists.txt
-│
-└── auto_aim/fire_control/             # AutoAim 专用
-    ├── types.hpp                      # 重新导出 + TargetSelection
-    ├── trajectory/*.hpp               # 重新导出 (兼容层)
-    ├── autoaim_target_adapter.hpp     # VehicleState → TargetInterface
-    ├── mpc/, pid/, target_selector/   # AutoAim 专用逻辑
-    └── CMakeLists.txt
-```
-
-### 核心设计: 适配器模式
-
-```cpp
-// TargetInterface - 目标抽象接口
-class TargetInterface {
-    virtual bool is_valid() const = 0;
-    virtual Eigen::Vector3d position() const = 0;
-    virtual Eigen::Vector3d velocity() const = 0;
-    virtual bool is_rotating() const { return false; }
-    virtual int sub_target_count() const { return 1; }
-    virtual Eigen::Vector3d predict_sub_target_position(int idx, double dt) const;
-    // ...
-};
-
-// VehicleTargetAdapter - 将 VehicleState 适配为 TargetInterface
-class VehicleTargetAdapter : public TargetInterface {
-    const predictor::VehicleState* vehicle_;
-    // 实现所有接口方法...
-};
-```
-
-### CMake 依赖
-
-- `fire_control_interface`: header-only 接口库
-- `fire_control_core`: 弹道解算 (需要 Ceres)
-- `autoaim_fire_control`: 依赖 fire_control_core
-
-### 后续扩展
-
-未来 autobuff 只需要:
-```cpp
-class BladeTargetAdapter : public fire_control::TargetInterface {
-    // 实现扇叶 → TargetInterface 的适配
-};
-```
 
 # 1.10
+1. 串口协议重构，支持配置文件选择协议。借鉴 librmcs 改进 UsbBulkProtocol，新增设备枚举、断线检测等功能。同时隔离依赖，协议工厂上层应用不应该依赖下层实现。在 hardware.toml 新增 Serial.protocol 配置项，可选 "uart" 或 "usb_bulk"，SerialManager 根据配置自动选择协议。同时修复了收发线程共享 _disconnected 标志的竞态问题，改用 std::atomic<bool>。
+2. 看门狗脚本增强。添加资源监控功能，每 x 秒记录 RMCV 进程和系统的 CPU、内存、虚拟内存、温度到 resources.csv，用于赛后分析内存泄漏和性能瓶颈。添加崩溃时自动保存 core dump 功能，重启时搜索 build/、/tmp、/var/lib/systemd/coredump 等目录，将 core 文件移动到会话目录保存。
+3. 录制节点修复。修复比赛模式（--match）未强制录制 raw/imu 的 bug，原因是 match_mode 检查逻辑放在了 writer 创建之后。优化 match_mode 查找逻辑，从循环内每帧查找改为循环外获取指针、循环内只读值。移除 debug video 录制功能，只保留 raw.mkv + imu.csv，简化录制流程。
+4. 代码审查工具切换。移除 CodeRabbit 配置，改用 GitHub Copilot Code Review。
+
 通过 TTL 发送出来的串口，除了稳态误差，随机误差很大。原因是数据在 Linux 的 tty 层会经过缓冲，不会立即发送/接收，而是等缓冲区满或超时（通常 1-10ms）才触发系统调用。加上 USB 转 TTL 芯片（CH340/CP2102 等）本身有 USB 轮询间隔（1ms），以及 Linux 非实时调度的抖动，导致收发时刻的随机误差可达数毫秒级别。
 准备改用USB Bulk 协议绕过 tty 层，降低抖动
 
