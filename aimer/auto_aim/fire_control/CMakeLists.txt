@@ -3,17 +3,15 @@
 
 # AutoAim 火控库
 add_library(autoaim_fire_control STATIC
-    # AutoAim 专用模块
-    target_selector/target_selector.cpp
-    fire_decision.cpp
+    # 目标选择层
+    selection/target_selector.cpp
+    selection/armor_aim.cpp
 
-    # PID 模式
-    pid/armor_aim.cpp
+    # 决策层
+    decision/fire_decision.cpp
 
-    # 主类
+    # 主控制器
     fire_controller.cpp
-
-    # 节点入口
     fire_control_node.cpp
 )
 

@@ -8,8 +8,8 @@
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_FIRE_DECISION_HPP__
 #define __AIMER_AUTO_AIM_FIRE_CONTROL_FIRE_DECISION_HPP__
 
-#include "types.hpp"
-#include "pid/armor_aim.hpp"
+#include "aimer/auto_aim/fire_control/types.hpp"
+#include "aimer/auto_aim/fire_control/selection/armor_aim.hpp"
 
 namespace autoaim::fire_control {
 
