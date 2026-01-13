@@ -214,9 +214,10 @@ void start_hardware_node() {
         // Time sync config
         int64_t delta_t_us = static_param::get_param<int64_t>(config, "TimeSync", "delta_t_us");
 
-        // IMU pitch/roll取反配置
+        // IMU pitch/roll/yaw取反配置
         bool imu_pitch_negate = static_param::get_param<bool>(config, "Serial", "imu_pitch_negate");
         bool imu_roll_negate = static_param::get_param<bool>(config, "Serial", "imu_roll_negate");
+        bool imu_yaw_negate = static_param::get_param<bool>(config, "Serial", "imu_yaw_negate");
 
         // Fake serial config
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
@@ -321,8 +322,11 @@ void start_hardware_node() {
                     }
                 }
 
-                // 应用IMU pitch/roll取反
+                // 应用IMU pitch/roll/yaw取反
                 if (frame.serial_valid) {
+                    if (imu_yaw_negate) {
+                        frame.serial_data.yaw = -frame.serial_data.yaw;
+                    }
                     if (imu_pitch_negate) {
                         frame.serial_data.pitch = -frame.serial_data.pitch;
                     }
