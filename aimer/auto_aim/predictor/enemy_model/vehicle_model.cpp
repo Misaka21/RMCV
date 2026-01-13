@@ -600,9 +600,16 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
 
                 // 标注 target_id 和 z_to_v
                 // z_to_v: 装甲板相对相机的夹角 (三分法优化后)
-                cv::putText(img, std::to_string(target_id_),
+                // 模式标注: SPIN(L/S) 或 NORMAL
+                std::string mode_str;
+                if (spin_active) {
+                    mode_str = use_lmtd ? "SPIN(L)" : "SPIN(S)";
+                } else {
+                    mode_str = "NORMAL";
+                }
+                cv::putText(img, fmt::format("T{} {}", target_id_, mode_str),
                             obs.center_2d + cv::Point2f(10, -10),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_DETECTED, 2);
+                            cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_DETECTED, 2);
 
                 // 显示 z_to_v (优化后的朝向角)
                 // 如果是双装甲板，显示会标记 "D" (double)
