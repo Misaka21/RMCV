@@ -180,7 +180,7 @@ target_link_libraries(test_timestamp ${OpenCV_LIBS} fmt::fmt plugin hardware)
 
 # 火控可视化测试 (默认使用实车硬件，可选模拟器)
 add_executable(test_fire_control test/test_fire_control.cpp)
-target_link_libraries(test_fire_control ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor fire_control)
+target_link_libraries(test_fire_control ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor fire_control_node)
 if(SIMULATOR_FOUND)
     target_compile_definitions(test_fire_control PRIVATE SIMULATOR_FOUND)
     target_link_libraries(test_fire_control simulator)

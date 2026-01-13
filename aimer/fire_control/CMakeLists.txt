@@ -40,6 +40,6 @@ target_include_directories(fire_control_node PUBLIC
 )
 target_link_libraries(fire_control_node PUBLIC
     fire_control_interface
-    autoaim_fire_control  # 自瞄控制器
+    autoaim_target_decision  # 自瞄目标决策器
     plugin
 )
