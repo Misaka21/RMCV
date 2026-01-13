@@ -494,6 +494,60 @@ void draw_armor_rect(cv::Mat& img, const Eigen::Vector3d& center, double yaw,
     }
 }
 
+// 根据 z_to_v (三分法优化后的朝向角) 绘制装甲板框
+// z_to_v: 相对于相机视线的角度 (0=正对, 正值=顺时针偏转)
+void draw_armor_by_z_to_v(cv::Mat& img, const Eigen::Vector3d& pos_world,
+                          double z_to_v, ArmorType type,
+                          const Eigen::Quaterniond& q_imu,
+                          const cv::Scalar& color, int thickness = 2) {
+    double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
+    double h = 0.055;
+    constexpr double pitch = -15.0 * M_PI / 180.0;
+
+    // 相机 Z 轴在世界 XY 平面的投影 (归一化)
+    Eigen::Vector3d camera_z_world = aimer::tf::vector<aimer::tf::Frame::Camera, aimer::tf::Frame::World>(
+        Eigen::Vector3d(0, 0, 1), q_imu);
+    Eigen::Vector2d camera_z_2d(camera_z_world.x(), camera_z_world.y());
+    double norm = camera_z_2d.norm();
+    if (norm > 1e-6) camera_z_2d /= norm;
+    else camera_z_2d = Eigen::Vector2d(1.0, 0.0);
+
+    // 装甲板法向量 = 相机前向旋转 z_to_v
+    Eigen::Vector2d normal_2d = aimer::math::rotate(camera_z_2d, z_to_v);
+
+    // 装甲板 X 轴 (水平，垂直于法向量)
+    Eigen::Vector2d x_2d = aimer::math::rotate(normal_2d, M_PI / 2);
+    Eigen::Vector3d x_axis(x_2d.x(), x_2d.y(), 0.0);
+
+    // 装甲板 Y 轴 (竖直，考虑俯仰角)
+    Eigen::Vector3d y_axis(
+        -normal_2d.x() * std::sin(pitch),
+        -normal_2d.y() * std::sin(pitch),
+        std::cos(pitch));
+
+    // 四角点
+    std::array<Eigen::Vector3d, 4> corners = {
+        pos_world + x_axis * (w / 2) + y_axis * (h / 2),
+        pos_world + x_axis * (w / 2) - y_axis * (h / 2),
+        pos_world - x_axis * (w / 2) - y_axis * (h / 2),
+        pos_world - x_axis * (w / 2) + y_axis * (h / 2)
+    };
+
+    // 投影并绘制
+    std::array<cv::Point2f, 4> pts;
+    bool all_valid = true;
+    for (int i = 0; i < 4; ++i) {
+        bool valid = false;
+        pts[i] = aimer::tf::world_to_pixel(corners[i], q_imu, valid);
+        if (!valid) all_valid = false;
+    }
+    if (!all_valid) return;
+
+    for (int i = 0; i < 4; ++i) {
+        cv::line(img, pts[i], pts[(i + 1) % 4], color, thickness);
+    }
+}
+
 }  // namespace
 
 void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
@@ -530,15 +584,19 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 1. 绘制检测到的装甲板 (X 形状: 对角线连接)
+    // 1. 绘制检测到的装甲板 (X 形状: 对角线连接) + z_to_v 重投影框
     // 只有数据新鲜时才绘制，避免绘制过时的观测
+    const cv::Scalar COLOR_Z_TO_V(0, 255, 255);  // 黄色: z_to_v 重投影
     if (data_fresh) {
         for (size_t idx = 0; idx < prev_armors_.size(); ++idx) {
             const auto& obs = prev_armors_[idx];
             if (obs.pts.size() >= 4) {
-                // X 形状: 连接对角线
+                // X 形状: 连接对角线 (原始检测)
                 cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左上-右下
                 cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左下-右上
+
+                // 三分法优化后的 z_to_v 重投影装甲板框 (黄色)
+                draw_armor_by_z_to_v(img, obs.pos, obs.z_to_v, obs.type, q_imu, COLOR_Z_TO_V, 2);
 
                 // 标注 target_id 和 z_to_v
                 // z_to_v: 装甲板相对相机的夹角 (三分法优化后)
