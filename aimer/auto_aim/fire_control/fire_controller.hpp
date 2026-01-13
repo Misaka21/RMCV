@@ -20,7 +20,7 @@
 #include "types.hpp"
 #include "fire_decision.hpp"
 #include "target_selector/target_selector.hpp"
-#include "aimer/fire_control/core/trajectory/solver_factory.hpp"
+#include "aimer/common/trajectory/solver_factory.hpp"
 #include "mpc/gimbal_planner.hpp"
 #include "pid/spin_aim.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"

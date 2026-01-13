@@ -10,7 +10,7 @@
 #include <tuple>
 
 #include "tinympc/tiny_api.hpp"
-#include "aimer/fire_control/core/trajectory/solver_factory.hpp"
+#include "aimer/common/trajectory/solver_factory.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {

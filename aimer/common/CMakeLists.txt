@@ -5,6 +5,8 @@ find_package(Ceres REQUIRED)
 
 add_library(aimer_common STATIC
     transformer/transformer.cpp
+    trajectory/trajectory_solver.cpp
+    trajectory/rk4_trajectory_solver.cpp
     # 头文件 (便于IDE识别)
     math/math.hpp
     filter/adaptive_ekf.hpp

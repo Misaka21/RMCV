@@ -1,8 +1,5 @@
 # 火控模块 CMakeLists.txt
-# AutoAim 专用火控，依赖 fire_control 通用模块
-
-# Ceres 依赖 (通过 fire_control_core)
-find_package(Ceres REQUIRED)
+# AutoAim 专用火控
 
 # TinyMPC 库
 add_library(tinympc STATIC
@@ -41,8 +38,7 @@ target_include_directories(autoaim_fire_control PUBLIC
 )
 
 target_link_libraries(autoaim_fire_control PUBLIC
-    fire_control_core      # 通用火控 (弹道解算)
-    fire_control_interface # 接口定义
+    aimer_common           # 弹道解算等通用功能
     tinympc
     Eigen3::Eigen
     plugin

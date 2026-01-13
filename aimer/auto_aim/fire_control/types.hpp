@@ -4,7 +4,7 @@
  *
  * 此文件重新导出 fire_control 通用类型，并添加 autoaim 专用类型
  *
- * 通用类型来自: aimer/fire_control/core/types.hpp
+ * 通用类型来自: aimer/common/fire_control_types.hpp
  *   - GimbalState, LatencyInfo, AimResult, GimbalPlan, FireCommand
  *
  * AutoAim 专用类型:
@@ -15,7 +15,7 @@
 #define __AIMER_AUTO_AIM_FIRE_CONTROL_TYPES_HPP__
 
 // 导入通用类型
-#include "aimer/fire_control/core/types.hpp"
+#include "aimer/common/fire_control_types.hpp"
 
 // AutoAim 专用依赖
 #include "aimer/auto_aim/predictor/types.hpp"

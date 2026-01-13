@@ -12,7 +12,7 @@
 #include "fire_controller.hpp"
 #include "common/latency_estimator.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
-#include "aimer/fire_control/core/types.hpp"
+#include "aimer/common/fire_control_types.hpp"
 #include "umt/BasicObjManager.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"

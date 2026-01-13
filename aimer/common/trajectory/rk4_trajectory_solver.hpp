@@ -20,7 +20,7 @@
 
 #include <Eigen/Core>
 
-#include "aimer/fire_control/core/types.hpp"
+#include "aimer/common/fire_control_types.hpp"
 #include "trajectory_solver.hpp"
 
 namespace fire_control {
