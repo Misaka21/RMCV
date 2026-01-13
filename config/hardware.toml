@@ -20,9 +20,9 @@
     #@float 增益
     Gain = 16.9
     #@bool 水平翻转
-    ReverseX = false
+    ReverseX = true
     #@bool 垂直翻转
-    ReverseY = false
+    ReverseY = true
     #@int 图像宽度
     Width = 1440
     #@string ADC位深
@@ -43,10 +43,15 @@
     ignore_crc = false
     #@bool 不接串口时使用虚拟数据
     use_fake_serial_data = false
+
+    #@bool IMU符号修正: 如果云台左转时yaw变小，需要设为true
+    imu_yaw_negate = false
     #@bool IMU符号修正: 如果云台抬头时pitch变小，需要设为true
-    imu_pitch_negate = false
+    imu_pitch_negate = true
+
     #@bool IMU符号修正: 如果云台右倾时roll变小，需要设为true
-    imu_roll_negate = true
+    imu_roll_negate = false
+
 
 # UART 协议配置 (protocol = "uart" 时使用)
 [Serial.uart]
