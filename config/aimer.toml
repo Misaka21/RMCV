@@ -10,9 +10,9 @@
     #camera_offset_y = 0.0
     #@double 相机在云台上方距离
     #camera_offset_z = 0.0
-    camera_offset_x = 0.0116
-    camera_offset_y = -0.0029
-    camera_offset_z = 0.0547
+    camera_offset_x = -0.1000
+    camera_offset_y = 0.0161
+    camera_offset_z = 0.0897
 
     # Barrel → Gimbal 平移 (米, 在Gimbal坐标系下)
     #@double 枪口在云台前方距离
@@ -26,9 +26,9 @@
 [AutoAim.Predictor]
     # 可视化
     #@bool 是否显示预测可视化窗口
-    show_window = false
+    show_window = true
 
-    use_lmtd = false
+    use_lmtd = true
 
     #@bool 是否使用双装甲板联合三分法优化 (fit_double_z_to_l)
     # true: 利用 90° 几何约束联合优化两块装甲板朝向角
