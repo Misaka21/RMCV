@@ -1,5 +1,5 @@
 # fire_control 独立模块
-# 提供与具体目标类型无关的火控功能
+# 只提供弹道解算等通用功能
 
 find_package(Ceres QUIET)
 
@@ -30,16 +30,3 @@ if(Ceres_FOUND)
 else()
     message(STATUS "fire_control_core skipped (Ceres not found)")
 endif()
-
-# 火控节点 (统一入口)
-add_library(fire_control_node
-    fire_controller_node.cpp
-)
-target_include_directories(fire_control_node PUBLIC
-    ${CMAKE_SOURCE_DIR}
-)
-target_link_libraries(fire_control_node PUBLIC
-    fire_control_interface
-    autoaim_fire_control  # 自瞄控制器
-    plugin
-)

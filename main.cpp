@@ -16,7 +16,7 @@
 #include "aimer/auto_aim/detector/detector_node.hpp"
 #include "aimer/auto_aim/predictor/predictor_node.hpp"
 #include "aimer/common/transformer/transformer.hpp"
-#include "aimer/fire_control/fire_controller_node.hpp"
+#include "aimer/auto_aim/fire_control/fire_control_node.hpp"
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
@@ -148,7 +148,7 @@ int main(int argc, char* argv[]) {
 
     // 启动火控节点线程
     std::thread fire_control_thread([]() {
-        fire_control::start_fire_control("aimer.toml");
+        autoaim::fire_control::start_fire_control_node("aimer.toml");
     });
 
     // 启动录制节点线程

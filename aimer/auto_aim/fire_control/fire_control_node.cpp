@@ -1,23 +1,23 @@
 /**
- * @file fire_controller_node.cpp
- * @brief 统一火控节点实现
+ * @file fire_control_node.cpp
+ * @brief 自瞄火控节点实现
  */
 
-#include "fire_controller_node.hpp"
+#include "fire_control_node.hpp"
 
 #include <chrono>
 #include <thread>
 
 #include "aimer/common/robot_state.hpp"
-#include "aimer/auto_aim/fire_control/fire_controller.hpp"
-#include "aimer/auto_aim/fire_control/common/latency_estimator.hpp"
+#include "fire_controller.hpp"
+#include "common/latency_estimator.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/fire_control/core/types.hpp"
 #include "umt/BasicObjManager.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
 
-namespace fire_control {
+namespace autoaim::fire_control {
 
 namespace {
 
@@ -31,31 +31,31 @@ double get_current_time() {
 }  // namespace
 
 void fire_control_run(const std::string& /* config_path */) {
-    debug::print(debug::PrintMode::INFO, "FireControlNode", "Starting fire control node...");
+    debug::print(debug::PrintMode::INFO, "AutoAimFireControl", "Starting...");
 
     // 数据源
-    auto battlefield = umt::BasicObjManager<autoaim::predictor::BattlefieldSnapshot>::find_or_create("battlefield");
+    auto battlefield = umt::BasicObjManager<predictor::BattlefieldSnapshot>::find_or_create("battlefield");
     auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
     auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
-    // 自瞄控制器 (使用完全限定名称避免命名空间冲突)
-    autoaim::fire_control::FireController autoaim_controller;
+    // 自瞄控制器
+    FireController controller;
 
     // 延迟估计器
-    autoaim::fire_control::LatencyEstimator latency_estimator;
+    LatencyEstimator latency_estimator;
 
     // 模式跟踪
     aimer::AimMode last_mode = aimer::AimMode::DISABLED;
     int last_frame_id = -1;
 
-    debug::print(debug::PrintMode::INFO, "FireControlNode", "Fire control node started, running at 100Hz");
+    debug::print(debug::PrintMode::INFO, "AutoAimFireControl", "Running at 100Hz");
 
     // 主循环 (100Hz)
     const auto period = std::chrono::microseconds(10000);  // 10ms
     auto next_time = std::chrono::steady_clock::now();
 
     while (app_running->get()) {
-        watchdog::heartbeat("fire_control");
+        watchdog::heartbeat("autoaim_fire_control");
 
         // 获取战场快照
         const auto& snapshot = battlefield->get();
@@ -73,48 +73,37 @@ void fire_control_run(const std::string& /* config_path */) {
 
         // 模式切换检测
         if (mode != last_mode) {
-            debug::print(debug::PrintMode::INFO, "FireControlNode",
+            debug::print(debug::PrintMode::INFO, "AutoAimFireControl",
                 "Mode switch: {} -> {}",
                 aimer::aim_mode_name(last_mode),
                 aimer::aim_mode_name(mode));
 
             // 重置控制器状态
             if (mode == aimer::AimMode::AUTOAIM) {
-                autoaim_controller.reset();
+                controller.reset();
             }
             last_mode = mode;
         }
 
         // 构建延迟信息
-        autoaim::fire_control::LatencyInfo latency = latency_estimator.build(snapshot, current_time);
+        LatencyInfo latency = latency_estimator.build(snapshot, current_time);
 
         // 根据模式处理
         ::fire_control::FireCommand cmd{};
 
         switch (mode) {
-        case aimer::AimMode::AUTOAIM: {
-            // 自瞄模式
-            cmd = autoaim_controller.control(snapshot, current_time, latency);
+        case aimer::AimMode::AUTOAIM:
+            cmd = controller.control(snapshot, current_time, latency);
             break;
-        }
 
         case aimer::AimMode::ENERGY_SMALL:
-        case aimer::AimMode::ENERGY_LARGE: {
-            // 能量机关模式 - 待实现
-            // TODO: 实现能量机关控制器
-            static bool warned = false;
-            if (!warned) {
-                debug::print(debug::PrintMode::WARNING, "FireControlNode",
-                    "Energy mode not implemented yet");
-                warned = true;
-            }
+        case aimer::AimMode::ENERGY_LARGE:
+            // 能量机关模式 - 由 autobuff 模块处理
             cmd.control_enabled = false;
             break;
-        }
 
         case aimer::AimMode::DISABLED:
         default:
-            // 关闭模式
             cmd.control_enabled = false;
             break;
         }
@@ -127,13 +116,13 @@ void fire_control_run(const std::string& /* config_path */) {
         std::this_thread::sleep_until(next_time);
     }
 
-    debug::print(debug::PrintMode::INFO, "FireControlNode", "Fire control node stopped");
+    debug::print(debug::PrintMode::INFO, "AutoAimFireControl", "Stopped");
 }
 
-void start_fire_control(const std::string& config_path) {
+void start_fire_control_node(const std::string& config_path) {
     std::thread([config_path]() {
         fire_control_run(config_path);
     }).detach();
 }
 
-}  // namespace fire_control
+}  // namespace autoaim::fire_control

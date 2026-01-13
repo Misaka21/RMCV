@@ -116,11 +116,11 @@ if(ENABLE_WEBVIEW)
     target_link_libraries(RMCV2026
         ${OpenCV_LIBS} fmt::fmt
         -Wl,--whole-archive plugin -Wl,--no-whole-archive
-        hardware detector predictor fire_control_node rmcv_bag
+        hardware detector predictor autoaim_fire_control rmcv_bag
         ${Python_LIBRARIES}
     )
 else()
-    target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor fire_control_node rmcv_bag)
+    target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control rmcv_bag)
 endif()
 
 add_executable(test_param test/test_param.cpp)
@@ -180,7 +180,7 @@ target_link_libraries(test_timestamp ${OpenCV_LIBS} fmt::fmt plugin hardware)
 
 # 火控可视化测试 (默认使用实车硬件，可选模拟器)
 add_executable(test_fire_control test/test_fire_control.cpp)
-target_link_libraries(test_fire_control ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor fire_control_node)
+target_link_libraries(test_fire_control ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control)
 if(SIMULATOR_FOUND)
     target_compile_definitions(test_fire_control PRIVATE SIMULATOR_FOUND)
     target_link_libraries(test_fire_control simulator)
