@@ -121,6 +121,14 @@ inline double get_theta(const Eigen::Vector2d& v) noexcept {
     return std::atan2(v.y(), v.x());
 }
 
+// 四元数 → (yaw, pitch)
+inline std::pair<double, double> quat_to_yaw_pitch(const Eigen::Quaterniond& q) noexcept {
+    double yaw = std::atan2(2*(q.w()*q.z() + q.x()*q.y()),
+                           1 - 2*(q.y()*q.y() + q.z()*q.z()));
+    double pitch = std::asin(2*(q.w()*q.y() - q.z()*q.x()));
+    return {yaw, pitch};
+}
+
 // ============================================================================
 // 4. 坐标转换 (xyz ↔ ypd)
 // ============================================================================

@@ -14,6 +14,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "aimer/common/types.hpp"
+#include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "enemy_predictor.hpp"
 #include "plugin/debug/logger.hpp"
@@ -21,6 +22,7 @@
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
 #include "plugin/webview/dashboard.hpp"
+#include "plugin/plotter/plotter.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim::predictor {
@@ -75,6 +77,13 @@ void start_predictor_node() {
 
             // 发布结果
             pub.push(snapshot);
+
+            // 输出云台状态到 PlotJuggler
+            {
+                auto [yaw, pitch] = aimer::math::quat_to_yaw_pitch(snapshot.self_state.q_imu);
+                plotter::plot("/gimbal.yaw", yaw * 57.3);
+                plotter::plot("/gimbal.pitch", pitch * 57.3);
+            }
 
             // 统计
             int tracked = 0;

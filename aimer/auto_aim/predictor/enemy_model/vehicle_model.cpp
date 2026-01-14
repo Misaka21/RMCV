@@ -16,6 +16,7 @@
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/plotter/plotter.hpp"
 
 namespace autoaim::predictor {
 
@@ -197,6 +198,78 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
 
     prev_armors_ = filtered;
     prev_timestamp_ = timestamp;
+
+    // ========== 输出到 PlotJuggler ==========
+    {
+        std::string prefix = fmt::format("/target.{}", target_id_);
+
+        // ========== 1. 观测层 obs ==========
+        plotter::plot(prefix + ".obs_num", static_cast<int>(filtered.size()));
+        for (size_t i = 0; i < filtered.size(); ++i) {
+            const auto& o = filtered[i];
+            std::string obs_prefix = fmt::format("{}.obs.{}", prefix, i);
+            plotter::plot(obs_prefix + ".x", o.pos.x());
+            plotter::plot(obs_prefix + ".y", o.pos.y());
+            plotter::plot(obs_prefix + ".z", o.pos.z());
+            plotter::plot(obs_prefix + ".yaw", o.z[obs::ARMOR_YAW] * 57.3);
+            plotter::plot(obs_prefix + ".z_to_v", o.z_to_v * 57.3);
+        }
+
+        // ========== 2. 单装甲板滤波 armor ==========
+        auto armor_states = armor_motion_.get_armor_states(timestamp);
+        plotter::plot(prefix + ".armor_num", static_cast<int>(armor_states.size()));
+        for (size_t i = 0; i < armor_states.size(); ++i) {
+            const auto& state = armor_states[i];
+            std::string armor_prefix = fmt::format("{}.armor.{}", prefix, i);
+            plotter::plot(armor_prefix + ".x", state.position.x());
+            plotter::plot(armor_prefix + ".y", state.position.y());
+            plotter::plot(armor_prefix + ".z", state.position.z());
+            plotter::plot(armor_prefix + ".vx", state.velocity.x());
+            plotter::plot(armor_prefix + ".vy", state.velocity.y());
+            plotter::plot(armor_prefix + ".vz", state.velocity.z());
+        }
+
+        // ========== 3. 整车滤波 vehicle ==========
+        std::string veh_prefix = prefix + ".vehicle";
+        Eigen::Vector3d center = Eigen::Vector3d::Zero();
+        Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
+        double theta = 0, omega = 0, radius = 0, radius_2 = 0, dz = 0;
+        bool vehicle_valid = false;
+
+        if (use_lmtd && lmtd_motion_.valid()) {
+            vehicle_valid = true;
+            center = lmtd_motion_.predict_center(0);
+            velocity = lmtd_motion_.get_center_velocity();
+            theta = lmtd_motion_.get_theta();
+            omega = lmtd_motion_.get_omega();
+            radius = lmtd_motion_.get_radius();
+            radius_2 = lmtd_motion_.get_another_radius();
+            dz = lmtd_motion_.get_dz();
+        } else if (spin_motion_.valid()) {
+            vehicle_valid = true;
+            center = spin_motion_.predict_center(0);
+            velocity = spin_motion_.get_velocity();
+            theta = spin_motion_.get_theta();
+            omega = spin_motion_.get_omega();
+            radius = spin_motion_.get_radius();
+            radius_2 = spin_motion_.get_another_radius();
+            dz = spin_motion_.get_dz();
+        }
+
+        plotter::plot(veh_prefix + ".valid", vehicle_valid ? 1 : 0);
+        plotter::plot(veh_prefix + ".x", center.x());
+        plotter::plot(veh_prefix + ".y", center.y());
+        plotter::plot(veh_prefix + ".z", center.z());
+        plotter::plot(veh_prefix + ".vx", velocity.x());
+        plotter::plot(veh_prefix + ".vy", velocity.y());
+        plotter::plot(veh_prefix + ".vz", velocity.z());
+        plotter::plot(veh_prefix + ".a", theta * 57.3);  // rad -> deg
+        plotter::plot(veh_prefix + ".w", omega);
+        plotter::plot(veh_prefix + ".r", radius);
+        plotter::plot(veh_prefix + ".r2", radius_2);
+        plotter::plot(veh_prefix + ".dz", dz);
+        plotter::plot(veh_prefix + ".spin_level", static_cast<int>(spin_.level));
+    }
 }
 
 /**
