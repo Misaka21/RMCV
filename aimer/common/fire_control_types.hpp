@@ -14,6 +14,8 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include "aimer/common/transformer/transformer.hpp"
+
 namespace fire_control {
 
 // ==================== 常量定义 ====================
@@ -36,10 +38,19 @@ struct GimbalState {
 
     /**
      * @brief 从 IMU 四元数更新状态
+     *
+     * q_imu 是 IMU 坐标系相对世界坐标系的姿态，需要修正 R_gimbal2imubody
+     * 得到真正的 Gimbal 坐标系角度 (与 Barrel/枪管坐标系方向相同)
      */
     void update(const Eigen::Quaterniond& q_imu, double dt) {
+        // Gimbal → Imu 的旋转修正
+        const auto& R_g2i = aimer::tf::Transform<
+            aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
+        // q_gimbal = R_g2i^T * q_imu (从 Imu 坐标系转到 Gimbal 坐标系)
+        Eigen::Quaterniond q_gimbal(R_g2i.transpose() * q_imu.toRotationMatrix());
+
         // 提取 yaw/pitch (ZYX 顺序)
-        Eigen::Vector3d euler = q_imu.toRotationMatrix().eulerAngles(2, 1, 0);
+        Eigen::Vector3d euler = q_gimbal.toRotationMatrix().eulerAngles(2, 1, 0);
         double new_yaw = euler[0];
         double new_pitch = euler[1];
 

@@ -79,8 +79,14 @@ void start_predictor_node() {
             pub.push(snapshot);
 
             // 输出云台状态到 PlotJuggler
+            // q_imu 是 IMU 原始姿态，需要修正 R_gimbal2imubody 得到真正的云台角度
             {
-                auto [yaw, pitch] = aimer::math::quat_to_yaw_pitch(snapshot.self_state.q_imu);
+                // Gimbal → Imu 的旋转修正
+                const auto& R_g2i = aimer::tf::Transform<
+                    aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
+                // q_gimbal = R_g2i^T * q_imu (从 Imu 坐标系转到 Gimbal 坐标系)
+                Eigen::Quaterniond q_gimbal(R_g2i.transpose() * snapshot.self_state.q_imu.toRotationMatrix());
+                auto [yaw, pitch] = aimer::math::quat_to_yaw_pitch(q_gimbal);
                 plotter::plot("/gimbal.yaw", yaw * 57.3);
                 plotter::plot("/gimbal.pitch", pitch * 57.3);
             }
