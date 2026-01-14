@@ -76,7 +76,7 @@ FireCommand FireController::control(
     // 4. 装甲板瞄准
     ArmorAimResult armor_result = armor_aim_.compute(
         vehicle,
-        latency.now_to_hit()
+        latency.prediction_latency()
     );
     last_armor_aim_ = armor_result;
 
