@@ -10,9 +10,10 @@
     #camera_offset_y = 0.0
     #@double 相机在云台上方距离
     #camera_offset_z = 0.0
-    camera_offset_x = -0.1000
-    camera_offset_y = 0.0161
-    camera_offset_z = 0.0897
+    camera_offset_x = 0.0295
+    camera_offset_y = -0.0068
+    camera_offset_z = -0.0228
+
 
     # Barrel → Gimbal 平移 (米, 在Gimbal坐标系下)
     #@double 枪口在云台前方距离

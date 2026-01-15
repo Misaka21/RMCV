@@ -8,7 +8,7 @@
 
 [Detector.traditional]
     #@bool 是否开启调试模式
-    debug = false
+    debug = true
     #@int 二值化阈值
     binary_thres = 100
     #@bool 是否开启灯条角点最小二乘校正
