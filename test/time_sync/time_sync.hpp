@@ -4,8 +4,12 @@
 //
 // 原理:
 //   静止目标在世界坐标系下位置不变
-//   p_world = R_imu(t_cam + delta_t) * R_gimbal2imu * R_cam2gimbal * p_cam
+//   p_world = R_imu(t_cam - delta_t) * R_gimbal2imu * R_cam2gimbal * p_cam
 //   找到 delta_t 使得 p_world 的方差最小
+//
+// 符号定义（与 hardware_node.cpp 一致）:
+//   delta_t > 0: 图像比IMU数据晚到达，匹配过去的IMU (target = cam_time - delta_t)
+//   delta_t < 0: 图像比IMU数据早到达，匹配未来的IMU (target = cam_time - delta_t)
 //
 // 使用方法:
 //   1. 将相机对准静止目标（装甲板、墙角等）
@@ -202,8 +206,12 @@ struct ExtrinsicParams {
 /**
  * @brief 计算给定 delta_t 下转换到世界系后的方差
  *
- * 变换链: p_world = R_imu(t_cam + delta_t) * R_gimbal2imu * R_cam2gimbal * p_cam
- *                 = R_imu(t_cam + delta_t) * R_cam2imu * p_cam
+ * 变换链: p_world = R_imu(t_cam - delta_t) * R_gimbal2imu * R_cam2gimbal * p_cam
+ *                 = R_imu(t_cam - delta_t) * R_cam2imu * p_cam
+ *
+ * 符号定义:
+ *   delta_t > 0: 图像晚于IMU，查找过去的IMU (t_imu = t_cam - delta_t)
+ *   delta_t < 0: 图像早于IMU，查找未来的IMU (t_imu = t_cam - delta_t)
  *
  * 静止目标的 p_world 应为常数，方差最小时 delta_t 最优
  */
@@ -225,7 +233,9 @@ inline double compute_variance(
     world_points.reserve(cam_samples.size());
 
     for (const auto& cs : cam_samples) {
-        double t_imu = cs.timestamp + delta_t;
+        // 注意: 与 hardware_node 定义一致，delta_t > 0 表示图像晚于IMU
+        // target_time_us = cam_time_us - delta_t_us (查找过去的IMU)
+        double t_imu = cs.timestamp - delta_t;
         Eigen::Quaterniond q_imu = imu_interp(t_imu);
 
         // p_world = R_imu * R_cam2imu * p_cam

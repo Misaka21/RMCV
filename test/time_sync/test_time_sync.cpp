@@ -47,7 +47,7 @@ using TimePoint = Clock::time_point;
 // ============================================================================
 constexpr double COLLECT_DURATION_SEC = 10.0;   // 采集时长(秒)
 constexpr size_t MIN_CAM_SAMPLES = 50;         // 最少相机数据点
-constexpr size_t MAX_IMU_BUFFER = 10000;        // IMU缓冲区最大容量
+constexpr size_t MAX_IMU_BUFFER = 50000;        // IMU缓冲区最大容量
 
 // ============================================================================
 // 带时间戳的IMU数据 (串口接收时记录)
@@ -179,8 +179,11 @@ void imu_receiver_thread() {
                 serial::SerialReceiveData data = queue.front();
                 queue.pop();
 
-                // 记录接收时间戳 (关键!)
-                TimePoint recv_time = Clock::now();
+                // 使用串口线程记录的时间戳 (关键修复!)
+                // 之前错误地在队列处理时才记录时间，导致IMU时间戳偏晚
+                TimePoint recv_time = Clock::time_point(
+                    std::chrono::microseconds(data.recv_time_us)
+                );
 
                 // 存入缓冲区
                 {
