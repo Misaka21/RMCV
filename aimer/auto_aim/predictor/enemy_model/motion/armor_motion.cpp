@@ -7,6 +7,7 @@
 
 #include <cmath>
 
+#include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
@@ -48,21 +49,44 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
     R(0, 0) = R(1, 1) = r_angle;
     R(2, 2) = r_dis_1m * ypd.dis * ypd.dis;
 
-    // 预测
+    // 预测 (使用自适应缩放的过程噪声)
     YpdCVPredict predict_func(dt);
-    ekf_.predict_forward(predict_func, Q);
+    ekf_.predict_forward_scaled(predict_func, Q);
 
-    // 处理角度±π跨越
+    // 处理角度±π跨越 (必须在门限检查之前)
     VectorX x = ekf_.get_x();
     double yaw_close = aimer::math::get_closest_angle(ypd.yaw, x[0]);
     double pitch_close = aimer::math::get_closest_angle(ypd.pitch, x[2]);
 
-    // 观测更新
+    // 构建观测
     VectorY y;
     y << yaw_close, pitch_close, ypd.dis;
 
+    // 构建重置状态
+    VectorX reset_state;
+    reset_state << ypd.yaw, 0, ypd.pitch, 0, ypd.dis, 0;
+
+    // 读取门限参数
+    double chi2_threshold = runtime_param::get_param<double>("AutoAim.Predictor.EKF.Gating.chi2_threshold");
+    int max_reject = runtime_param::get_param<int>("AutoAim.Predictor.EKF.Gating.max_reject");
+    double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.EKF.Gating.q_scale_increase");
+    double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.EKF.Gating.q_scale_decay");
+
+    // 带门限检查的观测更新
     YpdDirectMeasure measure_func;
-    ekf_.update_forward(measure_func, y, R);
+    auto status = ekf_.update_forward_gated(
+        measure_func, y, R, reset_state,
+        chi2_threshold, max_reject, q_scale_increase, q_scale_decay
+    );
+
+    // 处理更新结果
+    if (status == aimer::filter::UpdateStatus::RESET) {
+        debug::print(debug::PrintMode::WARNING, "ArmorMotion",
+            "EKF reset for armor {} due to {} consecutive rejections", armor.id, max_reject);
+    } else if (status == aimer::filter::UpdateStatus::REJECTED) {
+        debug::print(debug::PrintMode::DEBUG, "ArmorMotion",
+            "Observation rejected for armor {}, q_scale={:.2f}", armor.id, ekf_.get_q_scale());
+    }
 
     // 归一化角度
     VectorX x_new = ekf_.get_x();

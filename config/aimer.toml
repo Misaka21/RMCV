@@ -79,6 +79,17 @@
     #@double 绘图时的预测时间 (s)，用于可视化预测效果
     draw_predict_dt = 0.50
 
+[AutoAim.Predictor.EKF.Gating]
+    # 马氏距离门限检查参数 (3维观测, p=0.01)
+    #@double χ²门限, 超过则拒绝观测
+    chi2_threshold = 11.34
+    #@int 连续拒绝次数上限, 超过则重置EKF
+    max_reject = 5
+    #@double 拒绝后过程噪声放大倍数
+    q_scale_increase = 1.5
+    #@double 接受后过程噪声衰减倍数 (最小为1.0)
+    q_scale_decay = 0.9
+
 [AutoAim.Predictor.SpinEKF]
     # 过程噪声 Q (越大越信任观测，越小越信任预测)
     # 参考 rm.cv.fans lmtd-top-model 参数
@@ -118,6 +129,17 @@
     force_zero_vz = true
     #@double 两对装甲板高度差最大值 (m)
     dz_abs_max = 0.10
+
+[AutoAim.Predictor.SpinEKF.Gating]
+    # 马氏距离门限检查参数 (4维观测, p=0.01)
+    #@double χ²门限, 超过则拒绝观测
+    chi2_threshold = 13.28
+    #@int 连续拒绝次数上限, 超过则重置EKF
+    max_reject = 5
+    #@double 拒绝后过程噪声放大倍数
+    q_scale_increase = 1.5
+    #@double 接受后过程噪声衰减倍数 (最小为1.0)
+    q_scale_decay = 0.9
 
 [AutoAim.Predictor.LmtdEKF]
     # LMTD 整车旋转模型 (参考 rm.cv.fans lmtd::TopModel)
@@ -210,6 +232,17 @@
     # 速度约束 (前哨站定点旋转)
     #@bool 强制速度清零，每次更新后将vx,vy设为0
     force_zero_velocity = true
+
+[AutoAim.Predictor.OutpostEKF.Gating]
+    # 马氏距离门限检查参数 (4维观测, p=0.01)
+    #@double χ²门限, 超过则拒绝观测
+    chi2_threshold = 13.28
+    #@int 连续拒绝次数上限, 超过则重置EKF
+    max_reject = 5
+    #@double 拒绝后过程噪声放大倍数
+    q_scale_increase = 1.5
+    #@double 接受后过程噪声衰减倍数 (最小为1.0)
+    q_scale_decay = 0.9
 
 # ==================== 火控配置 ====================
 

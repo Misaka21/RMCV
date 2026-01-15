@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "aimer/common/math/math.hpp"
+#include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
@@ -90,6 +91,29 @@ bool get_force_zero_velocity() {
     return true;  // 默认开启
 }
 
+// 门限检查参数
+double get_chi2_threshold() {
+    return get_double_param("AutoAim.Predictor.OutpostEKF.Gating.chi2_threshold", 13.28);
+}
+
+int get_max_reject() {
+    auto ptr = runtime_param::find_param("AutoAim.Predictor.OutpostEKF.Gating.max_reject");
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<int64_t>(&*ptr)) {
+            return static_cast<int>(*val);
+        }
+    }
+    return 5;
+}
+
+double get_q_scale_increase() {
+    return get_double_param("AutoAim.Predictor.OutpostEKF.Gating.q_scale_increase", 1.5);
+}
+
+double get_q_scale_decay() {
+    return get_double_param("AutoAim.Predictor.OutpostEKF.Gating.q_scale_decay", 0.9);
+}
+
 }  // namespace
 
 // ============================================================================
@@ -154,15 +178,15 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
     // 处理装甲板切换
     handle_armor_switch(armor);
 
-    // 预测
+    // 预测 (使用自适应缩放的过程噪声)
     OutpostCVPredict predict_func(dt);
     MatrixXX Q = build_Q(dt);
-    ekf_.predict_forward(predict_func, Q);
+    ekf_.predict_forward_scaled(predict_func, Q);
 
     // 观测
     double armor_yaw = obs.z[obs::ARMOR_YAW];
 
-    // 连续化 yaw
+    // 连续化 yaw (必须在门限检查之前)
     VectorX x = ekf_.get_x();
     double theta_pred = x[outpost_model::THETA];
     double yaw_continuous = theta_pred + aimer::math::angle_diff(theta_pred, armor_yaw);
@@ -174,10 +198,45 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
     z[outpost_model::DIS] = obs.z[obs::DIST];
     z[outpost_model::ARMOR_YAW] = yaw_continuous;
 
-    // 观测更新
+    // 构建重置状态
+    double xa = obs.pos.x();
+    double ya = obs.pos.y();
+    double za = obs.pos.z();
+    double xc = xa + outpost_model::RADIUS * std::cos(armor_yaw);
+    double yc = ya + outpost_model::RADIUS * std::sin(armor_yaw);
+    double zc = za;
+
+    VectorX reset_state = VectorX::Zero();
+    reset_state[outpost_model::XC] = xc;
+    reset_state[outpost_model::YC] = yc;
+    reset_state[outpost_model::ZC] = zc;
+    reset_state[outpost_model::THETA] = armor_yaw;
+    reset_state[outpost_model::OMEGA] = 0;
+
+    // 带门限检查的观测更新
     OutpostMeasure measure_func(current_dz_);
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
-    ekf_.update_forward(measure_func, z, R);
+    auto status = ekf_.update_forward_gated(
+        measure_func, z, R, reset_state,
+        get_chi2_threshold(), get_max_reject(), get_q_scale_increase(), get_q_scale_decay()
+    );
+
+    // 处理更新结果
+    if (status == aimer::filter::UpdateStatus::RESET) {
+        // EKF 已重置，同时重置外部状态
+        slot_dz_.fill(0);
+        slot_known_.fill(false);
+        slot_dz_[0] = 0;
+        slot_known_[0] = true;
+        current_slot_ = 0;
+        current_dz_ = 0;
+        omega_sign_determined_ = false;  // 需要重新判断方向
+        debug::print(debug::PrintMode::WARNING, "OutpostMotion",
+            "EKF reset due to {} consecutive rejections", get_max_reject());
+    } else if (status == aimer::filter::UpdateStatus::REJECTED) {
+        debug::print(debug::PrintMode::DEBUG, "OutpostMotion",
+            "Observation rejected, q_scale={:.2f}", ekf_.get_q_scale());
+    }
 
     // 约束角速度
     constrain_omega();

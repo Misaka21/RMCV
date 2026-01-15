@@ -342,6 +342,16 @@ private:
      */
     MatrixZZ build_R(double distance, double z_to_v, int observed_armor_count = 1) const;
 
+    /**
+     * @brief 从观测构建重置状态
+     *
+     * 用于门限检查拒绝过多时重新初始化 EKF
+     *
+     * @param armor 当前观测的装甲板数据
+     * @return 重置状态向量
+     */
+    VectorX build_reset_state(const ArmorData& armor) const;
+
     // ==================== EKF ====================
     Ekf ekf_;
     bool initialized_ = false;

@@ -77,9 +77,10 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     if (dt <= 0) return;
 
     // 预测 (跳变检测已由上层完成)
+    // 使用自适应缩放的过程噪声
     SpinCVPredict predict_func(dt);
     MatrixXX Q = build_Q(dt);
-    ekf_.predict_forward(predict_func, Q);
+    ekf_.predict_forward_scaled(predict_func, Q);
 
     // 观测的装甲板朝向 (INWARD → OUTWARD)
     double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
@@ -94,15 +95,43 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     for (int i = 0; i < spin_model::N_Z; ++i) inner_z[i] = z_arr[i];
 
     // 连续化 (把观测调整到离 EKF 预测最近，避免 ±π 跳变)
+    // 注意: 必须在门限检查之前完成，否则 ±π 跳变会被误判为离群点
     VectorZ z;
     z[spin_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
     z[spin_model::PITCH] = obs.z[obs::PITCH];
     z[spin_model::DIS] = obs.z[obs::DIST];
     z[spin_model::ARMOR_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
 
-    // 观测更新
+    // 构建重置状态 (门限检查失败时使用)
+    VectorX reset_state = build_reset_state(armor);
+
+    // 读取门限参数
+    double chi2_threshold = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.chi2_threshold");
+    int max_reject = runtime_param::get_param<int>("AutoAim.Predictor.SpinEKF.Gating.max_reject");
+    double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.q_scale_increase");
+    double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.q_scale_decay");
+
+    // 带门限检查的观测更新
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
-    ekf_.update_forward(measure_func, z, R);
+    auto status = ekf_.update_forward_gated(
+        measure_func, z, R, reset_state,
+        chi2_threshold, max_reject, q_scale_increase, q_scale_decay
+    );
+
+    // 处理更新结果
+    if (status == aimer::filter::UpdateStatus::RESET) {
+        // EKF 已重置，同时重置外部状态
+        double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
+        another_r_ = init_r;
+        another_dz_ = 0;
+        spin_level_ = SpinLevel::NONE;
+        debug::print(debug::PrintMode::WARNING, "SpinMotion",
+            "EKF reset due to {} consecutive rejections", max_reject);
+    } else if (status == aimer::filter::UpdateStatus::REJECTED) {
+        debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+            "Observation rejected, q_scale={:.2f}, reject_count={}",
+            ekf_.get_q_scale(), ekf_.get_reject_count());
+    }
 
     // 后处理：限制半径和高度差范围
     x = ekf_.get_x();
@@ -177,7 +206,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 
     SpinCVPredict predict_func(dt);
     MatrixXX Q = build_Q(dt);
-    ekf_.predict_forward(predict_func, Q);
+    ekf_.predict_forward_scaled(predict_func, Q);
 
     // 用主装甲板做观测更新
     const auto& obs = primary.observation;
@@ -199,9 +228,34 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     z[spin_model::DIS] = obs.z[obs::DIST];
     z[spin_model::ARMOR_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[spin_model::ARMOR_YAW]);
 
+    // 构建重置状态 (门限检查失败时使用)
+    VectorX reset_state = build_reset_state(primary);
+
+    // 读取门限参数
+    double chi2_threshold = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.chi2_threshold");
+    int max_reject = runtime_param::get_param<int>("AutoAim.Predictor.SpinEKF.Gating.max_reject");
+    double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.q_scale_increase");
+    double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.q_scale_decay");
+
     // 双装甲板时观测噪声更小（朝向角更可信）
     MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);
-    ekf_.update_forward(measure_func, z, R);
+    auto status = ekf_.update_forward_gated(
+        measure_func, z, R, reset_state,
+        chi2_threshold, max_reject, q_scale_increase, q_scale_decay
+    );
+
+    // 处理更新结果
+    if (status == aimer::filter::UpdateStatus::RESET) {
+        double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
+        another_r_ = init_r;
+        another_dz_ = 0;
+        spin_level_ = SpinLevel::NONE;
+        debug::print(debug::PrintMode::WARNING, "SpinMotion",
+            "EKF reset due to {} consecutive rejections (dual armor)", max_reject);
+    } else if (status == aimer::filter::UpdateStatus::REJECTED) {
+        debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+            "Observation rejected (dual armor), q_scale={:.2f}", ekf_.get_q_scale());
+    }
 
     // 后处理
     x = ekf_.get_x();
@@ -423,6 +477,39 @@ void SpinMotion::reset() {
     spin_level_ = SpinLevel::NONE;
     another_dz_ = 0;
     another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
+}
+
+SpinMotion::VectorX SpinMotion::build_reset_state(const ArmorData& armor) const {
+    const auto& obs = armor.observation;
+
+    // 从观测提取
+    double xa = obs.pos.x();
+    double ya = obs.pos.y();
+    double za = obs.pos.z();
+
+    // 装甲板朝向 (PnP 输出的是 INWARD，转为 OUTWARD)
+    double armor_yaw_inward = obs.z[obs::ARMOR_YAW];
+    double theta = armor_yaw_inward + M_PI;
+
+    // 初始半径
+    double r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
+
+    // 从装甲板位置反推旋转中心 (OUTWARD: center = armor - r * (cos θ, sin θ))
+    double xc = xa - r * std::cos(theta);
+    double yc = ya - r * std::sin(theta);
+    double zc = za;  // 初始 dz = 0
+
+    // 构建重置状态
+    VectorX x0 = VectorX::Zero();
+    x0[spin_model::XC] = xc;
+    x0[spin_model::YC] = yc;
+    x0[spin_model::ZC] = zc;
+    x0[spin_model::THETA] = theta;
+    x0[spin_model::R] = r;
+    x0[spin_model::DZ] = 0;
+    // 速度保持为 0
+
+    return x0;
 }
 
 }  // namespace autoaim::predictor
