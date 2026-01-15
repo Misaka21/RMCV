@@ -6,33 +6,36 @@
 namespace plotter {
 
 /**
- * 初始化 PlotJuggler 连接 (可选，不调用则使用默认配置)
- * @param host PlotJuggler 地址，默认 127.0.0.1
- * @param port PlotJuggler 端口，默认 9870
+ * 初始化 Plotter (从 debugger.toml 读取配置)
  */
-void init(const std::string& host = "127.0.0.1", uint16_t port = 9870);
+void init();
 
 /**
- * 发送单个数据点到 PlotJuggler
- * @param name 数据名称，如 "/target.yaw" 或 "gimbal/pitch"
- * @param value 数据值
- *
- * 使用示例:
- *   plotter::plot("/target.yaw", yaw);
- *   plotter::plot("/gimbal.pitch", pitch);
- *   plotter::plot("/distance", 5.2);
+ * 设置全局开关
+ */
+void set_enabled(bool enabled);
+
+/**
+ * 单条发送
  */
 void plot(const std::string& name, double value);
-
-/**
- * 发送 int 类型数据
- */
 void plot(const std::string& name, int value);
+void plot(const std::string& name, bool value);
 
 /**
- * 发送 bool 类型数据 (转为 0/1)
+ * 批量发送 - 每个线程独立缓冲区
+ *
+ * 用法:
+ *   plotter::begin();  // 可选，清空缓冲区
+ *   plotter::add("/target/yaw", 1.0);
+ *   plotter::add("/target/pitch", 2.0);
+ *   plotter::end();    // 发送
  */
-void plot(const std::string& name, bool value);
+void begin();  // 清空缓冲区 (可选)
+void add(const std::string& name, double value);
+void add(const std::string& name, int value);
+void add(const std::string& name, bool value);
+void end();    // 发送并清空
 
 }  // namespace plotter
 

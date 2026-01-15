@@ -20,6 +20,7 @@
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/plotter/plotter.hpp"
 #include "plugin/rmcv_bag/recorder_node.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
 #include "umt/umt.hpp"
@@ -107,6 +108,9 @@ int main(int argc, char* argv[]) {
 
     // 初始化坐标变换系统
     aimer::tf::init("camera.yaml");
+
+    // 初始化 Plotter (从 debugger.toml 读取配置)
+    plotter::init();
 
     fmt::print(fmt::fg(fmt::color::gold),
                "====================================================================\n"

@@ -87,8 +87,10 @@ void start_predictor_node() {
                 // q_gimbal = R_g2i^T * q_imu (从 Imu 坐标系转到 Gimbal 坐标系)
                 Eigen::Quaterniond q_gimbal(R_g2i.transpose() * snapshot.self_state.q_imu.toRotationMatrix());
                 auto [yaw, pitch] = aimer::math::quat_to_yaw_pitch(q_gimbal);
-                plotter::plot("/gimbal.yaw", yaw * 57.3);
-                plotter::plot("/gimbal.pitch", pitch * 57.3);
+                plotter::begin();
+                plotter::add("/gimbal/yaw", yaw * 57.3);
+                plotter::add("/gimbal/pitch", pitch * 57.3);
+                plotter::end();
             }
 
             // 统计

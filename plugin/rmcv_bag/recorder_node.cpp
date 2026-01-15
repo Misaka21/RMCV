@@ -70,7 +70,7 @@ struct RecorderConfig {
 
     static RecorderConfig load() {
         RecorderConfig cfg;
-        auto table = static_param::parse_file("recorder.toml");
+        auto table = static_param::parse_file("debugger.toml");
         cfg.enable_recording = static_param::get_param<bool>(table, "Recorder", "enable_recording");
         cfg.record_raw_video = static_param::get_param<bool>(table, "Recorder", "record_raw_video");
         cfg.record_imu_csv = static_param::get_param<bool>(table, "Recorder", "record_imu_csv");
