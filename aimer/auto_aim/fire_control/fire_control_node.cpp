@@ -106,10 +106,10 @@ void fire_control_run(const std::string& /* config_path */) {
     aimer::AimMode last_mode = aimer::AimMode::DISABLED;
     int last_frame_id = -1;
 
-    debug::print(debug::PrintMode::INFO, "AutoAimFireControl", "Running at 100Hz");
+    debug::print(debug::PrintMode::INFO, "AutoAimFireControl", "Running at 500Hz");
 
-    // 主循环 (100Hz)
-    const auto period = std::chrono::microseconds(10000);  // 10ms
+    // 主循环 (500Hz)
+    const auto period = std::chrono::microseconds(2000);  // 2ms
     auto next_time = std::chrono::steady_clock::now();
 
     while (app_running->get()) {

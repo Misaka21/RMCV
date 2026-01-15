@@ -128,6 +128,24 @@ void draw_world_ground_grid(
             }
         }
     }
+
+    // 在地平面末端绘制 Z 轴 (向上的箭头)
+    // 起点: (range, 0, ground_z)
+    // 终点: (range, 0, ground_z + 2.0)  // 2米高的箭头
+    Eigen::Vector3d z_axis_start(range, 0, ground_z);
+    Eigen::Vector3d z_axis_end(range, 0, ground_z + 2.0);
+
+    bool valid_start = false, valid_end = false;
+    cv::Point2f pixel_start = aimer::tf::world_to_pixel(z_axis_start, q_imu, valid_start);
+    cv::Point2f pixel_end = aimer::tf::world_to_pixel(z_axis_end, q_imu, valid_end);
+
+    if (valid_start && valid_end) {
+        // 绘制黄色箭头表示 Z 轴 (向上)
+        cv::arrowedLine(img, pixel_start, pixel_end, cv::Scalar(0, 255, 255), 3, cv::LINE_AA, 0, 0.2);
+        // 标注 "Z"
+        cv::putText(img, "Z", pixel_end + cv::Point2f(10, -10),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 255), 2, cv::LINE_AA);
+    }
 }
 
 void draw_debug_visualization(
@@ -153,10 +171,41 @@ void draw_debug_visualization(
 
     // 显示IMU信息
     if (frame.serial_valid) {
-        std::string imu_info = fmt::format("IMU: yaw={:.1f} pitch={:.1f}",
-                                           frame.serial_data.yaw, frame.serial_data.pitch);
-        cv::putText(debug_img, imu_info, cv::Point(10, 60),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
+        // 原始串口数据
+        std::string serial_info = fmt::format("Serial: yaw={:.1f} pitch={:.1f} roll={:.1f}",
+                                              frame.serial_data.yaw,
+                                              frame.serial_data.pitch,
+                                              frame.serial_data.roll);
+        cv::putText(debug_img, serial_info, cv::Point(10, 60),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(150, 150, 150), 2);
+
+        // IMU 四元数转欧拉角 (ZYX顺序)
+        auto euler_imu = result.state.q_imu.toRotationMatrix().eulerAngles(2, 1, 0);
+        double yaw_imu = euler_imu[0] * 180.0 / M_PI;
+        double pitch_imu = euler_imu[1] * 180.0 / M_PI;
+        double roll_imu = euler_imu[2] * 180.0 / M_PI;
+
+        std::string imu_info = fmt::format("IMU(q): yaw={:.1f} pitch={:.1f} roll={:.1f}",
+                                           yaw_imu, pitch_imu, roll_imu);
+        cv::putText(debug_img, imu_info, cv::Point(10, 90),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
+
+        // Gimbal 坐标系欧拉角 (修正IMU安装偏差后)
+        // Gimbal → Imu 的旋转矩阵
+        Eigen::Matrix3d R_gimbal2imu =
+            aimer::tf::Transform<aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
+        // q_gimbal = R_gimbal2imu.transpose() * q_imu
+        Eigen::Quaterniond q_gimbal(R_gimbal2imu.transpose() * result.state.q_imu.toRotationMatrix());
+
+        auto euler_gimbal = q_gimbal.toRotationMatrix().eulerAngles(2, 1, 0);
+        double yaw_gimbal = euler_gimbal[0] * 180.0 / M_PI;
+        double pitch_gimbal = euler_gimbal[1] * 180.0 / M_PI;
+        double roll_gimbal = euler_gimbal[2] * 180.0 / M_PI;
+
+        std::string gimbal_info = fmt::format("Gimbal: yaw={:.1f} pitch={:.1f} roll={:.1f}",
+                                              yaw_gimbal, pitch_gimbal, roll_gimbal);
+        cv::putText(debug_img, gimbal_info, cv::Point(10, 120),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 150, 0), 2);
     }
 
     // 显示窗口
