@@ -184,6 +184,11 @@ add_executable(test_timestamp test/time_sync/test_timestamp.cpp)
 target_include_directories(test_timestamp PRIVATE ${PROJECT_SOURCE_DIR}/test)
 target_link_libraries(test_timestamp ${OpenCV_LIBS} fmt::fmt plugin hardware)
 
+# 相机-IMU时间戳顺序检查工具 (不需要Ceres)
+add_executable(check_timestamp_order test/time_sync/check_timestamp_order.cpp)
+target_include_directories(check_timestamp_order PRIVATE ${PROJECT_SOURCE_DIR}/test)
+target_link_libraries(check_timestamp_order ${OpenCV_LIBS} fmt::fmt plugin hardware)
+
 # 火控可视化测试 (默认使用实车硬件，可选模拟器)
 add_executable(test_fire_control test/test_fire_control.cpp)
 target_link_libraries(test_fire_control ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control)

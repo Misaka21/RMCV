@@ -37,10 +37,8 @@ int main() {
 
             if (!frame.serial_valid) continue;
 
-            // 相机时间戳
-            int64_t cam_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                frame.image_time.time_since_epoch()
-            ).count();
+            // 相机时间戳 (从 SyncFrame 直接获取)
+            int64_t cam_time_us = frame.timestamp_us;
 
             // IMU接收时间戳
             int64_t imu_time_us = frame.serial_data.recv_time_us;
