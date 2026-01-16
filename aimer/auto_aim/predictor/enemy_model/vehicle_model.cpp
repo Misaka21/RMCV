@@ -84,11 +84,15 @@ VehicleModel::VehicleModel(int target_id, EnemyType enemy_type)
       enemy_type_(enemy_type),
       armor_motion_(get_armor_credit_time()),
       spin_motion_(enemy_type == EnemyType::OUTPOST ? 3 : 4),
-      lmtd_motion_(enemy_type == EnemyType::OUTPOST ? 3 : 4) {}
+      lmtd_motion_(enemy_type == EnemyType::OUTPOST ? 3 : 4),
+      sp_motion_(enemy_type == EnemyType::OUTPOST ? 3 : 4) {}
 
 void VehicleModel::update(const std::vector<ArmorObservation>& observations, double timestamp) {
     ++frame_count_;
-    const bool use_lmtd = runtime_param::get_param<bool>("AutoAim.Predictor.use_lmtd");
+    // 模型选择: spin (旧), lmtd, sp (新)
+    const std::string motion_model = runtime_param::get_param<std::string>("AutoAim.Predictor.motion_model");
+    const bool use_lmtd = (motion_model == "lmtd");
+    const bool use_sp = (motion_model == "sp");
 
     // 1. 消抖过滤 (参考 rm.cv.fans screened_armors)
     auto filtered = filter(observations, prev_armors_);
@@ -109,9 +113,13 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
     armor_motion_.update(armors_with_id, timestamp);
 
-    // 4. 整车 EKF 滤波: SpinMotion 或 LmtdMotion
+    // 4. 整车 EKF 滤波: SpinMotion, LmtdMotion 或 SpMotion
     if (!armors_with_id.empty()) {
-        if (use_lmtd) {
+        if (use_sp) {
+            // ========== SP 模式: 11维状态，无状态交换 ==========
+            sp_motion_.update(armors_with_id, timestamp);
+            last_tracking_id_ = sp_motion_.get_tracked_id();
+        } else if (use_lmtd) {
             // ========== LMTD 模式: 内部处理跳变 ==========
             lmtd_motion_.update(armors_with_id, timestamp);
 
@@ -145,7 +153,14 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     }
 
     // 5. 更新陀螺状态
-    if (use_lmtd) {
+    if (use_sp) {
+        spin_.omega = sp_motion_.get_omega();
+        spin_.phase = sp_motion_.get_theta();
+        spin_.radius = sp_motion_.get_radius();
+        spin_.radius_2 = sp_motion_.get_another_radius();
+        spin_.level = sp_motion_.get_spin_level();
+        spin_.active = (spin_.level >= SpinLevel::LOW) && sp_motion_.valid();
+    } else if (use_lmtd) {
         spin_.omega = lmtd_motion_.get_omega();
         spin_.phase = lmtd_motion_.get_theta();
         spin_.radius = lmtd_motion_.get_radius();
@@ -208,7 +223,16 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
         double theta = 0, omega = 0, radius = 0, radius_2 = 0, dz = 0;
         bool vehicle_valid = false;
 
-        if (use_lmtd && lmtd_motion_.valid()) {
+        if (use_sp && sp_motion_.valid()) {
+            vehicle_valid = true;
+            center = sp_motion_.predict_center(0);
+            velocity = sp_motion_.get_velocity();
+            theta = sp_motion_.get_theta();
+            omega = sp_motion_.get_omega();
+            radius = sp_motion_.get_radius();
+            radius_2 = sp_motion_.get_another_radius();
+            dz = sp_motion_.get_dz();
+        } else if (use_lmtd && lmtd_motion_.valid()) {
             vehicle_valid = true;
             center = lmtd_motion_.predict_center(0);
             velocity = lmtd_motion_.get_center_velocity();
@@ -339,7 +363,10 @@ std::vector<ArmorObservation> VehicleModel::filter(
 }
 
 VehicleState VehicleModel::predict(double timestamp) const {
-    const bool use_lmtd = runtime_param::get_param<bool>("AutoAim.Predictor.use_lmtd");
+    // 模型选择
+    const std::string motion_model = runtime_param::get_param<std::string>("AutoAim.Predictor.motion_model");
+    const bool use_lmtd = (motion_model == "lmtd");
+    const bool use_sp = (motion_model == "sp");
 
     VehicleState vs;
     vs.target_id = target_id_;
@@ -357,13 +384,21 @@ VehicleState VehicleModel::predict(double timestamp) const {
     double best_score = 0;
 
     // 根据陀螺等级选择模型
-    bool spin_active = use_lmtd
-        ? (lmtd_motion_.get_spin_level() >= SpinLevel::LOW && lmtd_motion_.valid())
-        : (spin_motion_.get_spin_level() >= SpinLevel::LOW && spin_motion_.valid());
+    bool spin_active = false;
+    if (use_sp) {
+        spin_active = (sp_motion_.get_spin_level() >= SpinLevel::LOW && sp_motion_.valid());
+    } else if (use_lmtd) {
+        spin_active = (lmtd_motion_.get_spin_level() >= SpinLevel::LOW && lmtd_motion_.valid());
+    } else {
+        spin_active = (spin_motion_.get_spin_level() >= SpinLevel::LOW && spin_motion_.valid());
+    }
 
     if (spin_active) {
         // ========== 陀螺模式 ==========
-        if (use_lmtd) {
+        if (use_sp) {
+            vs.center = sp_motion_.predict_center(dt);
+            vs.velocity = sp_motion_.get_velocity();
+        } else if (use_lmtd) {
             vs.center = lmtd_motion_.predict_center(dt);
             vs.velocity = lmtd_motion_.get_center_velocity();
         } else {
@@ -372,8 +407,12 @@ VehicleState VehicleModel::predict(double timestamp) const {
         }
 
         // 获取当前追踪装甲板的 ID
-        int tracking_id = use_lmtd ? lmtd_motion_.get_tracked_id() : 0;
-        if (!use_lmtd) {
+        int tracking_id = 0;
+        if (use_sp) {
+            tracking_id = sp_motion_.get_tracked_id();
+        } else if (use_lmtd) {
+            tracking_id = lmtd_motion_.get_tracked_id();
+        } else {
             const auto* best_filter = armor_motion_.get_best(timestamp);
             if (best_filter) {
                 tracking_id = best_filter->id();
@@ -387,13 +426,22 @@ VehicleState VehicleModel::predict(double timestamp) const {
         double local_best_score = -1;
         int best_idx = -1;
 
-        double theta = use_lmtd ? lmtd_motion_.get_theta() : spin_motion_.get_theta();
+        double theta = 0;
+        if (use_sp) {
+            theta = sp_motion_.get_theta();
+        } else if (use_lmtd) {
+            theta = lmtd_motion_.get_theta();
+        } else {
+            theta = spin_motion_.get_theta();
+        }
 
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
             as.id = (i == 0) ? tracking_id : -1;  // 只有当前追踪的有 ID
 
-            if (use_lmtd) {
+            if (use_sp) {
+                as.position = sp_motion_.predict_armor_pos(i, dt);
+            } else if (use_lmtd) {
                 as.position = lmtd_motion_.predict_armor_pos(i, dt);
             } else {
                 as.position = spin_motion_.predict_armor_pos(i, dt);
@@ -479,6 +527,7 @@ void VehicleModel::reset() {
     armor_motion_.reset();
     spin_motion_.reset();
     lmtd_motion_.reset();
+    sp_motion_.reset();
     prev_armors_.clear();
     spin_.reset();
     frame_count_ = 0;
@@ -608,7 +657,10 @@ const char* enemy_color_str(EnemyColor color) {
 
 void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
     if (!initialized_) return;
-    const bool use_lmtd = runtime_param::get_param<bool>("AutoAim.Predictor.use_lmtd");
+    // 模型选择
+    const std::string motion_model = runtime_param::get_param<std::string>("AutoAim.Predictor.motion_model");
+    const bool use_lmtd = (motion_model == "lmtd");
+    const bool use_sp = (motion_model == "sp");
 
     // 计算距离上次更新的时间，用于判断数据是否过时
     double time_since_update = timestamp - last_update_time_;
@@ -622,10 +674,20 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     const cv::Scalar COLOR_FILTERED(255, 200, 0);  // 蓝色: 滤波后的
     const cv::Scalar COLOR_CENTER(0, 0, 255);      // 红色: 旋转中心
 
-    // SpinMotion/LmtdMotion 预测颜色: 未使用灰色，使用时用我方颜色
+    // SpinMotion/LmtdMotion/SpMotion 预测颜色: 未使用灰色，使用时用我方颜色
     cv::Scalar COLOR_SPIN;
-    bool spin_valid = use_lmtd ? lmtd_motion_.valid() : spin_motion_.valid();
-    SpinLevel spin_level = use_lmtd ? lmtd_motion_.get_spin_level() : spin_motion_.get_spin_level();
+    bool spin_valid = false;
+    SpinLevel spin_level = SpinLevel::NONE;
+    if (use_sp) {
+        spin_valid = sp_motion_.valid();
+        spin_level = sp_motion_.get_spin_level();
+    } else if (use_lmtd) {
+        spin_valid = lmtd_motion_.valid();
+        spin_level = lmtd_motion_.get_spin_level();
+    } else {
+        spin_valid = spin_motion_.valid();
+        spin_level = spin_motion_.get_spin_level();
+    }
     bool spin_active = spin_level >= SpinLevel::LOW && spin_valid;
     if (!spin_active) {
         COLOR_SPIN = cv::Scalar(128, 128, 128);  // 灰色: 未使用
@@ -702,22 +764,36 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 3. 绘制 SpinMotion/LmtdMotion 预测 (口字形) - EKF 滤波后的
+    // 3. 绘制 SpinMotion/LmtdMotion/SpMotion 预测 (口字形) - EKF 滤波后的
     // 即使未激活也绘制，方便调试
     // EKF 预测可以继续绘制，因为它有自己的时间预测能力
     if (spin_valid) {
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
-        double omega = use_lmtd ? lmtd_motion_.get_omega() : spin_motion_.get_omega();
-        double theta = use_lmtd ? lmtd_motion_.get_theta() : spin_motion_.get_theta();
+        double omega = 0, theta = 0;
+        if (use_sp) {
+            omega = sp_motion_.get_omega();
+            theta = sp_motion_.get_theta();
+        } else if (use_lmtd) {
+            omega = lmtd_motion_.get_omega();
+            theta = lmtd_motion_.get_theta();
+        } else {
+            omega = spin_motion_.get_omega();
+            theta = spin_motion_.get_theta();
+        }
         // 注意: predict_armor_pos 内部已经对 theta 做了 draw_dt 外推
         // 这里也要做同样的外推，保持一致
         double theta_predicted = theta + omega * draw_dt;
 
         // 绘制所有装甲板预测位置
         for (int i = 0; i < armor_num; ++i) {
-            Eigen::Vector3d pos = use_lmtd
-                ? lmtd_motion_.predict_armor_pos(i, draw_dt)
-                : spin_motion_.predict_armor_pos(i, draw_dt);
+            Eigen::Vector3d pos;
+            if (use_sp) {
+                pos = sp_motion_.predict_armor_pos(i, draw_dt);
+            } else if (use_lmtd) {
+                pos = lmtd_motion_.predict_armor_pos(i, draw_dt);
+            } else {
+                pos = spin_motion_.predict_armor_pos(i, draw_dt);
+            }
 
             // draw_armor_rect 需要装甲板朝向 (面朝方向, INWARD)
             // theta_predicted 是 OUTWARD (从中心指向装甲板), 装甲板朝向 = theta + π
@@ -737,9 +813,14 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
 
         // 绘制旋转中心
-        Eigen::Vector3d center = use_lmtd
-            ? lmtd_motion_.predict_center(draw_dt)
-            : spin_motion_.predict_center(draw_dt);
+        Eigen::Vector3d center;
+        if (use_sp) {
+            center = sp_motion_.predict_center(draw_dt);
+        } else if (use_lmtd) {
+            center = lmtd_motion_.predict_center(draw_dt);
+        } else {
+            center = spin_motion_.predict_center(draw_dt);
+        }
         bool valid = false;
         cv::Point2f pt = aimer::tf::world_to_pixel(center, q_imu, valid);
         if (valid) {
@@ -748,7 +829,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             cv::line(img, pt - cv::Point2f(s, 0), pt + cv::Point2f(s, 0), COLOR_CENTER, 2);
             cv::line(img, pt - cv::Point2f(0, s), pt + cv::Point2f(0, s), COLOR_CENTER, 2);
             // 标注角速度和状态
-            std::string model_str = use_lmtd ? "L" : "S";  // L=LMTD, S=SpinMotion
+            std::string model_str = use_sp ? "SP" : (use_lmtd ? "L" : "S");  // SP=SpMotion, L=LMTD, S=SpinMotion
             std::string state_str = spin_active ? "ON" : "OFF";
             cv::putText(img, fmt::format("w={:.1f} {}{}", omega, model_str, state_str),
                         pt + cv::Point2f(20, 0),
@@ -765,7 +846,11 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
 
         // rm.cv.fans 原版: 直接从 EKF 状态生成所有装甲板
         std::vector<Eigen::Vector3d> all_armors;
-        if (use_lmtd) {
+        if (use_sp) {
+            for (int i = 0; i < ((enemy_type_ == EnemyType::OUTPOST) ? 3 : 4); ++i) {
+                all_armors.push_back(sp_motion_.predict_armor_pos(i, 0));
+            }
+        } else if (use_lmtd) {
             for (int i = 0; i < ((enemy_type_ == EnemyType::OUTPOST) ? 3 : 4); ++i) {
                 all_armors.push_back(lmtd_motion_.predict_armor_pos(i, 0));
             }
@@ -778,14 +863,19 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
 
         // rm.cv.fans 原版: 用 EKF 的 theta 来画装甲板朝向
-        double state_theta_outward = use_lmtd ? lmtd_motion_.get_theta() : 0;
+        double state_theta_outward = 0;
+        if (use_sp) {
+            state_theta_outward = sp_motion_.get_theta();
+        } else if (use_lmtd) {
+            state_theta_outward = lmtd_motion_.get_theta();
+        }
         double obs_armor_yaw = active_armors[0].observation.z[obs::ARMOR_YAW];
 
         for (int i = 0; i < armor_num && i < static_cast<int>(all_armors.size()); ++i) {
             // draw_armor_rect 需要装甲板朝向 (INWARD)
-            // LMTD: OUTWARD + M_PI = INWARD
+            // SP/LMTD: OUTWARD + M_PI = INWARD
             double armor_yaw;
-            if (use_lmtd) {
+            if (use_sp || use_lmtd) {
                 armor_yaw = state_theta_outward + i * (2.0 * M_PI / armor_num) + M_PI;
             } else {
                 armor_yaw = obs_armor_yaw + i * (2.0 * M_PI / armor_num);
@@ -805,13 +895,24 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
 
         // 绘制中心和参数
-        double r0 = use_lmtd ? lmtd_motion_.get_radius() : spin_motion_.get_radius();
-        double dz = use_lmtd ? lmtd_motion_.get_dz() : spin_motion_.get_dz();
-        double another_r = use_lmtd ? lmtd_motion_.get_another_radius() : spin_motion_.get_another_radius();
-
-        Eigen::Vector3d center = use_lmtd
-            ? lmtd_motion_.predict_center(0)
-            : spin_motion_.predict_center(0);
+        double r0 = 0, dz = 0, another_r = 0;
+        Eigen::Vector3d center;
+        if (use_sp) {
+            r0 = sp_motion_.get_radius();
+            dz = sp_motion_.get_dz();
+            another_r = sp_motion_.get_another_radius();
+            center = sp_motion_.predict_center(0);
+        } else if (use_lmtd) {
+            r0 = lmtd_motion_.get_radius();
+            dz = lmtd_motion_.get_dz();
+            another_r = lmtd_motion_.get_another_radius();
+            center = lmtd_motion_.predict_center(0);
+        } else {
+            r0 = spin_motion_.get_radius();
+            dz = spin_motion_.get_dz();
+            another_r = spin_motion_.get_another_radius();
+            center = spin_motion_.predict_center(0);
+        }
 
         bool valid = false;
         cv::Point2f pt = aimer::tf::world_to_pixel(center, q_imu, valid);
@@ -836,7 +937,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             if (prev_armors_.size() == 2) {
                 dz_str += " [2]";  // 标记双装甲板
             }
-            if (use_lmtd) {
+            if (use_sp || use_lmtd) {
                 cv::putText(img, dz_str,
                             pt + cv::Point2f(15, 10),
                             cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
@@ -868,7 +969,12 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
                 double area = aimer::math::get_area(obs.pts) / 1000.0;
 
                 // 模式标注
-                std::string mode_str = spin_active ? (use_lmtd ? "LMTD" : "SPIN") : "NORMAL";
+                std::string mode_str = "NORMAL";
+                if (spin_active) {
+                    if (use_sp) mode_str = "SP";
+                    else if (use_lmtd) mode_str = "LMTD";
+                    else mode_str = "SPIN";
+                }
 
                 // 5行文字
                 std::array<std::string, 5> lines = {

@@ -29,7 +29,9 @@
     #@bool 是否显示预测可视化窗口
     show_window = true
 
-    use_lmtd = true
+    # 整车运动模型选择: "spin" (旧), "lmtd", "sp" (新, 推荐)
+    #@string 整车运动模型
+    motion_model = "sp"
 
     #@bool 是否使用双装甲板联合三分法优化 (fit_double_z_to_l)
     # true: 利用 90° 几何约束联合优化两块装甲板朝向角
@@ -104,7 +106,7 @@
     #@double 陀螺半径r过程噪声
     q_r = 0.005
     #@double 高度差dz过程噪声 (dz 现在在状态向量中滤波)
-    q_dz = 1.0
+    q_dz = 100.0
 
     # 观测噪声 R (越大越不信任观测，滤波越平滑)
     #@double yaw/pitch角度观测噪声 (调大减少位置抖动)
@@ -201,6 +203,76 @@
     top2_activate_w = 500.0
     #@double top_level 2 退激活阈值 (°/s)
     top2_deactivate_w = 450.0
+
+[AutoAim.Predictor.SpEKF]
+    # SP 整车旋转模型 (移植自 sp_vision_25)
+    # 核心区别: L 和 H 在状态向量内，切板时无需交换状态
+    # 状态向量: [xc, vx, yc, vy, zc, vz, θ, ω, r, l, h] (11维)
+    # l = r_odd - r_even (id=1,3 用 r+l)
+    # h = z_odd - z_even (id=1,3 用 zc+h)
+
+    # 过程噪声 Q (参考 SpinEKF)
+    #@double 旋转中心位置过程噪声
+    q_pos = 2.8
+    #@double 旋转中心速度过程噪声
+    q_vel = 2800.0
+    #@double 朝向角θ过程噪声
+    q_theta = 2.8
+    #@double 角速度ω过程噪声
+    q_omega = 280.0
+    #@double 基础半径r过程噪声
+    q_r = 0.005
+    #@double 半径差l过程噪声 (不乘dt)
+    q_l = 0.005
+    #@double 高度差h过程噪声 (不乘dt)
+    q_h = 0.005
+
+    # 观测噪声 R
+    #@double yaw/pitch角度观测噪声
+    r_angle = 15.0
+    #@double 距离观测噪声系数, R_dis = r_dis_k × distance⁴
+    r_dis_k = 80.0
+    #@double 装甲板朝向角观测噪声 - 单块
+    r_armor_yaw_single = 150.0
+    #@double 装甲板朝向角观测噪声 - 双块
+    r_armor_yaw_double = 80.0
+
+    # 几何参数
+    #@double 初始半径 (m)
+    init_r = 0.26
+    #@double 最小半径限制 (m)
+    r_min = 0.19
+    #@double 最大半径限制 (m)
+    r_max = 0.30
+    #@double 半径差绝对值最大值 (m)
+    l_abs_max = 0.15
+    #@double 高度差绝对值最大值 (m)
+    h_abs_max = 0.10
+
+    # Z轴约束
+    #@bool 强制Z轴速度为0
+    force_zero_vz = true
+
+    # 陀螺等级阈值 (度/秒)
+    #@double top_level 1 激活阈值 (°/s)
+    top1_activate_w = 90.0
+    #@double top_level 1 退激活阈值 (°/s)
+    top1_deactivate_w = 60.0
+    #@double top_level 2 激活阈值 (°/s)
+    top2_activate_w = 500.0
+    #@double top_level 2 退激活阈值 (°/s)
+    top2_deactivate_w = 450.0
+
+[AutoAim.Predictor.SpEKF.Gating]
+    # 马氏距离门限检查参数 (4维观测, p=0.01)
+    #@double χ²门限, 超过则拒绝观测
+    chi2_threshold = 13.28
+    #@int 连续拒绝次数上限, 超过则重置EKF
+    max_reject = 5
+    #@double 拒绝后过程噪声放大倍数
+    q_scale_increase = 1.5
+    #@double 接受后过程噪声衰减倍数 (最小为1.0)
+    q_scale_decay = 0.9
 
 [AutoAim.Predictor.OutpostEKF]
     # 过程噪声 Q (越大越信任观测，越小越信任预测)

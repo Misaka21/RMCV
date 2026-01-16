@@ -19,6 +19,7 @@
 #include "motion/armor_motion.hpp"
 #include "motion/spin_motion.hpp"
 #include "motion/lmtd_motion.hpp"
+#include "motion/sp_motion.hpp"
 #include "param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
@@ -82,6 +83,9 @@ private:
     // LMTD 整车旋转模型 (替代 SpinMotion, 内部处理跳变)
     LmtdMotion lmtd_motion_;
     // use_lmtd 参数在使用点直接调用 runtime_param::get_param 以支持热更新
+
+    // SP 整车旋转模型 (移植自 sp_vision_25, 11维状态)
+    SpMotion sp_motion_;
 
     // 上一帧观测 (用于消抖)
     std::vector<ArmorObservation> prev_armors_;
