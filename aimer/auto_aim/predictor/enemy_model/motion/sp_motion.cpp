@@ -11,6 +11,7 @@
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/plotter/plotter.hpp"
 
 namespace autoaim::predictor {
 
@@ -509,15 +510,37 @@ Eigen::Vector3d SpMotion::get_velocity() const {
 std::vector<Eigen::Vector3d> SpMotion::compute_all_armors_from_observation(
     const Eigen::Vector3d& /* observed_pos */,
     double /* observed_theta */) const {
-    // 直接从 EKF 状态生成所有装甲板
+    // 直接调用新接口
+    return compute_all_armors(0);
+}
+
+std::vector<Eigen::Vector3d> SpMotion::compute_all_armors(double dt) const {
     std::vector<Eigen::Vector3d> result;
     result.reserve(armor_num_);
 
     for (int i = 0; i < armor_num_; ++i) {
-        result.push_back(predict_armor_pos(i, 0));
+        result.push_back(predict_armor_pos(i, dt));
     }
 
     return result;
+}
+
+void SpMotion::output_to_plotter(const std::string& prefix) const {
+    VectorX x = ekf_.get_x();
+
+    plotter::add(prefix + "/xc", x[sp_model::XC]);
+    plotter::add(prefix + "/yc", x[sp_model::YC]);
+    plotter::add(prefix + "/zc", x[sp_model::ZC]);
+    plotter::add(prefix + "/vx", x[sp_model::VX]);
+    plotter::add(prefix + "/vy", x[sp_model::VY]);
+    plotter::add(prefix + "/vz", x[sp_model::VZ]);
+    plotter::add(prefix + "/theta", x[sp_model::THETA] * 57.3);  // 转换为度
+    plotter::add(prefix + "/omega", x[sp_model::OMEGA]);
+    plotter::add(prefix + "/r", x[sp_model::R]);
+    plotter::add(prefix + "/l", x[sp_model::L]);
+    plotter::add(prefix + "/h", x[sp_model::H]);
+    plotter::add(prefix + "/spin_level", static_cast<int>(spin_level_));
+    plotter::add(prefix + "/tracked_id", tracked_armor_id_);
 }
 
 void SpMotion::reset() {

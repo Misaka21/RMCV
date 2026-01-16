@@ -45,6 +45,7 @@
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "aimer/common/filter/adaptive_ekf.hpp"
+#include "motion_interface.hpp"
 
 namespace autoaim::predictor {
 
@@ -182,7 +183,7 @@ struct SpMeasure {
  * - 切板时状态连续，不会跳变
  * - 简化代码，减少 bug
  */
-class SpMotion {
+class SpMotion : public MotionInterface {
 public:
     using Ekf = aimer::filter::AdaptiveEkf<sp_model::N_X, sp_model::N_Z>;
     using VectorX = Eigen::Matrix<double, sp_model::N_X, 1>;
@@ -196,92 +197,45 @@ public:
      */
     explicit SpMotion(int armor_num = 4);
 
-    /**
-     * @brief 初始化
-     */
-    void init(const ArmorData& armor, double timestamp);
+    // ==================== MotionInterface 实现 ====================
 
-    /**
-     * @brief 更新 (单装甲板)
-     */
-    void update(const ArmorData& armor, double timestamp);
+    void init(const ArmorData& armor, double timestamp) override;
+    void update(const ArmorData& armor, double timestamp) override;
+    void update(const std::vector<ArmorData>& armors, double timestamp) override;
+    void reset() override;
+    bool valid() const override { return initialized_; }
 
-    /**
-     * @brief 更新 (多装甲板)
-     */
-    void update(const std::vector<ArmorData>& armors, double timestamp);
+    Eigen::Vector3d predict_center(double dt) const override;
+    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const override;
 
-    /**
-     * @brief 预测旋转中心位置
-     */
-    Eigen::Vector3d predict_center(double dt) const;
-
-    /**
-     * @brief 预测指定装甲板位置
-     * @param armor_idx 装甲板编号 (0-3)
-     * @param dt 预测时间差
-     */
-    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const;
-
-    /**
-     * @brief 获取当前追踪装甲板位置
-     */
-    Eigen::Vector3d get_armor_pos() const;
-
-    /**
-     * @brief 获取旋转中心速度
-     */
-    Eigen::Vector3d get_velocity() const;
-
-    /**
-     * @brief 获取角速度
-     */
-    double get_omega() const { return ekf_.get_x()[sp_model::OMEGA]; }
-
-    /**
-     * @brief 获取车体朝向 (OUTWARD, 指向 id=0 装甲板)
-     */
-    double get_theta() const { return ekf_.get_x()[sp_model::THETA]; }
-
-    /**
-     * @brief 获取陀螺等级
-     */
-    SpinLevel get_spin_level() const { return spin_level_; }
-
-    /**
-     * @brief 获取基础半径 (id=0,2 用)
-     */
-    double get_radius() const { return ekf_.get_x()[sp_model::R]; }
-
-    /**
-     * @brief 获取另一个半径 (id=1,3 用, 即 r+l)
-     */
-    double get_another_radius() const {
+    Eigen::Vector3d get_velocity() const override;
+    Eigen::Vector3d get_armor_pos() const override;
+    double get_theta() const override { return ekf_.get_x()[sp_model::THETA]; }
+    double get_omega() const override { return ekf_.get_x()[sp_model::OMEGA]; }
+    double get_radius() const override { return ekf_.get_x()[sp_model::R]; }
+    double get_another_radius() const override {
         VectorX x = ekf_.get_x();
         return x[sp_model::R] + x[sp_model::L];
     }
+    double get_dz() const override { return ekf_.get_x()[sp_model::H]; }
+    SpinLevel get_spin_level() const override { return spin_level_; }
+    int get_tracked_id() const override { return tracked_armor_id_; }
+
+    std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
+    void output_to_plotter(const std::string& prefix) const override;
+    const char* name() const override { return "sp"; }
+    int armor_num() const override { return armor_num_; }
+
+    // ==================== 额外方法 ====================
 
     /**
-     * @brief 获取高度差 h (z_odd - z_even)
-     */
-    double get_dz() const { return ekf_.get_x()[sp_model::H]; }
-
-    /**
-     * @brief 获取当前追踪的装甲板 ID
-     */
-    int get_tracked_id() const { return tracked_armor_id_; }
-
-    /**
-     * @brief 从观测装甲板反推所有装甲板位置
-     * @param observed_pos 观测装甲板位置 (未使用，直接从 EKF 状态计算)
-     * @param observed_theta 观测装甲板朝向 (未使用)
+     * @brief 从观测装甲板反推所有装甲板位置 (兼容旧接口)
+     * @deprecated 使用 compute_all_armors() 替代
      */
     std::vector<Eigen::Vector3d> compute_all_armors_from_observation(
         const Eigen::Vector3d& observed_pos,
         double observed_theta) const;
 
-    bool valid() const { return initialized_; }
-    void reset();
     VectorX get_state() const { return ekf_.get_x(); }
 
 private:

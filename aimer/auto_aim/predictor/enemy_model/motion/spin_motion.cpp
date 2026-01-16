@@ -10,6 +10,7 @@
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/plotter/plotter.hpp"
 
 namespace autoaim::predictor {
 
@@ -550,18 +551,38 @@ Eigen::Vector3d SpinMotion::get_velocity() const {
 std::vector<Eigen::Vector3d> SpinMotion::compute_all_armors_from_observation(
     const Eigen::Vector3d& /* observed_pos */,
     double /* observed_theta */) const {
-    // rm.cv.fans 原版设计: 直接从 EKF 状态生成所有装甲板
-    // 不需要从观测反推！更稳定，避免飘走
+    // 直接调用新接口
+    return compute_all_armors(0);
+}
 
+std::vector<Eigen::Vector3d> SpinMotion::compute_all_armors(double dt) const {
     std::vector<Eigen::Vector3d> result;
     result.reserve(armor_num_);
 
-    // 直接用 predict_armor_pos，和 rm.cv.fans 的 predict_armors 一样
     for (int i = 0; i < armor_num_; ++i) {
-        result.push_back(predict_armor_pos(i, 0));  // dt=0，当前时刻
+        result.push_back(predict_armor_pos(i, dt));
     }
 
     return result;
+}
+
+void SpinMotion::output_to_plotter(const std::string& prefix) const {
+    VectorX x = ekf_.get_x();
+
+    plotter::add(prefix + "/xc", x[spin_model::XC]);
+    plotter::add(prefix + "/yc", x[spin_model::YC]);
+    plotter::add(prefix + "/zc", x[spin_model::ZC]);
+    plotter::add(prefix + "/vx", x[spin_model::VX]);
+    plotter::add(prefix + "/vy", x[spin_model::VY]);
+    plotter::add(prefix + "/vz", x[spin_model::VZ]);
+    plotter::add(prefix + "/theta", x[spin_model::THETA] * 57.3);  // 转换为度
+    plotter::add(prefix + "/omega", x[spin_model::OMEGA]);
+    plotter::add(prefix + "/r", x[spin_model::R]);
+    plotter::add(prefix + "/dz", x[spin_model::DZ]);
+    plotter::add(prefix + "/another_r", another_r_);
+    plotter::add(prefix + "/another_dz", another_dz_);
+    plotter::add(prefix + "/spin_level", static_cast<int>(spin_level_));
+    plotter::add(prefix + "/tracked_id", tracked_armor_id_);
 }
 
 void SpinMotion::reset() {

@@ -6,6 +6,7 @@ add_library(motion STATIC
     lmtd_motion.cpp
     sp_motion.cpp
     outpost_motion.cpp
+    motion_factory.cpp
 )
 
 target_include_directories(motion PUBLIC

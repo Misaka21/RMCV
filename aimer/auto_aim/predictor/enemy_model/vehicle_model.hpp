@@ -8,18 +8,19 @@
  * - 观测消抖
  * - 装甲板 ID 分配 (ArmorIdentifier)
  * - 匀速 EKF 滤波 (ArmorMotion)
- * - (TODO) 整车 EKF 滤波 (VehicleEkf)
+ * - 整车 EKF 滤波 (MotionInterface)
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_VEHICLE_MODEL_HPP__
 #define __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_VEHICLE_MODEL_HPP__
 
+#include <memory>
+
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "enemy_model.hpp"
 #include "motion/armor_motion.hpp"
-#include "motion/spin_motion.hpp"
-#include "motion/lmtd_motion.hpp"
-#include "motion/sp_motion.hpp"
+#include "motion/motion_interface.hpp"
+#include "motion/motion_factory.hpp"
 #include "param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
@@ -47,7 +48,7 @@ public:
      * 绘制内容:
      * - 检测到的装甲板四角点 (绿色)
      * - ArmorMotion 滤波位置 (蓝色圆圈)
-     * - SpinMotion 预测的所有装甲板 (黄色, 陀螺模式)
+     * - 整车模型预测的所有装甲板 (黄色, 陀螺模式)
      * - 旋转中心 (红色十字, 陀螺模式)
      */
     void draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const override;
@@ -63,6 +64,11 @@ private:
         const std::vector<ArmorObservation>& last
     ) const;
 
+    /**
+     * @brief 确保运动模型存在且类型匹配
+     */
+    void ensure_motion_model();
+
     // ==================== 数据 ====================
 
     int target_id_;
@@ -77,15 +83,9 @@ private:
     // 装甲板运动模型 (职责: 匀速 EKF 滤波)
     ArmorMotion armor_motion_;
 
-    // 整车旋转模型 (职责: 陀螺 EKF 滤波)
-    SpinMotion spin_motion_;
-
-    // LMTD 整车旋转模型 (替代 SpinMotion, 内部处理跳变)
-    LmtdMotion lmtd_motion_;
-    // use_lmtd 参数在使用点直接调用 runtime_param::get_param 以支持热更新
-
-    // SP 整车旋转模型 (移植自 sp_vision_25, 11维状态)
-    SpMotion sp_motion_;
+    // 整车旋转模型 (通过工厂创建，支持热切换)
+    std::unique_ptr<MotionInterface> motion_;
+    std::string current_motion_model_;  // 当前模型类型 ("spin", "lmtd", "sp")
 
     // 上一帧观测 (用于消抖)
     std::vector<ArmorObservation> prev_armors_;
@@ -94,7 +94,7 @@ private:
     // 陀螺状态
     SpinState spin_;
 
-    // 跳变检测 (上层负责检测，通知 SpinMotion)
+    // 追踪状态
     int last_tracking_id_ = -1;
 
     // 敌方颜色 (用于绘图)

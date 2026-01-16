@@ -42,6 +42,7 @@
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "aimer/common/filter/adaptive_ekf.hpp"
+#include "motion_interface.hpp"
 
 namespace autoaim::predictor {
 
@@ -170,7 +171,7 @@ struct LmtdMeasure {
  * 3. dz 定义: 当前装甲板 z - 下一块装甲板 z
  *    - 跳变时: new_dz = old_za - new_za
  */
-class LmtdMotion {
+class LmtdMotion : public MotionInterface {
 public:
     using Ekf = aimer::filter::AdaptiveEkf<lmtd_model::N_X, lmtd_model::N_Z>;
     using VectorX = Eigen::Matrix<double, lmtd_model::N_X, 1>;
@@ -184,36 +185,33 @@ public:
      */
     explicit LmtdMotion(int armor_num = 4);
 
-    /**
-     * @brief 初始化
-     */
-    void init(const ArmorData& armor, double timestamp);
+    // ==================== MotionInterface 实现 ====================
 
-    /**
-     * @brief 更新 (单装甲板)
-     */
-    void update(const ArmorData& armor, double timestamp);
+    void init(const ArmorData& armor, double timestamp) override;
+    void update(const ArmorData& armor, double timestamp) override;
+    void update(const std::vector<ArmorData>& armors, double timestamp) override;
+    void reset() override;
+    bool valid() const override { return initialized_; }
 
-    /**
-     * @brief 更新 (多装甲板)
-     */
-    void update(const std::vector<ArmorData>& armors, double timestamp);
+    Eigen::Vector3d predict_center(double dt) const override;
+    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const override;
 
-    /**
-     * @brief 预测旋转中心位置
-     */
-    Eigen::Vector3d predict_center(double dt) const;
+    Eigen::Vector3d get_velocity() const override { return get_center_velocity(); }
+    Eigen::Vector3d get_armor_pos() const override;
+    double get_theta() const override { return ekf_.get_x()[lmtd_model::THETA]; }
+    double get_omega() const override { return ekf_.get_x()[lmtd_model::OMEGA]; }
+    double get_radius() const override { return ekf_.get_x()[lmtd_model::R]; }
+    double get_another_radius() const override { return another_r_; }
+    double get_dz() const override { return dz_; }
+    SpinLevel get_spin_level() const override { return spin_level_; }
+    int get_tracked_id() const override { return tracked_armor_id_; }
 
-    /**
-     * @brief 预测指定装甲板位置
-     * @param armor_idx 装甲板索引 (0 = 当前追踪, 1~3 = 其他)
-     */
-    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const;
+    std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
+    void output_to_plotter(const std::string& prefix) const override;
+    const char* name() const override { return "lmtd"; }
+    int armor_num() const override { return armor_num_; }
 
-    /**
-     * @brief 获取当前追踪装甲板位置
-     */
-    Eigen::Vector3d get_armor_pos() const;
+    // ==================== 额外方法 ====================
 
     /**
      * @brief 获取装甲板速度 (包含旋转分量)
@@ -226,40 +224,8 @@ public:
     Eigen::Vector3d get_center_velocity() const;
 
     /**
-     * @brief 获取角速度
-     */
-    double get_omega() const { return ekf_.get_x()[lmtd_model::OMEGA]; }
-
-    /**
-     * @brief 获取装甲板朝向角 (OUTWARD)
-     */
-    double get_theta() const { return ekf_.get_x()[lmtd_model::THETA]; }
-
-    /**
-     * @brief 获取陀螺等级
-     */
-    SpinLevel get_spin_level() const { return spin_level_; }
-
-    /**
-     * @brief 获取当前半径
-     */
-    double get_radius() const { return ekf_.get_x()[lmtd_model::R]; }
-
-    /**
-     * @brief 获取另一个半径
-     */
-    double get_another_radius() const { return another_r_; }
-
-    /**
-     * @brief 获取高度差 (当前装甲板 z - 下一块装甲板 z)
-     */
-    double get_dz() const { return dz_; }
-
-    /**
-     * @brief 从观测装甲板反推所有装甲板位置
-     * @param observed_pos 观测装甲板位置
-     * @param observed_theta 观测装甲板朝向 (OUTWARD)
-     * @param observed_id 观测装甲板 ID (用于确定半径)
+     * @brief 从观测装甲板反推所有装甲板位置 (兼容旧接口)
+     * @deprecated 使用 compute_all_armors() 替代
      */
     std::vector<Eigen::Vector3d> compute_all_armors_from_observation(
         const Eigen::Vector3d& observed_pos,
@@ -271,13 +237,6 @@ public:
      */
     bool credit(double current_time) const;
 
-    /**
-     * @brief 获取当前追踪的装甲板 ID
-     */
-    int get_tracked_id() const { return tracked_armor_id_; }
-
-    bool valid() const { return initialized_; }
-    void reset();
     VectorX get_state() const { return ekf_.get_x(); }
 
 private:

@@ -18,6 +18,7 @@
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/plotter/plotter.hpp"
 
 namespace autoaim::predictor {
 
@@ -504,19 +505,38 @@ std::vector<Eigen::Vector3d> LmtdMotion::compute_all_armors_from_observation(
     const Eigen::Vector3d& /* observed_pos */,
     double /* observed_theta */,
     int /* observed_id */) const {
-    // rm.cv.fans 原版设计: 直接从 EKF 状态生成所有装甲板
-    // 不需要从观测反推！
-    // 参考 lmtd_top_model.cpp 的 predict_armors (第 461-490 行)
+    // 直接调用新接口
+    return compute_all_armors(0);
+}
 
+std::vector<Eigen::Vector3d> LmtdMotion::compute_all_armors(double dt) const {
     std::vector<Eigen::Vector3d> result;
     result.reserve(armor_num_);
 
-    // 直接用 predict_armor_pos，和 rm.cv.fans 的 predict_armors 一样
     for (int i = 0; i < armor_num_; ++i) {
-        result.push_back(predict_armor_pos(i, 0));  // dt=0，当前时刻
+        result.push_back(predict_armor_pos(i, dt));
     }
 
     return result;
+}
+
+void LmtdMotion::output_to_plotter(const std::string& prefix) const {
+    VectorX x = ekf_.get_x();
+
+    plotter::add(prefix + "/xc", x[lmtd_model::XC]);
+    plotter::add(prefix + "/yc", x[lmtd_model::YC]);
+    plotter::add(prefix + "/za", x[lmtd_model::ZA]);
+    plotter::add(prefix + "/vx", x[lmtd_model::VX]);
+    plotter::add(prefix + "/vy", x[lmtd_model::VY]);
+    plotter::add(prefix + "/vz", x[lmtd_model::VZ]);
+    plotter::add(prefix + "/theta", x[lmtd_model::THETA] * 57.3);  // 转换为度
+    plotter::add(prefix + "/omega", x[lmtd_model::OMEGA]);
+    plotter::add(prefix + "/r", x[lmtd_model::R]);
+    plotter::add(prefix + "/another_r", another_r_);
+    plotter::add(prefix + "/dz", dz_);
+    plotter::add(prefix + "/spin_level", static_cast<int>(spin_level_));
+    plotter::add(prefix + "/top_level", top_level_);
+    plotter::add(prefix + "/tracked_id", tracked_armor_id_);
 }
 
 void LmtdMotion::reset() {

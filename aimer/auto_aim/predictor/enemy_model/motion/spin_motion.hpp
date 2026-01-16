@@ -41,6 +41,7 @@
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
 #include "aimer/common/filter/adaptive_ekf.hpp"
+#include "motion_interface.hpp"
 
 namespace autoaim::predictor {
 
@@ -183,7 +184,7 @@ struct SpinMeasure {
  * - 陀螺等级判断
  * - 多装甲板位置预测
  */
-class SpinMotion {
+class SpinMotion : public MotionInterface {
 public:
     using Ekf = aimer::filter::AdaptiveEkf<spin_model::N_X, spin_model::N_Z>;
     using VectorX = Eigen::Matrix<double, spin_model::N_X, 1>;
@@ -197,85 +198,33 @@ public:
      */
     explicit SpinMotion(int armor_num = 4);
 
-    /**
-     * @brief 初始化
-     * @param armor 初始装甲板数据 (带 ID)
-     * @param timestamp 时间戳
-     */
-    void init(const ArmorData& armor, double timestamp);
+    // ==================== MotionInterface 实现 ====================
 
-    /**
-     * @brief 更新 (单装甲板)
-     * @param armor 装甲板数据 (带 ID，用于跳变检测)
-     * @param timestamp 时间戳
-     */
-    void update(const ArmorData& armor, double timestamp);
+    void init(const ArmorData& armor, double timestamp) override;
+    void update(const ArmorData& armor, double timestamp) override;
+    void update(const std::vector<ArmorData>& armors, double timestamp) override;
+    void reset() override;
+    bool valid() const override { return initialized_; }
 
-    /**
-     * @brief 更新 (多装甲板)
-     *
-     * 当同时看到多块装甲板时，利用几何关系直接计算:
-     * - 旋转中心 (两块装甲板位置 + 朝向)
-     * - 半径 (两块装甲板间距 / 法向量差)
-     * - 高度差 (两块装甲板 z 坐标差)
-     *
-     * @param armors 装甲板数据列表 (按 z_to_v 排序)
-     * @param timestamp 时间戳
-     */
-    void update(const std::vector<ArmorData>& armors, double timestamp);
+    Eigen::Vector3d predict_center(double dt) const override;
+    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const override;
 
-    /**
-     * @brief 预测旋转中心位置
-     * @param dt 预测时间差
-     */
-    Eigen::Vector3d predict_center(double dt) const;
+    Eigen::Vector3d get_velocity() const override;
+    Eigen::Vector3d get_armor_pos() const override;
+    double get_theta() const override { return ekf_.get_x()[spin_model::THETA]; }
+    double get_omega() const override { return ekf_.get_x()[spin_model::OMEGA]; }
+    double get_radius() const override { return ekf_.get_x()[spin_model::R]; }
+    double get_another_radius() const override { return another_r_; }
+    double get_dz() const override { return ekf_.get_x()[spin_model::DZ]; }
+    SpinLevel get_spin_level() const override { return spin_level_; }
+    int get_tracked_id() const override { return tracked_armor_id_; }
 
-    /**
-     * @brief 预测指定装甲板位置
-     * @param armor_idx 装甲板索引 (0~3)
-     * @param dt 预测时间差
-     */
-    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const;
+    std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
+    void output_to_plotter(const std::string& prefix) const override;
+    const char* name() const override { return "spin"; }
+    int armor_num() const override { return armor_num_; }
 
-    /**
-     * @brief 获取当前追踪装甲板位置
-     */
-    Eigen::Vector3d get_armor_pos() const;
-
-    /**
-     * @brief 获取旋转中心速度
-     */
-    Eigen::Vector3d get_velocity() const;
-
-    /**
-     * @brief 获取角速度
-     */
-    double get_omega() const { return ekf_.get_x()[spin_model::OMEGA]; }
-
-    /**
-     * @brief 获取车体朝向
-     */
-    double get_theta() const { return ekf_.get_x()[spin_model::THETA]; }
-
-    /**
-     * @brief 获取陀螺等级
-     */
-    SpinLevel get_spin_level() const { return spin_level_; }
-
-    /**
-     * @brief 获取当前半径
-     */
-    double get_radius() const { return ekf_.get_x()[spin_model::R]; }
-
-    /**
-     * @brief 获取另一个半径 (4装甲板时)
-     */
-    double get_another_radius() const { return another_r_; }
-
-    /**
-     * @brief 获取当前高度差 (从状态向量)
-     */
-    double get_dz() const { return ekf_.get_x()[spin_model::DZ]; }
+    // ==================== 额外方法 ====================
 
     /**
      * @brief 获取另一个高度差 (外部维护)
@@ -283,45 +232,20 @@ public:
     double get_another_dz() const { return another_dz_; }
 
     /**
-     * @brief 从观测装甲板反推所有装甲板位置
-     *
-     * 用途: 绘制时避免 EKF 滤波滞后
-     * - 以观测装甲板为基准点 (位置无滞后)
-     * - 用 EKF 估计的几何参数 (r, another_r, dz)
-     * - 反推其他装甲板位置
-     *
-     * @param observed_pos 观测到的装甲板位置
-     * @param observed_theta 观测到的装甲板朝向 (OUTWARD)
-     * @return 所有装甲板位置 (idx=0 是观测装甲板)
+     * @brief 从观测装甲板反推所有装甲板位置 (兼容旧接口)
+     * @deprecated 使用 compute_all_armors() 替代
      */
     std::vector<Eigen::Vector3d> compute_all_armors_from_observation(
         const Eigen::Vector3d& observed_pos,
         double observed_theta) const;
 
     /**
-     * @brief 是否有效
-     */
-    bool valid() const { return initialized_; }
-
-    /**
-     * @brief 重置
-     */
-    void reset();
-
-    /**
-     * @brief 获取状态向量
-     */
-    VectorX get_state() const { return ekf_.get_x(); }
-
-    /**
      * @brief 通知发生装甲板跳变 (由上层 VehicleModel 调用)
-     *
-     * 职责: 只做状态转移 (交换半径/高度差)，不做跳变检测
-     *
-     * @param jump_index 跳变索引 (相对当前装甲板偏移几块, 1~armor_num-1)
-     * @param new_armor 新装甲板数据 (用于更新朝向角和位置)
+     * @deprecated 跳变检测已移到内部
      */
     void notify_jump(int jump_index, const ArmorData& new_armor);
+
+    VectorX get_state() const { return ekf_.get_x(); }
 
 private:
     /**
