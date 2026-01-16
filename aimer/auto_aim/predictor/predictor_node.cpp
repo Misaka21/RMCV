@@ -3,7 +3,7 @@
  * @brief 预测器节点
  *
  * 订阅: Message<DetectionResult> "detections"
- * 发布: Message<BattlefieldSnapshot> "battlefield"
+ * 输出: BasicObjManager<BattlefieldSnapshot> "battlefield"
  */
 
 #include <chrono>
@@ -40,7 +40,7 @@ void start_predictor_node() {
 
     // 设置 UMT
     umt::Subscriber<DetectionResult> sub("detections");
-    umt::Publisher<BattlefieldSnapshot> pub("battlefield");
+    auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find_or_create("battlefield");
     umt::Publisher<cv::Mat> vis_pub("predictor_vis");  // 可视化帧 (供录制)
     umt::Publisher<cv::Mat> pub_debug("/predictor/debug");  // Web 调试图像
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
@@ -75,8 +75,8 @@ void start_predictor_node() {
             auto predict_time_since_epoch = predict_end.time_since_epoch();
             snapshot.predict_timestamp = std::chrono::duration<double>(predict_time_since_epoch).count();
 
-            // 发布结果
-            pub.push(snapshot);
+            // 写入共享对象 (火控通过 BasicObjManager 读取)
+            battlefield->get() = snapshot;
 
             // 输出云台状态到 PlotJuggler
             // q_imu 是 IMU 原始姿态，需要修正 R_gimbal2imubody 得到真正的云台角度
