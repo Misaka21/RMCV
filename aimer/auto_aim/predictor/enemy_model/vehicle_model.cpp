@@ -162,13 +162,19 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
         spin_.active = (spin_.level >= SpinLevel::LOW) && sp_motion_.valid();
     } else if (use_lmtd) {
         spin_.omega = lmtd_motion_.get_omega();
-        spin_.phase = lmtd_motion_.get_theta();
+        // LmtdMotion 的 theta 是当前追踪装甲板的角度，需要转换为车体角度
+        // 车体角度 = 装甲板角度 - tracked_id × 2π/N
+        int tracked_id = lmtd_motion_.get_tracked_id();
+        constexpr int armor_num = 4;
+        spin_.phase = lmtd_motion_.get_theta() - tracked_id * (2.0 * M_PI / armor_num);
         spin_.radius = lmtd_motion_.get_radius();
         spin_.radius_2 = lmtd_motion_.get_another_radius();
         spin_.level = lmtd_motion_.get_spin_level();
         spin_.active = (spin_.level >= SpinLevel::LOW) && lmtd_motion_.valid();
     } else {
         spin_.omega = spin_motion_.get_omega();
+        // SpinMotion 的 theta 也是当前追踪装甲板的角度
+        // 但 SpinMotion 没有 get_tracked_id，暂时不转换 (此分支已很少使用)
         spin_.phase = spin_motion_.get_theta();
         spin_.radius = spin_motion_.get_radius();
         spin_.radius_2 = spin_motion_.get_another_radius();
