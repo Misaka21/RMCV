@@ -126,8 +126,10 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
             // 检测跳变: ID 变化 + 角度匹配验证
             if (last_tracking_id_ >= 0 && current_id != last_tracking_id_ && spin_motion_.valid()) {
                 // 计算跳变索引 (用角度匹配)
+                // theta_pred 是 OUTWARD (从中心指向装甲板)
+                // armor_yaw 需要从 INWARD (PnP输出) 转成 OUTWARD
                 double theta_pred = spin_motion_.get_theta();
-                double armor_yaw = best_armor.observation.z[obs::ARMOR_YAW];
+                double armor_yaw = best_armor.observation.z[obs::ARMOR_YAW] + M_PI;  // INWARD → OUTWARD
 
                 int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
                 double angle_step = 2.0 * M_PI / armor_num;
