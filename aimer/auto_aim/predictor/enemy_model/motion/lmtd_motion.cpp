@@ -136,6 +136,13 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
         // 直接设为新装甲板的 z (避免累积误差)
         x[lmtd_model::ZA] = new_za;
 
+        // 关键修复：r 交换后，需要根据新 r 和观测位置反推新中心
+        // 否则用旧中心 + 新 r 计算的装甲板位置会跳变
+        // center = armor_pos - r * (cos θ, sin θ)  (OUTWARD)
+        double new_r = x[lmtd_model::R];
+        x[lmtd_model::XC] = obs.pos.x() - new_r * std::cos(new_orient);
+        x[lmtd_model::YC] = obs.pos.y() - new_r * std::sin(new_orient);
+
         debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
             "After swap: r={:.3f}, another_r={:.3f}, za={:.3f}, dz={:.3f}",
             x[lmtd_model::R], another_r_, x[lmtd_model::ZA], dz_);
@@ -145,8 +152,7 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
             most_like_index, x[lmtd_model::R], another_r_);
     }
 
-    // rm.cv.fans 关键设计：跳变时只更新 theta，不更新中心位置 xc, yc
-    // 让 EKF 通过后续观测自己收敛中心位置，避免 PnP 误差直接影响中心
+    // 更新 theta
     x[lmtd_model::THETA] = new_orient;
 
     debug::print(debug::PrintMode::DEBUG, "LmtdMotion",

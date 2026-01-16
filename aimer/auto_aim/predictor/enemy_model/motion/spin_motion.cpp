@@ -347,9 +347,17 @@ bool SpinMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
         debug::print(debug::PrintMode::DEBUG, "SpinMotion",
             "After swap: r={:.3f}, another_r={:.3f}, dz={:.3f}, another_dz={:.3f}",
             x[spin_model::R], another_r_, x[spin_model::DZ], another_dz_);
+
+        // 关键修复：r 交换后，需要根据新 r 和观测位置反推新中心
+        // 否则用旧中心 + 新 r 计算的装甲板位置会跳变
+        // center = armor_pos - r * (cos θ, sin θ)  (OUTWARD)
+        double new_r = x[spin_model::R];
+        x[spin_model::XC] = obs.pos.x() - new_r * std::cos(new_orient);
+        x[spin_model::YC] = obs.pos.y() - new_r * std::sin(new_orient);
+        x[spin_model::ZC] = obs.pos.z() - x[spin_model::DZ];
     }
 
-    // rm.cv.fans 关键设计：跳变时只更新 theta，不更新中心位置 xc, yc, zc
+    // 更新 theta
     x[spin_model::THETA] = new_orient;
 
     debug::print(debug::PrintMode::DEBUG, "SpinMotion",
