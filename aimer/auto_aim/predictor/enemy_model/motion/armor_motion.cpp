@@ -68,7 +68,7 @@ void FilterThread::update(const ArmorData& armor, double timestamp) {
 
     // 读取门限参数
     double chi2_threshold = runtime_param::get_param<double>("AutoAim.Predictor.EKF.Gating.chi2_threshold");
-    int max_reject = runtime_param::get_param<int>("AutoAim.Predictor.EKF.Gating.max_reject");
+    int64_t max_reject = runtime_param::get_param<int64_t>("AutoAim.Predictor.EKF.Gating.max_reject");
     double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.EKF.Gating.q_scale_increase");
     double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.EKF.Gating.q_scale_decay");
 

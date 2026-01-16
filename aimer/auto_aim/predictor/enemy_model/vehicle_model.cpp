@@ -159,16 +159,16 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     }
 
     // DEBUG: 输出装甲板数量和 ID
-    if (armors_with_id.size() > 1 || armor_motion_.size() > 1) {
-        fmt::print(fmt::fg(fmt::color::orange),
-            "[T{}] obs:{} filtered:{} active:{} filters:{}\n",
-            target_id_, observations.size(), filtered.size(),
-            armors_with_id.size(), armor_motion_.size());
-        for (const auto& a : armors_with_id) {
-            fmt::print("  armor id={} pos=({:.2f},{:.2f},{:.2f})\n",
-                a.id, a.pos().x(), a.pos().y(), a.pos().z());
-        }
-    }
+    //if (armors_with_id.size() > 1 || armor_motion_.size() > 1) {
+    //    fmt::print(fmt::fg(fmt::color::orange),
+    //        "[T{}] obs:{} filtered:{} active:{} filters:{}\n",
+    //        target_id_, observations.size(), filtered.size(),
+    //        armors_with_id.size(), armor_motion_.size());
+    //    for (const auto& a : armors_with_id) {
+    //        fmt::print("  armor id={} pos=({:.2f},{:.2f},{:.2f})\n",
+    //            a.id, a.pos().x(), a.pos().y(), a.pos().z());
+    //    }
+    //}
 
     if (!initialized_) {
         initialized_ = true;

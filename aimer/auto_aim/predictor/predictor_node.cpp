@@ -59,8 +59,8 @@ void start_predictor_node() {
 
             // DEBUG: 输入装甲板数量
             if (!detection.armors.empty()) {
-                fmt::print(fmt::fg(fmt::color::magenta),
-                    "[DEBUG] Input: {} armors\n", detection.armors.size());
+                //fmt::print(fmt::fg(fmt::color::magenta),
+                //    "[DEBUG] Input: {} armors\n", detection.armors.size());
             }
 
             // 运行预测

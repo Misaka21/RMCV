@@ -144,18 +144,18 @@ const ArmorObservationTable& ArmorObserver::observe(
                 obs_j.target_id = merged_id;
 
                 // DEBUG: 打印优化结果
-                fmt::print(fmt::fg(fmt::color::green),
-                    "[DoubleZ] T{}: z_to_l {:.1f}° → {:.1f}°, z_to_r {:.1f}° → {:.1f}°\n",
-                    merged_id,
-                    z_to_l_before * 180.0 / M_PI, obs_l.z_to_v * 180.0 / M_PI,
-                    z_to_r_before * 180.0 / M_PI, obs_r.z_to_v * 180.0 / M_PI);
+                //fmt::print(fmt::fg(fmt::color::green),
+                //    "[DoubleZ] T{}: z_to_l {:.1f}° → {:.1f}°, z_to_r {:.1f}° → {:.1f}°\n",
+                //    merged_id,
+                //    z_to_l_before * 180.0 / M_PI, obs_l.z_to_v * 180.0 / M_PI,
+                //    z_to_r_before * 180.0 / M_PI, obs_r.z_to_v * 180.0 / M_PI);
             } else if (obs_i.target_id == obs_j.target_id && use_double_fit) {
                 // 同一 target_id，保留优化结果
-                fmt::print(fmt::fg(fmt::color::green),
-                    "[DoubleZ] T{}: z_to_l {:.1f}° → {:.1f}°, z_to_r {:.1f}° → {:.1f}°\n",
-                    obs_i.target_id,
-                    z_to_l_before * 180.0 / M_PI, obs_l.z_to_v * 180.0 / M_PI,
-                    z_to_r_before * 180.0 / M_PI, obs_r.z_to_v * 180.0 / M_PI);
+                //fmt::print(fmt::fg(fmt::color::green),
+                //    "[DoubleZ] T{}: z_to_l {:.1f}° → {:.1f}°, z_to_r {:.1f}° → {:.1f}°\n",
+                //    obs_i.target_id,
+                //    z_to_l_before * 180.0 / M_PI, obs_l.z_to_v * 180.0 / M_PI,
+                //    z_to_r_before * 180.0 / M_PI, obs_r.z_to_v * 180.0 / M_PI);
             } else if (use_double_fit) {
                 // 几何不匹配，恢复原始值
                 obs_l.z_to_v = z_to_l_before;
@@ -283,12 +283,12 @@ ArmorObservation ArmorObserver::solve_pnp(
     double cos_3d_angle = -normal_cam.z();  // normal_cam 指向相机时是负的
     double angle_3d = std::acos(std::clamp(cos_3d_angle, -1.0, 1.0)) * 180.0 / M_PI;
 
-    fmt::print(fmt::fg(fmt::color::cyan),
-        "[PnP] normal_cam: ({:.3f}, {:.3f}, {:.3f}) → 3D夹角: {:.1f}°\n",
-        normal_cam.x(), normal_cam.y(), normal_cam.z(), angle_3d);
-    fmt::print(fmt::fg(fmt::color::orange),
-        "[z_to_v] raw: {:.1f}° → fit: {:.1f}° (pnp_pitch: {:.1f}°)\n",
-        z_to_v_raw * 180.0 / M_PI, z_to_v * 180.0 / M_PI, pnp_pitch * 180.0 / M_PI);
+    //fmt::print(fmt::fg(fmt::color::cyan),
+    //    "[PnP] normal_cam: ({:.3f}, {:.3f}, {:.3f}) → 3D夹角: {:.1f}°\n",
+    //    normal_cam.x(), normal_cam.y(), normal_cam.z(), angle_3d);
+    //fmt::print(fmt::fg(fmt::color::orange),
+    //    "[z_to_v] raw: {:.1f}° → fit: {:.1f}° (pnp_pitch: {:.1f}°)\n",
+    //    z_to_v_raw * 180.0 / M_PI, z_to_v * 180.0 / M_PI, pnp_pitch * 180.0 / M_PI);
 
     // 使用稳定的 z_to_v 计算 armor_yaw
     // 参考 rm.cv.fans: armor_yaw = z_to_v + camera_z_i_yaw
