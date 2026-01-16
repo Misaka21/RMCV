@@ -143,6 +143,15 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
 
     const auto& obs = armor.observation;
 
+    // ⭐ 前置过滤: z_to_v 异常值检测
+    // z_to_v 理论范围 [0, π/2] ≈ [0, 1.57]，超出说明 PnP 有问题
+    constexpr double Z_TO_V_MAX = 1.6;  // 略大于 π/2
+    if (std::abs(armor.z_to_v()) > Z_TO_V_MAX) {
+        debug::print(debug::PrintMode::WARNING, "SpMotion",
+            "Reject observation: z_to_v={:.3f} out of range", armor.z_to_v());
+        return;  // 直接拒绝，不更新 EKF
+    }
+
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
@@ -195,8 +204,14 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
+    // ⭐ 关键修正: 用 EKF 预测的角度计算自适应因子，而不是观测值
+    // 这样离群点不会因为 z_to_v 大而获得更大的 R，反而会被 Gating 正确拒绝
+    // predicted_z_to_v = |armor_yaw - camera_yaw| (从预测值计算)
+    double predicted_z_to_v = std::abs(aimer::math::angle_diff(
+        inner_z[sp_model::ARMOR_YAW], inner_z[sp_model::YAW]));
+
     // 观测更新
-    MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
+    MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v);
     auto status = ekf_.update_forward_gated(
         measure_func, z, R, reset_state,
         chi2_threshold, max_reject, q_scale_increase, q_scale_decay
@@ -240,6 +255,14 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
 
     // ==================== 双装甲板处理 ====================
     const auto& primary = armors[0];  // z_to_v 更小，更正对
+
+    // ⭐ 前置过滤: z_to_v 异常值检测
+    constexpr double Z_TO_V_MAX = 1.6;
+    if (std::abs(primary.z_to_v()) > Z_TO_V_MAX) {
+        debug::print(debug::PrintMode::WARNING, "SpMotion",
+            "Reject dual observation: z_to_v={:.3f} out of range", primary.z_to_v());
+        return;
+    }
 
     if (!initialized_) {
         init(primary, timestamp);
@@ -296,8 +319,12 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
+    // ⭐ 关键修正: 用 EKF 预测的角度计算自适应因子
+    double predicted_z_to_v = std::abs(aimer::math::angle_diff(
+        inner_z[sp_model::ARMOR_YAW], inner_z[sp_model::YAW]));
+
     // 双装甲板时观测噪声更小
-    MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);
+    MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v, 2);
     auto status = ekf_.update_forward_gated(
         measure_func, z, R, reset_state,
         chi2_threshold, max_reject, q_scale_increase, q_scale_decay
@@ -399,9 +426,33 @@ SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v, int observe
     double r_angle = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_angle");
     double r_dis_k = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_k");
 
-    double r_armor_yaw = (observed_armor_count >= 2)
+    // 基础朝向角噪声
+    double r_armor_yaw_base = (observed_armor_count >= 2)
         ? runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_double")
         : runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_single");
+
+    // ⭐ 自适应噪声 (来自 sp_vision_25)
+    // 重要: z_to_v 应该是 EKF 预测的角度，不是观测值！
+    //
+    // 原理: 侧对时 PnP 朝向角精度下降，需要增大 R
+    // 关键: 用预测值计算，这样:
+    //   - 正常观测: 预测和观测都接近，R 适中，正常更新
+    //   - 离群观测: 预测值正常，R 正常，innovation 大，被 Gating 拒绝
+    //
+    // 如果用观测值计算 R (错误做法):
+    //   - 离群观测 z_to_v 异常大 → R 变大 → 马氏距离变小 → 反而通过 Gating！
+
+    // 防止异常值: z_to_v 理论范围 [0, π/2]，clamp 到 [0, 1.5]
+    double z_to_v_clamped = std::clamp(std::abs(z_to_v), 0.0, 1.5);
+
+    // 使用 log 函数平滑过渡
+    double adaptive_factor = std::log(z_to_v_clamped + 1.0) + 1.0;
+    // z_to_v = 0.0 → factor = 1.0 (正对)
+    // z_to_v = 0.5 → factor ≈ 1.4
+    // z_to_v = 1.0 → factor ≈ 1.7 (侧对)
+    // z_to_v = 1.5 → factor ≈ 1.9 (max)
+
+    double r_armor_yaw = r_armor_yaw_base * adaptive_factor;
 
     R(sp_model::YAW, sp_model::YAW) = r_angle;
     R(sp_model::PITCH, sp_model::PITCH) = r_angle;
