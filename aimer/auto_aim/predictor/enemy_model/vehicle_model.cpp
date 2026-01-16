@@ -595,6 +595,15 @@ void draw_armor_by_z_to_v(cv::Mat& img, const Eigen::Vector3d& pos_world,
     }
 }
 
+// 颜色转字符串
+const char* enemy_color_str(EnemyColor color) {
+    switch (color) {
+        case EnemyColor::RED: return "R";
+        case EnemyColor::BLUE: return "B";
+        default: return "G";
+    }
+}
+
 }  // namespace
 
 void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
@@ -631,53 +640,35 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         }
     }
 
-    // 1. 绘制检测到的装甲板 (X 形状: 对角线连接) + z_to_v 重投影框
-    // 只有数据新鲜时才绘制，避免绘制过时的观测
+    // 1. 绘制检测到的装甲板 (X形状 + z_to_v重投影框)
+    // 文字在最后绘制，避免被其他线覆盖
     const cv::Scalar COLOR_Z_TO_V(0, 255, 255);  // 黄色: z_to_v 重投影
     if (data_fresh) {
-        for (size_t idx = 0; idx < prev_armors_.size(); ++idx) {
-            const auto& obs = prev_armors_[idx];
+        auto active_armors = identifier_.get_active_armors(frame_count_);
+
+        for (size_t idx = 0; idx < active_armors.size(); ++idx) {
+            const auto& armor = active_armors[idx];
+            const auto& obs = armor.observation;
+
             if (obs.pts.size() >= 4) {
                 // X 形状: 连接对角线 (原始检测)
-                cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);  // 左上-右下
-                cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);  // 左下-右上
+                cv::line(img, obs.pts[0], obs.pts[2], COLOR_DETECTED, 2);
+                cv::line(img, obs.pts[1], obs.pts[3], COLOR_DETECTED, 2);
 
                 // 三分法优化后的 z_to_v 重投影装甲板框 (黄色)
                 draw_armor_by_z_to_v(img, obs.pos, obs.z_to_v, obs.type, q_imu, COLOR_Z_TO_V, 2);
-
-                // 标注 target_id 和 z_to_v
-                // z_to_v: 装甲板相对相机的夹角 (三分法优化后)
-                // 模式标注: SPIN(L/S) 或 NORMAL
-                std::string mode_str;
-                if (spin_active) {
-                    mode_str = use_lmtd ? "SPIN(L)" : "SPIN(S)";
-                } else {
-                    mode_str = "NORMAL";
-                }
-                cv::putText(img, fmt::format("T{} {}", target_id_, mode_str),
-                            obs.center_2d + cv::Point2f(10, -10),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_DETECTED, 2);
-
-                // 显示 z_to_v (优化后的朝向角)
-                // 如果是双装甲板，显示会标记 "D" (double)
-                std::string z_str = fmt::format("z:{:.0f}", obs.z_to_v * 180.0 / M_PI);
-                if (prev_armors_.size() == 2) {
-                    z_str += (idx == 0) ? "L" : "R";  // L=左, R=右
-                }
-                cv::putText(img, z_str,
-                            obs.center_2d + cv::Point2f(-30, 20),
-                            cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_DETECTED, 1);
             }
         }
 
         // 如果是双装甲板，显示两者夹角差 (应该接近 90°)
-        if (prev_armors_.size() == 2) {
-            double z0 = prev_armors_[0].z_to_v;
-            double z1 = prev_armors_[1].z_to_v;
+        if (active_armors.size() == 2) {
+            double z0 = active_armors[0].observation.z_to_v;
+            double z1 = active_armors[1].observation.z_to_v;
             double angle_diff = std::abs(aimer::math::angle_diff(z0, z1)) * 180.0 / M_PI;
 
             // 在两块装甲板中间显示夹角差
-            cv::Point2f mid = (prev_armors_[0].center_2d + prev_armors_[1].center_2d) * 0.5f;
+            cv::Point2f mid = (active_armors[0].observation.center_2d +
+                               active_armors[1].observation.center_2d) * 0.5f;
             cv::Scalar color = (std::abs(angle_diff - 90.0) < 10.0)
                 ? cv::Scalar(0, 255, 0)    // 绿色: 接近 90°
                 : cv::Scalar(0, 165, 255); // 橙色: 偏离 90°
@@ -853,6 +844,60 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
                 cv::putText(img, fmt::format("dz={:.2f}/{:.2f}", dz, spin_motion_.get_another_dz()),
                             pt + cv::Point2f(15, 10),
                             cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
+            }
+        }
+    }
+
+    // 5. 最后绘制装甲板详细信息文字 (在所有线之上)
+    if (data_fresh) {
+        auto active_armors = identifier_.get_active_armors(frame_count_);
+
+        // 计算所有装甲板的平均 x 坐标 (用于左右分布)
+        float avg_x = 0;
+        for (const auto& a : active_armors) {
+            avg_x += a.observation.center_2d.x;
+        }
+        if (!active_armors.empty()) avg_x /= active_armors.size();
+
+        for (size_t idx = 0; idx < active_armors.size(); ++idx) {
+            const auto& armor = active_armors[idx];
+            const auto& obs = armor.observation;
+
+            if (obs.pts.size() >= 4) {
+                // 计算面积 (以 k 为单位)
+                double area = aimer::math::get_area(obs.pts) / 1000.0;
+
+                // 模式标注
+                std::string mode_str = spin_active ? (use_lmtd ? "LMTD" : "SPIN") : "NORMAL";
+
+                // 5行文字
+                std::array<std::string, 5> lines = {
+                    fmt::format("number:{} | id:{} | {}", idx, armor.id, mode_str),
+                    fmt::format("color:{} | z_to_v:{:.1f}", enemy_color_str(obs.color), obs.z_to_v * 57.3),
+                    fmt::format("area:{:.1f}k", area),
+                    fmt::format("x:{:.2f} | y:{:.2f} | z:{:.2f}", obs.pos.x(), obs.pos.y(), obs.pos.z()),
+                    fmt::format("yaw:{:.1f} | pitch:{:.1f} | dist:{:.2f}",
+                        obs.z[obs::YAW] * 57.3, obs.z[obs::PITCH] * 57.3, obs.z[obs::DIST])
+                };
+
+                // 根据位置分左右，避免重叠
+                bool on_left = (obs.center_2d.x < avg_x);
+                cv::Point2f base;
+                if (active_armors.size() == 1) {
+                    // 单装甲板：放正下方
+                    base = obs.center_2d + cv::Point2f(-100, 70);
+                } else if (on_left) {
+                    // 左边装甲板：文字偏左下
+                    base = obs.center_2d + cv::Point2f(-160, 70);
+                } else {
+                    // 右边装甲板：文字偏右下
+                    base = obs.center_2d + cv::Point2f(20, 70);
+                }
+
+                for (size_t i = 0; i < lines.size(); ++i) {
+                    cv::putText(img, lines[i], base + cv::Point2f(0, i * 18),
+                                cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_DETECTED, 1);
+                }
             }
         }
     }
