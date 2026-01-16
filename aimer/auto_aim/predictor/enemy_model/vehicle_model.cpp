@@ -118,45 +118,13 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
             // 更新 last_tracking_id_ (用于上层逻辑)
             last_tracking_id_ = lmtd_motion_.get_tracked_id();
         } else {
-            // ========== SpinMotion 模式: 外部跳变检测 ==========
-            // 获取当前最佳装甲板 (按 z_to_v 排序后的第一个)
-            const auto& best_armor = armors_with_id[0];
-            int current_id = best_armor.id;
-
-            // 检测跳变: ID 变化 + 角度匹配验证
-            if (last_tracking_id_ >= 0 && current_id != last_tracking_id_ && spin_motion_.valid()) {
-                // 计算跳变索引 (用角度匹配)
-                // theta_pred 是 OUTWARD (从中心指向装甲板)
-                // armor_yaw 需要从 INWARD (PnP输出) 转成 OUTWARD
-                double theta_pred = spin_motion_.get_theta();
-                double armor_yaw = best_armor.observation.z[obs::ARMOR_YAW] + M_PI;  // INWARD → OUTWARD
-
-                int armor_num = (enemy_type_ == EnemyType::OUTPOST) ? 3 : 4;
-                double angle_step = 2.0 * M_PI / armor_num;
-
-                int best_index = 0;
-                double min_diff = std::abs(aimer::math::angle_diff(theta_pred, armor_yaw));
-
-                for (int i = 1; i < armor_num; ++i) {
-                    double possible_theta = theta_pred + i * angle_step;
-                    double diff = std::abs(aimer::math::angle_diff(possible_theta, armor_yaw));
-                    if (diff < min_diff) {
-                        min_diff = diff;
-                        best_index = i;
-                    }
-                }
-
-                // 通知 SpinMotion 发生跳变
-                if (best_index > 0) {
-                    spin_motion_.notify_jump(best_index, best_armor);
-                }
-            }
-
-            // 更新追踪 ID
-            last_tracking_id_ = current_id;
-
-            // 更新 SpinMotion
+            // ========== SpinMotion 模式: 内部处理跳变 ==========
+            // SpinMotion::update() 内部调用 detect_and_handle_jump()
+            // 顺序: predict → 跳变检测 → 观测更新
             spin_motion_.update(armors_with_id, timestamp);
+
+            // 更新追踪 ID (用于上层逻辑)
+            last_tracking_id_ = armors_with_id[0].id;
         }
     }
 

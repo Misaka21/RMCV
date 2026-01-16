@@ -60,6 +60,7 @@ void SpinMotion::init(const ArmorData& armor, double timestamp) {
     another_dz_ = 0;
     last_yaw_ = theta;  // 保存 OUTWARD 角度
     spin_level_ = SpinLevel::NONE;
+    tracked_armor_id_ = armor.id;  // 记录追踪的装甲板 ID
 
     last_update_time_ = timestamp;
     initialized_ = true;
@@ -76,13 +77,16 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
-    // 预测 (跳变检测已由上层完成)
-    // 使用自适应缩放的过程噪声
+    // 1. 预测
     SpinCVPredict predict_func(dt);
     MatrixXX Q = build_Q(dt);
     ekf_.predict_forward_scaled(predict_func, Q);
 
-    // 观测的装甲板朝向 (INWARD → OUTWARD)
+    // 2. 跳变检测 (在 predict 之后，观测更新之前)
+    int new_tracked_id;
+    detect_and_handle_jump(armor, new_tracked_id);
+
+    // 3. 观测的装甲板朝向 (INWARD → OUTWARD)
     double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
 
     // 获取 EKF 内部预测的观测值 (用于连续化)
@@ -95,7 +99,6 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     for (int i = 0; i < spin_model::N_Z; ++i) inner_z[i] = z_arr[i];
 
     // 连续化 (把观测调整到离 EKF 预测最近，避免 ±π 跳变)
-    // 注意: 必须在门限检查之前完成，否则 ±π 跳变会被误判为离群点
     VectorZ z;
     z[spin_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[spin_model::YAW]);
     z[spin_model::PITCH] = obs.z[obs::PITCH];
@@ -111,12 +114,15 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.q_scale_increase");
     double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.Gating.q_scale_decay");
 
-    // 带门限检查的观测更新
+    // 4. 带门限检查的观测更新
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
     auto status = ekf_.update_forward_gated(
         measure_func, z, R, reset_state,
         chi2_threshold, max_reject, q_scale_increase, q_scale_decay
     );
+
+    // 5. 更新追踪 ID (在 EKF 更新之后，与 LmtdMotion 一致)
+    tracked_armor_id_ = new_tracked_id;
 
     // 处理更新结果
     if (status == aimer::filter::UpdateStatus::RESET) {
@@ -125,6 +131,7 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
         another_r_ = init_r;
         another_dz_ = 0;
         spin_level_ = SpinLevel::NONE;
+        tracked_armor_id_ = armor.id;  // 重置时也更新 ID
         debug::print(debug::PrintMode::WARNING, "SpinMotion",
             "EKF reset due to {} consecutive rejections", max_reject);
     } else if (status == aimer::filter::UpdateStatus::REJECTED) {
@@ -141,7 +148,7 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
 
     x[spin_model::R] = std::clamp(x[spin_model::R], r_min, r_max);
     x[spin_model::DZ] = std::clamp(x[spin_model::DZ], -dz_max, dz_max);
-    another_r_ = std::clamp(another_r_, r_min, r_max);  // 同时约束 another_r_
+    another_r_ = std::clamp(another_r_, r_min, r_max);
 
     // 强制 Z 轴速度为 0 (PnP 在 Z 方向误差大)
     if (runtime_param::get_param<bool>("AutoAim.Predictor.SpinEKF.force_zero_vz")) {
@@ -194,6 +201,7 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 
         another_r_ = init_r;  // 两个半径初始相同
         another_dz_ = 0;
+        tracked_armor_id_ = primary.id;  // 记录追踪 ID
 
         last_update_time_ = timestamp;
         initialized_ = true;
@@ -204,11 +212,16 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
+    // 1. 预测
     SpinCVPredict predict_func(dt);
     MatrixXX Q = build_Q(dt);
     ekf_.predict_forward_scaled(predict_func, Q);
 
-    // 用主装甲板做观测更新
+    // 2. 跳变检测 (在 predict 之后)
+    int new_tracked_id;
+    detect_and_handle_jump(primary, new_tracked_id);
+
+    // 3. 用主装甲板做观测更新
     const auto& obs = primary.observation;
     double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
 
@@ -250,12 +263,16 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         another_r_ = init_r;
         another_dz_ = 0;
         spin_level_ = SpinLevel::NONE;
+        tracked_armor_id_ = primary.id;  // 重置时也更新 ID
         debug::print(debug::PrintMode::WARNING, "SpinMotion",
             "EKF reset due to {} consecutive rejections (dual armor)", max_reject);
     } else if (status == aimer::filter::UpdateStatus::REJECTED) {
         debug::print(debug::PrintMode::DEBUG, "SpinMotion",
             "Observation rejected (dual armor), q_scale={:.2f}", ekf_.get_q_scale());
     }
+
+    // 更新追踪 ID (在 EKF 更新之后，与 LmtdMotion 一致)
+    tracked_armor_id_ = new_tracked_id;
 
     // 后处理
     x = ekf_.get_x();
@@ -275,6 +292,73 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     update_spin_level();
     last_yaw_ = orient_yaw;
     last_update_time_ = timestamp;
+}
+
+bool SpinMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id) {
+    out_tracked_id = armor.id;
+
+    // 如果 ID 相同，没有跳变
+    if (armor.id == tracked_armor_id_) {
+        return false;
+    }
+
+    // ID 不同，可能发生跳变
+    const auto& obs = armor.observation;
+    double new_orient = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
+
+    VectorX x = ekf_.get_x();
+    double state_theta = x[spin_model::THETA];
+
+    // 遍历所有可能的装甲板位置，找最接近观测角度的
+    int most_like_index = 0;
+    double min_yaw_diff = std::abs(aimer::math::angle_diff(state_theta, new_orient));
+
+    double angle_step = 2.0 * M_PI / armor_num_;
+    for (int i = 1; i < armor_num_; ++i) {
+        double possible_theta = aimer::math::normalize_angle(state_theta + i * angle_step);
+        double yaw_diff = std::abs(aimer::math::angle_diff(possible_theta, new_orient));
+
+        if (yaw_diff < min_yaw_diff) {
+            min_yaw_diff = yaw_diff;
+            most_like_index = i;
+        }
+    }
+
+    if (most_like_index == 0) {
+        // 没有实际跳变，只是 ID 变了
+        return false;
+    }
+
+    // 真的跳变了
+    debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+        "Jump detected: {} -> {}, index={}, state_theta={:.1f}°, new_orient={:.1f}°",
+        tracked_armor_id_, armor.id, most_like_index,
+        state_theta * 180.0 / M_PI, new_orient * 180.0 / M_PI);
+
+    // 4装甲板: 奇数跳变交换半径和高度差
+    if (armor_num_ == 4 && most_like_index % 2 == 1) {
+        debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+            "Before swap: r={:.3f}, another_r={:.3f}, dz={:.3f}, another_dz={:.3f}",
+            x[spin_model::R], another_r_, x[spin_model::DZ], another_dz_);
+
+        std::swap(x[spin_model::R], another_r_);
+        std::swap(x[spin_model::DZ], another_dz_);
+
+        debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+            "After swap: r={:.3f}, another_r={:.3f}, dz={:.3f}, another_dz={:.3f}",
+            x[spin_model::R], another_r_, x[spin_model::DZ], another_dz_);
+    }
+
+    // rm.cv.fans 关键设计：跳变时只更新 theta，不更新中心位置 xc, yc, zc
+    x[spin_model::THETA] = new_orient;
+
+    debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+        "Jump: theta={:.1f}°, r={:.3f} (center unchanged, let EKF converge)",
+        new_orient * 180.0 / M_PI, x[spin_model::R]);
+
+    ekf_.set_x(x);
+
+    return true;
 }
 
 void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
@@ -477,6 +561,7 @@ void SpinMotion::reset() {
     spin_level_ = SpinLevel::NONE;
     another_dz_ = 0;
     another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
+    tracked_armor_id_ = -1;  // 重置追踪 ID
 }
 
 SpinMotion::VectorX SpinMotion::build_reset_state(const ArmorData& armor) const {

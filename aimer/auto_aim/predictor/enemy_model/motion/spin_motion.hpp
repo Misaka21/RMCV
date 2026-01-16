@@ -365,6 +365,18 @@ private:
     // ==================== 陀螺状态 ====================
     SpinLevel spin_level_ = SpinLevel::NONE;
     double last_yaw_ = 0;       // 上一帧观测的 armor_yaw (用于连续化)
+
+    // ==================== 跳变检测 (与 LmtdMotion 一致) ====================
+    int tracked_armor_id_ = -1;  // 当前追踪的装甲板 ID
+
+    /**
+     * @brief 检测并处理装甲板跳变 (内部调用，在 predict 之后)
+     *
+     * @param armor 当前观测装甲板
+     * @param out_tracked_id 输出: 新的追踪 ID
+     * @return 是否发生跳变
+     */
+    bool detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id);
 };
 
 }  // namespace autoaim::predictor
