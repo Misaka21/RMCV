@@ -142,6 +142,7 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     spin_.phase = motion_->get_theta() - tracked_id * (2.0 * M_PI / armor_num);
     spin_.radius = motion_->get_radius();
     spin_.radius_2 = motion_->get_another_radius();
+    spin_.dz = motion_->get_dz();
     spin_.level = motion_->get_spin_level();
     spin_.active = (spin_.level >= SpinLevel::LOW) && motion_->valid();
 

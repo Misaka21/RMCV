@@ -182,7 +182,8 @@ struct SpinState {
     double omega = 0;          // 角速度 (rad/s)，正值为逆时针
     double phase = 0;          // 当前相位 (rad)，即车体朝向角 θ
     double radius = 0;         // 陀螺半径 (m)
-    double radius_2 = 0;       // 第二半径 (四装甲板时)
+    double radius_2 = 0;       // 第二半径 (四装甲板时，奇数装甲板用)
+    double dz = 0;             // 高度差 (m)，奇数装甲板 z = zc + dz
 
     // 迟滞阈值 (消抖)
     static constexpr double THRESH_LOW = 1.2;       // 进入 LOW
@@ -237,6 +238,7 @@ struct SpinState {
         phase = 0;
         radius = 0;
         radius_2 = 0;
+        dz = 0;
     }
 };
 
@@ -308,16 +310,23 @@ struct VehicleState {
             return armors[armor_idx].predict_position(dt);
         }
 
-        // 陀螺：用旋转中心 + 相位计算
+        // 陀螺：用存储位置 + 绕 z 轴旋转
+        // 注意: armors[] 是按相对顺序填充的 (armors[0] = tracked)
+        // 不能用 armor_idx % 2 判断物理属性，必须直接使用存储的位置
         Eigen::Vector3d new_center = predict_center(dt);
-        double new_phase = spin.predict_phase(dt);
-        double armor_angle = new_phase + armor_idx * (2.0 * M_PI / armor_count);
-        double r = (armor_count == 4 && armor_idx % 2 == 1) ? spin.radius_2 : spin.radius;
+
+        // 从存储的 armors[i].position 获取相对中心的偏移 (motion 模型已正确计算)
+        Eigen::Vector3d offset = armors[armor_idx].position - center;
+
+        // 绕 z 轴旋转 omega * dt
+        double rot = spin.omega * dt;
+        double cos_rot = std::cos(rot);
+        double sin_rot = std::sin(rot);
 
         return Eigen::Vector3d(
-            new_center.x() + r * std::cos(armor_angle),
-            new_center.y() + r * std::sin(armor_angle),
-            new_center.z()
+            new_center.x() + offset.x() * cos_rot - offset.y() * sin_rot,
+            new_center.y() + offset.x() * sin_rot + offset.y() * cos_rot,
+            new_center.z() + offset.z()  // z 不随旋转变化
         );
     }
 };
