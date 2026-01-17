@@ -748,8 +748,8 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
                 fmt::format("vel: ({:.2f}, {:.2f}, {:.2f})", velocity.x(), velocity.y(), velocity.z())
             };
 
-            // 绘制在中心右侧
-            cv::Point2f text_base = pt + cv::Point2f(25, -40);
+            // 绘制在中心上方
+            cv::Point2f text_base = pt + cv::Point2f(-100, -120);
             for (size_t i = 0; i < lines.size(); ++i) {
                 cv::putText(img, lines[i], text_base + cv::Point2f(0, i * 16),
                             cv::FONT_HERSHEY_SIMPLEX, 0.45, COLOR_CENTER, 1);
