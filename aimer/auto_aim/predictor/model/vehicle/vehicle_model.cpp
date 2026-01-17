@@ -575,7 +575,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     // 颜色定义
     const cv::Scalar COLOR_DETECTED(0, 255, 0);    // 绿色: 检测到的
     const cv::Scalar COLOR_FILTERED(255, 200, 0);  // 蓝色: 滤波后的
-    const cv::Scalar COLOR_CENTER(0, 0, 255);      // 红色: 旋转中心
+    const cv::Scalar COLOR_CENTER(255, 0, 255);    // 紫色: 旋转中心
 
     // 整车模型预测颜色: 未使用灰色，使用时用我方颜色
     cv::Scalar COLOR_SPIN;
@@ -689,21 +689,71 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             }
         }
 
-        // 绘制旋转中心
+        // 绘制旋转中心 (紫色十字 + 菱形)
         Eigen::Vector3d center = motion_->predict_center(draw_dt);
+        Eigen::Vector3d velocity = motion_->get_velocity();
+        double r0 = motion_->get_radius();
+        double r2 = motion_->get_another_radius();
+        double dz = motion_->get_dz();
+        double theta_deg = motion_->get_theta() * 180.0 / M_PI;
+        double omega_deg = omega * 180.0 / M_PI;
+        int tracked_id = motion_->get_tracked_id();
+
         bool valid = false;
         cv::Point2f pt = aimer::tf::world_to_pixel(center, q_imu, valid);
         if (valid) {
-            // 十字标记
-            int s = 15;
+            // 十字 + 菱形组合标记
+            int s = 12;
+            // 十字
             cv::line(img, pt - cv::Point2f(s, 0), pt + cv::Point2f(s, 0), COLOR_CENTER, 2);
             cv::line(img, pt - cv::Point2f(0, s), pt + cv::Point2f(0, s), COLOR_CENTER, 2);
-            // 标注角速度和状态
+            // 菱形
+            std::vector<cv::Point> diamond = {
+                cv::Point(pt.x, pt.y - s - 3),
+                cv::Point(pt.x + s + 3, pt.y),
+                cv::Point(pt.x, pt.y + s + 3),
+                cv::Point(pt.x - s - 3, pt.y)
+            };
+            cv::polylines(img, diamond, true, COLOR_CENTER, 2);
+
+            // ========== 详细状态信息 ==========
+            // 陀螺等级字符串
+            const char* level_str = "NONE";
+            if (spin_level == SpinLevel::LOW) level_str = "LOW";
+            else if (spin_level == SpinLevel::HIGH) level_str = "HIGH";
+
+            // 敌方类型字符串
+            const char* type_str = "UNK";
+            switch (enemy_type_) {
+                case EnemyType::HERO: type_str = "HERO"; break;
+                case EnemyType::ENGINEER: type_str = "ENG"; break;
+                case EnemyType::INFANTRY_3:
+                case EnemyType::INFANTRY_4:
+                case EnemyType::INFANTRY_5:
+                    type_str = "INF"; break;
+                case EnemyType::SENTRY: type_str = "SENT"; break;
+                case EnemyType::OUTPOST: type_str = "OUTP"; break;
+                case EnemyType::BASE: type_str = "BASE"; break;
+                default: break;
+            }
+
+            // 多行状态信息
             std::string model_str = motion_->name();
-            std::string state_str = spin_active ? "ON" : "OFF";
-            cv::putText(img, fmt::format("w={:.1f} {}{}", omega, model_str, state_str),
-                        pt + cv::Point2f(20, 0),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_CENTER, 1);
+            std::array<std::string, 6> lines = {
+                fmt::format("[T{}] {} | {} {}", target_id_, type_str, model_str, spin_active ? "ON" : "OFF"),
+                fmt::format("spin: {} | track_id: {}", level_str, tracked_id),
+                fmt::format("w: {:.0f} d/s | th: {:.0f}", omega_deg, theta_deg),
+                fmt::format("r: {:.2f}/{:.2f} | dz: {:.2f}", r0, r2, dz),
+                fmt::format("pos: ({:.2f}, {:.2f}, {:.2f})", center.x(), center.y(), center.z()),
+                fmt::format("vel: ({:.2f}, {:.2f}, {:.2f})", velocity.x(), velocity.y(), velocity.z())
+            };
+
+            // 绘制在中心右侧
+            cv::Point2f text_base = pt + cv::Point2f(25, -40);
+            for (size_t i = 0; i < lines.size(); ++i) {
+                cv::putText(img, lines[i], text_base + cv::Point2f(0, i * 16),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.45, COLOR_CENTER, 1);
+            }
         }
     }
 
@@ -737,40 +787,6 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
                 cv::putText(img, "G" + std::to_string(i), pt + cv::Point2f(10, -10),
                             cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
             }
-        }
-
-        // 绘制中心和参数
-        double r0 = motion_->get_radius();
-        double dz = motion_->get_dz();
-        double another_r = motion_->get_another_radius();
-        Eigen::Vector3d center = motion_->predict_center(0);
-
-        bool valid = false;
-        cv::Point2f pt = aimer::tf::world_to_pixel(center, q_imu, valid);
-        if (valid) {
-            // 菱形标记
-            int s = 10;
-            std::vector<cv::Point> diamond = {
-                cv::Point(pt.x, pt.y - s),
-                cv::Point(pt.x + s, pt.y),
-                cv::Point(pt.x, pt.y + s),
-                cv::Point(pt.x - s, pt.y)
-            };
-            cv::polylines(img, diamond, true, COLOR_GEOMETRY, 2);
-
-            // 标注几何参数
-            cv::putText(img, fmt::format("r={:.2f}/{:.2f}", r0, another_r),
-                        pt + cv::Point2f(15, -5),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
-
-            // dz 和双装甲板标记
-            std::string dz_str = fmt::format("dz={:.2f}", dz);
-            if (prev_armors_.size() == 2) {
-                dz_str += " [2]";  // 标记双装甲板
-            }
-            cv::putText(img, dz_str,
-                        pt + cv::Point2f(15, 10),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_GEOMETRY, 1);
         }
     }
 

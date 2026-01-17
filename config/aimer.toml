@@ -230,8 +230,8 @@
     q_vel = 2800.0
     #@double 朝向角θ过程噪声
     q_theta = 2.8
-    #@double 角速度ω过程噪声
-    q_omega = 280.0
+    #@double 角速度ω过程噪声，较大值以更快响应陀螺加减速
+    q_omega = 400.0
     #@double 基础半径r过程噪声
     q_r = 0.005
     #@double 半径差l过程噪声 (不乘dt)
