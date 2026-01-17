@@ -2,14 +2,26 @@
 # Predictor 模块 CMakeLists.txt
 # =============================================================================
 
-# 添加子目录
-add_subdirectory(enemy_state)
-add_subdirectory(enemy_model)
-
 # 创建 predictor 库
 add_library(predictor STATIC
     enemy_predictor.cpp
     predictor_node.cpp
+
+    # observer/ (PnP 观测 + 跟踪)
+    observer/armor_observer.cpp
+    observer/armor_tracker.cpp
+
+    # model/
+    model/enemy_model_factory.cpp
+    model/vehicle/vehicle_model.cpp
+    model/vehicle/ekf/motion_factory.cpp
+    model/vehicle/ekf/armor_ekf.cpp
+    model/vehicle/ekf/spin_ekf.cpp
+    model/vehicle/ekf/lmtd_ekf.cpp
+    model/vehicle/ekf/sp_ekf.cpp
+    model/outpost/outpost_model.cpp
+    model/outpost/outpost_ekf.cpp
+    model/base/base_model.cpp
 )
 
 target_include_directories(predictor PUBLIC
@@ -18,8 +30,6 @@ target_include_directories(predictor PUBLIC
 )
 
 target_link_libraries(predictor PUBLIC
-    enemy_state
-    enemy_model
     aimer_common
     plugin
     ${OpenCV_LIBS}

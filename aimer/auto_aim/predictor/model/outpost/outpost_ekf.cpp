@@ -3,7 +3,7 @@
  * @brief 前哨站运动模型实现 (EKF)
  */
 
-#include "outpost_motion.hpp"
+#include "outpost_ekf.hpp"
 
 #include <cmath>
 

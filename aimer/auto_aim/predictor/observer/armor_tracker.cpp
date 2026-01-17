@@ -3,7 +3,7 @@
  * @brief 装甲板 ID 分配器实现
  */
 
-#include "armor_identifier.hpp"
+#include "armor_tracker.hpp"
 
 #include <algorithm>
 #include <cmath>

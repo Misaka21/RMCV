@@ -5,7 +5,7 @@
 
 #include "enemy_predictor.hpp"
 
-#include "enemy_model/enemy_model.hpp"
+#include "model/enemy_model.hpp"
 
 namespace autoaim::predictor {
 

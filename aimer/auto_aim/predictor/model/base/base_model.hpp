@@ -10,7 +10,7 @@
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_BASE_MODEL_HPP__
 #define __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_BASE_MODEL_HPP__
 
-#include "enemy_model.hpp"
+#include "../enemy_model.hpp"
 
 namespace autoaim::predictor {
 

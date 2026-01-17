@@ -16,12 +16,12 @@
 
 #include <memory>
 
-#include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
-#include "enemy_model.hpp"
-#include "motion/armor_motion.hpp"
-#include "motion/motion_interface.hpp"
-#include "motion/motion_factory.hpp"
-#include "param/runtime_parameter.hpp"
+#include "aimer/auto_aim/predictor/observer/armor_tracker.hpp"
+#include "../enemy_model.hpp"
+#include "ekf/armor_ekf.hpp"
+#include "ekf/motion_interface.hpp"
+#include "ekf/motion_factory.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
 

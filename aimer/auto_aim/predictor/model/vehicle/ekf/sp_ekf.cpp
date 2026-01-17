@@ -3,7 +3,7 @@
  * @brief SP 整车旋转模型实现 - 移植自 sp_vision_25
  */
 
-#include "sp_motion.hpp"
+#include "sp_ekf.hpp"
 
 #include <cmath>
 #include <algorithm>

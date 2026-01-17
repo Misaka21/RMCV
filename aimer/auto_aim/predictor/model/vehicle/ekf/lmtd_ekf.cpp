@@ -10,7 +10,7 @@
  * 5. 距离观测噪声 ∝ dis^4 - 远距离噪声放大
  */
 
-#include "lmtd_motion.hpp"
+#include "lmtd_ekf.hpp"
 
 #include <cmath>
 #include <cfloat>

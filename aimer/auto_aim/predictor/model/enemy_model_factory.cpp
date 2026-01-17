@@ -4,9 +4,9 @@
  */
 
 #include "enemy_model.hpp"
-#include "vehicle_model.hpp"
-#include "outpost_model.hpp"
-#include "base_model.hpp"
+#include "vehicle/vehicle_model.hpp"
+#include "outpost/outpost_model.hpp"
+#include "base/base_model.hpp"
 
 namespace autoaim::predictor {
 

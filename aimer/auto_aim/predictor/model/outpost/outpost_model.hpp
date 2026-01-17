@@ -12,9 +12,9 @@
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_OUTPOST_MODEL_HPP__
 #define __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_OUTPOST_MODEL_HPP__
 
-#include "enemy_model.hpp"
-#include "motion/outpost_motion.hpp"
-#include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
+#include "../enemy_model.hpp"
+#include "outpost_ekf.hpp"
+#include "aimer/auto_aim/predictor/observer/armor_tracker.hpp"
 
 namespace autoaim::predictor {
 

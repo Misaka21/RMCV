@@ -3,7 +3,7 @@
  * @brief 整车旋转模型实现
  */
 
-#include "spin_motion.hpp"
+#include "spin_ekf.hpp"
 
 #include <cmath>
 

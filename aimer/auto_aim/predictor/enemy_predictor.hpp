@@ -22,7 +22,7 @@
 #include <opencv2/core.hpp>
 
 #include "aimer/common/types.hpp"
-#include "aimer/auto_aim/predictor/enemy_state/armor_observer.hpp"
+#include "aimer/auto_aim/predictor/observer/armor_observer.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
 namespace autoaim::predictor {

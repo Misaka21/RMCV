@@ -29,7 +29,7 @@
 #include <ceres/jet.h>
 
 #include "aimer/auto_aim/predictor/types.hpp"
-#include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
+#include "aimer/auto_aim/predictor/observer/armor_tracker.hpp"
 #include "aimer/common/filter/adaptive_ekf.hpp"
 
 namespace autoaim::predictor {

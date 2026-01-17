@@ -3,7 +3,7 @@
  * @brief 装甲板运动模型实现 - YPD坐标系 EKF
  */
 
-#include "armor_motion.hpp"
+#include "armor_ekf.hpp"
 
 #include <cmath>
 

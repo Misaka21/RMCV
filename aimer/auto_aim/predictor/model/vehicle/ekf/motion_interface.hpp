@@ -19,7 +19,7 @@
 #include <Eigen/Core>
 
 #include "aimer/auto_aim/predictor/types.hpp"
-#include "aimer/auto_aim/predictor/enemy_state/armor_identifier.hpp"
+#include "aimer/auto_aim/predictor/observer/armor_tracker.hpp"
 
 namespace autoaim::predictor {
 

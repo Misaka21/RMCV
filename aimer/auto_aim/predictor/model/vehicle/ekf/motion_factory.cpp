@@ -5,9 +5,9 @@
 
 #include "motion_factory.hpp"
 
-#include "spin_motion.hpp"
-#include "lmtd_motion.hpp"
-#include "sp_motion.hpp"
+#include "spin_ekf.hpp"
+#include "lmtd_ekf.hpp"
+#include "sp_ekf.hpp"
 
 namespace autoaim::predictor {
 
