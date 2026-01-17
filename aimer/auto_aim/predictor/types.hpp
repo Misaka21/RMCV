@@ -25,6 +25,7 @@
 #include "aimer/auto_aim/common/types.hpp"  // ArmorType, ArmorNumber, DetectedArmor
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/robot_state.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
 
@@ -185,11 +186,6 @@ struct SpinState {
     double radius_2 = 0;       // 第二半径 (四装甲板时，奇数装甲板用)
     double dz = 0;             // 高度差 (m)，奇数装甲板 z = zc + dz
 
-    // 迟滞阈值 (消抖)
-    static constexpr double THRESH_LOW = 1.2;       // 进入 LOW
-    static constexpr double THRESH_HIGH = 3.5;      // 进入 HIGH
-    static constexpr double HYSTERESIS = 0.7;       // 退出时乘以此系数
-
     // 插值预测
     double predict_phase(double dt) const {
         return phase + omega * dt;
@@ -197,31 +193,44 @@ struct SpinState {
 
     /**
      * @brief 更新陀螺等级 (带迟滞消抖)
-     * @param new_omega 新的角速度
+     *
+     * 阈值从运行时参数读取:
+     *   AutoAim.Predictor.Motion.top1_activate_w   (°/s)
+     *   AutoAim.Predictor.Motion.top1_deactivate_w (°/s)
+     *   AutoAim.Predictor.Motion.top2_activate_w   (°/s)
+     *   AutoAim.Predictor.Motion.top2_deactivate_w (°/s)
+     *
+     * @param new_omega 新的角速度 (rad/s)
      */
     void update_level(double new_omega) {
         omega = new_omega;
-        double w = std::abs(omega);
+        double w_deg = std::abs(omega) * 180.0 / M_PI;  // 转换为度/秒
+
+        // 从运行时参数读取阈值 (°/s)
+        double top1_activate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top1_activate_w");
+        double top1_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top1_deactivate_w");
+        double top2_activate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top2_activate_w");
+        double top2_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top2_deactivate_w");
 
         switch (level) {
             case SpinLevel::NONE:
-                if (w > THRESH_LOW) {
+                if (w_deg > top1_activate) {
                     level = SpinLevel::LOW;
                     active = true;
                 }
                 break;
 
             case SpinLevel::LOW:
-                if (w < THRESH_LOW * HYSTERESIS) {
+                if (w_deg < top1_deactivate) {
                     level = SpinLevel::NONE;
                     active = false;
-                } else if (w > THRESH_HIGH) {
+                } else if (w_deg > top2_activate) {
                     level = SpinLevel::HIGH;
                 }
                 break;
 
             case SpinLevel::HIGH:
-                if (w < THRESH_HIGH * HYSTERESIS) {
+                if (w_deg < top2_deactivate) {
                     level = SpinLevel::LOW;
                 }
                 break;

@@ -92,6 +92,18 @@
     #@double 接受后过程噪声衰减倍数 (最小为1.0)
     q_scale_decay = 0.9
 
+# 统一的陀螺等级判断参数 (被 VehicleModel 使用)
+[AutoAim.Predictor.Motion]
+    # 陀螺等级阈值 (度/秒, 带迟滞消抖)
+    #@double top_level 1 激活阈值 (°/s)
+    top1_activate_w = 90.0
+    #@double top_level 1 退激活阈值 (°/s)
+    top1_deactivate_w = 60.0
+    #@double top_level 2 激活阈值 (°/s)
+    top2_activate_w = 500.0
+    #@double top_level 2 退激活阈值 (°/s)
+    top2_deactivate_w = 450.0
+
 [AutoAim.Predictor.SpinEKF]
     # 过程噪声 Q (越大越信任观测，越小越信任预测)
     # 参考 rm.cv.fans lmtd-top-model 参数
@@ -257,7 +269,7 @@
     #@double top_level 1 激活阈值 (°/s)
     top1_activate_w = 90.0
     #@double top_level 1 退激活阈值 (°/s)
-    top1_deactivate_w = 60.0
+    top1_deactivate_w = 70.0
     #@double top_level 2 激活阈值 (°/s)
     top2_activate_w = 500.0
     #@double top_level 2 退激活阈值 (°/s)

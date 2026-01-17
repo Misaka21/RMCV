@@ -203,7 +203,6 @@ public:
     double get_radius() const override { return ekf_.get_x()[lmtd_model::R]; }
     double get_another_radius() const override { return another_r_; }
     double get_dz() const override { return dz_; }
-    SpinLevel get_spin_level() const override { return spin_level_; }
     int get_tracked_id() const override { return tracked_armor_id_; }
 
     std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
@@ -261,7 +260,6 @@ private:
      */
     int select_armor_to_track(const std::vector<ArmorData>& armors) const;
 
-    void update_spin_level();
     MatrixXX build_Q(double dt) const;
     MatrixZZ build_R(double distance, double z_to_v, int observed_armor_count = 1) const;
 
@@ -279,10 +277,6 @@ private:
 
     // ==================== 追踪状态 ====================
     int tracked_armor_id_ = -1;  // 当前追踪的装甲板 ID (用于内部跳变检测)
-
-    // ==================== 陀螺状态 ====================
-    SpinLevel spin_level_ = SpinLevel::NONE;
-    int top_level_ = 0;  // LMTD 风格: 0/1/2
 };
 
 // ============================================================================

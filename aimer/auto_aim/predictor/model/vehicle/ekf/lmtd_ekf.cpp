@@ -62,8 +62,6 @@ void LmtdMotion::init(const ArmorData& armor, double timestamp) {
 
     // 重置状态
     dz_ = 0;
-    spin_level_ = SpinLevel::NONE;
-    top_level_ = 0;
     tracked_armor_id_ = armor.id;  // 记录追踪的装甲板 ID
 
     last_update_time_ = timestamp;
@@ -262,7 +260,6 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
 
     ekf_.set_x(x);
 
-    update_spin_level();
     update_t_ = timestamp;
     last_update_time_ = timestamp;
 }
@@ -375,35 +372,8 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     }
     ekf_.set_x(x);
 
-    update_spin_level();
     update_t_ = timestamp;
     last_update_time_ = timestamp;
-}
-
-void LmtdMotion::update_spin_level() {
-    double omega = std::abs(get_omega());
-
-    // 参数单位是度/秒，需要转换成弧度/秒 (与 rm.cv.fans 一致)
-    constexpr double DEG_TO_RAD = M_PI / 180.0;
-    double activate_1 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top1_activate_w") * DEG_TO_RAD;
-    double deactivate_1 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top1_deactivate_w") * DEG_TO_RAD;
-    double activate_2 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top2_activate_w") * DEG_TO_RAD;
-    double deactivate_2 = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.top2_deactivate_w") * DEG_TO_RAD;
-
-    if (top_level_ == 0) {
-        if (omega >= activate_1) top_level_ = 1;
-    } else if (top_level_ == 1) {
-        if (omega < deactivate_1) top_level_ = 0;
-        else if (omega >= activate_2) top_level_ = 2;
-    } else {
-        if (omega < deactivate_2) top_level_ = 1;
-    }
-
-    switch (top_level_) {
-        case 0: spin_level_ = SpinLevel::NONE; break;
-        case 1: spin_level_ = SpinLevel::LOW; break;
-        case 2: spin_level_ = SpinLevel::HIGH; break;
-    }
 }
 
 LmtdMotion::MatrixXX LmtdMotion::build_Q(double dt) const {
@@ -534,15 +504,11 @@ void LmtdMotion::output_to_plotter(const std::string& prefix) const {
     plotter::add(prefix + "/r", x[lmtd_model::R]);
     plotter::add(prefix + "/another_r", another_r_);
     plotter::add(prefix + "/dz", dz_);
-    plotter::add(prefix + "/spin_level", static_cast<int>(spin_level_));
-    plotter::add(prefix + "/top_level", top_level_);
     plotter::add(prefix + "/tracked_id", tracked_armor_id_);
 }
 
 void LmtdMotion::reset() {
     initialized_ = false;
-    spin_level_ = SpinLevel::NONE;
-    top_level_ = 0;
     dz_ = 0;
     tracked_armor_id_ = -1;
     another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.init_r");

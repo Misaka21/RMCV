@@ -60,7 +60,6 @@ void SpinMotion::init(const ArmorData& armor, double timestamp) {
     // 重置状态
     another_dz_ = 0;
     last_yaw_ = theta;  // 保存 OUTWARD 角度
-    spin_level_ = SpinLevel::NONE;
     tracked_armor_id_ = armor.id;  // 记录追踪的装甲板 ID
 
     last_update_time_ = timestamp;
@@ -131,7 +130,6 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
         double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
         another_r_ = init_r;
         another_dz_ = 0;
-        spin_level_ = SpinLevel::NONE;
         tracked_armor_id_ = armor.id;  // 重置时也更新 ID
         debug::print(debug::PrintMode::WARNING, "SpinMotion",
             "EKF reset due to {} consecutive rejections", max_reject);
@@ -156,9 +154,6 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
         x[spin_model::VZ] = 0;
     }
     ekf_.set_x(x);
-
-    // 更新陀螺等级
-    update_spin_level();
 
     last_yaw_ = orient_yaw;
     last_update_time_ = timestamp;
@@ -263,7 +258,6 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
         another_r_ = init_r;
         another_dz_ = 0;
-        spin_level_ = SpinLevel::NONE;
         tracked_armor_id_ = primary.id;  // 重置时也更新 ID
         debug::print(debug::PrintMode::WARNING, "SpinMotion",
             "EKF reset due to {} consecutive rejections (dual armor)", max_reject);
@@ -290,7 +284,6 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     }
     ekf_.set_x(x);
 
-    update_spin_level();
     last_yaw_ = orient_yaw;
     last_update_time_ = timestamp;
 }
@@ -409,37 +402,6 @@ void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
         new_theta * 180.0 / M_PI, x[spin_model::R]);
 
     ekf_.set_x(x);
-}
-
-void SpinMotion::update_spin_level() {
-    double omega = std::abs(get_omega());
-
-    // 迟滞阈值
-    constexpr double THRESH_LOW = 1.2;
-    constexpr double THRESH_HIGH = 3.5;
-    constexpr double HYSTERESIS = 0.7;
-
-    switch (spin_level_) {
-        case SpinLevel::NONE:
-            if (omega > THRESH_LOW) {
-                spin_level_ = SpinLevel::LOW;
-            }
-            break;
-
-        case SpinLevel::LOW:
-            if (omega < THRESH_LOW * HYSTERESIS) {
-                spin_level_ = SpinLevel::NONE;
-            } else if (omega > THRESH_HIGH) {
-                spin_level_ = SpinLevel::HIGH;
-            }
-            break;
-
-        case SpinLevel::HIGH:
-            if (omega < THRESH_HIGH * HYSTERESIS) {
-                spin_level_ = SpinLevel::LOW;
-            }
-            break;
-    }
 }
 
 SpinMotion::MatrixXX SpinMotion::build_Q(double dt) const {
@@ -581,13 +543,11 @@ void SpinMotion::output_to_plotter(const std::string& prefix) const {
     plotter::add(prefix + "/dz", x[spin_model::DZ]);
     plotter::add(prefix + "/another_r", another_r_);
     plotter::add(prefix + "/another_dz", another_dz_);
-    plotter::add(prefix + "/spin_level", static_cast<int>(spin_level_));
     plotter::add(prefix + "/tracked_id", tracked_armor_id_);
 }
 
 void SpinMotion::reset() {
     initialized_ = false;
-    spin_level_ = SpinLevel::NONE;
     another_dz_ = 0;
     another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
     tracked_armor_id_ = -1;  // 重置追踪 ID

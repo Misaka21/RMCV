@@ -143,7 +143,7 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     spin_.radius = motion_->get_radius();
     spin_.radius_2 = motion_->get_another_radius();
     spin_.dz = motion_->get_dz();
-    spin_.level = motion_->get_spin_level();
+    spin_.update_level(motion_->get_omega());  // 更新陀螺等级 (带迟滞消抖)
     spin_.active = (spin_.level >= SpinLevel::LOW) && motion_->valid();
 
     // 6. 更新敌方颜色 (用于绘图)
@@ -330,7 +330,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
     double best_score = 0;
 
     // 根据陀螺等级选择模型
-    bool spin_active = (motion_->get_spin_level() >= SpinLevel::LOW && motion_->valid());
+    bool spin_active = (spin_.level >= SpinLevel::LOW && motion_->valid());
 
     if (spin_active) {
         // ========== 陀螺模式 ==========
@@ -580,7 +580,7 @@ void VehicleModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
     // 整车模型预测颜色: 未使用灰色，使用时用我方颜色
     cv::Scalar COLOR_SPIN;
     bool spin_valid = motion_->valid();
-    SpinLevel spin_level = motion_->get_spin_level();
+    SpinLevel spin_level = spin_.level;
     bool spin_active = spin_level >= SpinLevel::LOW && spin_valid;
     if (!spin_active) {
         COLOR_SPIN = cv::Scalar(128, 128, 128);  // 灰色: 未使用

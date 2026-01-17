@@ -127,12 +127,6 @@ public:
     virtual double get_dz() const = 0;
 
     /**
-     * @brief 获取陀螺等级
-     * @return 陀螺等级 (NONE/LOW/HIGH)
-     */
-    virtual SpinLevel get_spin_level() const = 0;
-
-    /**
      * @brief 获取当前追踪的装甲板 ID
      * @return 装甲板 ID (0-3)
      */

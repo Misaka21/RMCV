@@ -59,7 +59,6 @@ void SpMotion::init(const ArmorData& armor, double timestamp) {
     ekf_.init(x0);
 
     tracked_armor_id_ = 0;  // 假设初始追踪的是 id=0
-    spin_level_ = SpinLevel::NONE;
     last_update_time_ = timestamp;
     initialized_ = true;
 
@@ -219,7 +218,6 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
     );
 
     if (status == aimer::filter::UpdateStatus::RESET) {
-        spin_level_ = SpinLevel::NONE;
         tracked_armor_id_ = 0;
         debug::print(debug::PrintMode::WARNING, "SpMotion",
             "EKF reset due to {} consecutive rejections", max_reject);
@@ -242,7 +240,6 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
     }
     ekf_.set_x(x);
 
-    update_spin_level();
     last_update_time_ = timestamp;
 }
 
@@ -332,7 +329,6 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     );
 
     if (status == aimer::filter::UpdateStatus::RESET) {
-        spin_level_ = SpinLevel::NONE;
         tracked_armor_id_ = 0;
         debug::print(debug::PrintMode::WARNING, "SpMotion",
             "EKF reset due to {} consecutive rejections (dual armor)", max_reject);
@@ -354,40 +350,7 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     }
     ekf_.set_x(x);
 
-    update_spin_level();
     last_update_time_ = timestamp;
-}
-
-void SpMotion::update_spin_level() {
-    double omega = std::abs(get_omega());
-
-    // 读取运行时参数 (度/秒 转 弧度/秒)
-    double top1_activate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.top1_activate_w") * M_PI / 180.0;
-    double top1_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.top1_deactivate_w") * M_PI / 180.0;
-    double top2_activate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.top2_activate_w") * M_PI / 180.0;
-    double top2_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.top2_deactivate_w") * M_PI / 180.0;
-
-    switch (spin_level_) {
-        case SpinLevel::NONE:
-            if (omega > top1_activate) {
-                spin_level_ = SpinLevel::LOW;
-            }
-            break;
-
-        case SpinLevel::LOW:
-            if (omega < top1_deactivate) {
-                spin_level_ = SpinLevel::NONE;
-            } else if (omega > top2_activate) {
-                spin_level_ = SpinLevel::HIGH;
-            }
-            break;
-
-        case SpinLevel::HIGH:
-            if (omega < top2_deactivate) {
-                spin_level_ = SpinLevel::LOW;
-            }
-            break;
-    }
 }
 
 SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
@@ -539,13 +502,11 @@ void SpMotion::output_to_plotter(const std::string& prefix) const {
     plotter::add(prefix + "/r", x[sp_model::R]);
     plotter::add(prefix + "/l", x[sp_model::L]);
     plotter::add(prefix + "/h", x[sp_model::H]);
-    plotter::add(prefix + "/spin_level", static_cast<int>(spin_level_));
     plotter::add(prefix + "/tracked_id", tracked_armor_id_);
 }
 
 void SpMotion::reset() {
     initialized_ = false;
-    spin_level_ = SpinLevel::NONE;
     tracked_armor_id_ = 0;
 }
 

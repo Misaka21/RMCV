@@ -218,7 +218,6 @@ public:
         return x[sp_model::R] + x[sp_model::L];
     }
     double get_dz() const override { return ekf_.get_x()[sp_model::H]; }
-    SpinLevel get_spin_level() const override { return spin_level_; }
     int get_tracked_id() const override { return tracked_armor_id_; }
 
     std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
@@ -254,7 +253,6 @@ private:
      */
     Eigen::Vector3d h_armor_xyz(const VectorX& x, int id) const;
 
-    void update_spin_level();
     MatrixXX build_Q(double dt) const;
     MatrixZZ build_R(double distance, double z_to_v, int observed_armor_count = 1) const;
 
@@ -268,9 +266,6 @@ private:
 
     // ==================== 追踪状态 ====================
     int tracked_armor_id_ = 0;  // 当前追踪的装甲板 ID (0-3)
-
-    // ==================== 陀螺状态 ====================
-    SpinLevel spin_level_ = SpinLevel::NONE;
 };
 
 // ============================================================================

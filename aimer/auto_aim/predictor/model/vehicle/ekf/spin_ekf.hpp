@@ -216,7 +216,6 @@ public:
     double get_radius() const override { return ekf_.get_x()[spin_model::R]; }
     double get_another_radius() const override { return another_r_; }
     double get_dz() const override { return ekf_.get_x()[spin_model::DZ]; }
-    SpinLevel get_spin_level() const override { return spin_level_; }
     int get_tracked_id() const override { return tracked_armor_id_; }
 
     std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
@@ -248,11 +247,6 @@ public:
     VectorX get_state() const { return ekf_.get_x(); }
 
 private:
-    /**
-     * @brief 更新陀螺等级 (带迟滞)
-     */
-    void update_spin_level();
-
     /**
      * @brief 构建过程噪声矩阵
      */
@@ -286,8 +280,7 @@ private:
     double another_r_ = 0.26;   // 另一个半径 (4装甲板时)
     double another_dz_ = 0;     // 另一个高度差 (dz 现在在状态向量中)
 
-    // ==================== 陀螺状态 ====================
-    SpinLevel spin_level_ = SpinLevel::NONE;
+    // ==================== 追踪状态 ====================
     double last_yaw_ = 0;       // 上一帧观测的 armor_yaw (用于连续化)
 
     // ==================== 跳变检测 (与 LmtdMotion 一致) ====================
