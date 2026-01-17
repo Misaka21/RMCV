@@ -58,7 +58,8 @@ void SpMotion::init(const ArmorData& armor, double timestamp) {
 
     ekf_.init(x0);
 
-    tracked_armor_id_ = 0;  // 假设初始追踪的是 id=0
+    tracked_armor_id_ = 0;  // 假设初始追踪的是 state_id=0
+    last_detector_id_ = armor.id;  // 记录初始的 detector ID
     last_update_time_ = timestamp;
     initialized_ = true;
 
@@ -68,6 +69,14 @@ void SpMotion::init(const ArmorData& armor, double timestamp) {
 }
 
 int SpMotion::match_armor(const ArmorData& armor) const {
+    // ⭐ 利用 armor.id 的稳定性：
+    // 如果是同一个物理装甲板（detector ID 相同），帧间 state_id 不会变
+    // 帧间时间 ~5ms，即使高速陀螺 500°/s 也只旋转 2.5°，不会跨越 90° 边界
+    if (armor.id == last_detector_id_ && armor.id >= 0) {
+        return tracked_armor_id_;  // 保持 state_id 稳定
+    }
+
+    // 新装甲板或 ID 变化，重新计算最佳匹配
     const auto& obs = armor.observation;
 
     // 观测的装甲板位置和朝向
@@ -163,6 +172,7 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
     // 2. 匹配装甲板 ID
     int matched_id = match_armor(armor);
     tracked_armor_id_ = matched_id;
+    last_detector_id_ = armor.id;  // 记录这一帧的 detector ID
 
     // 3. 观测更新 (使用匹配的 armor_id)
     double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
@@ -278,6 +288,7 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     // 2. 匹配装甲板 ID
     int matched_id = match_armor(primary);
     tracked_armor_id_ = matched_id;
+    last_detector_id_ = primary.id;  // 记录主装甲板的 detector ID
 
     // 3. 用主装甲板做观测更新
     const auto& obs = primary.observation;
@@ -508,6 +519,7 @@ void SpMotion::output_to_plotter(const std::string& prefix) const {
 void SpMotion::reset() {
     initialized_ = false;
     tracked_armor_id_ = 0;
+    last_detector_id_ = -1;  // 重置 detector ID
 }
 
 }  // namespace autoaim::predictor

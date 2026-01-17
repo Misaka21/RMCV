@@ -265,7 +265,8 @@ private:
     int armor_num_ = 4;
 
     // ==================== 追踪状态 ====================
-    int tracked_armor_id_ = 0;  // 当前追踪的装甲板 ID (0-3)
+    int tracked_armor_id_ = 0;   // 当前追踪的 state_id (0-3)
+    int last_detector_id_ = -1;  // 上一帧的 armor.id（ArmorIdentifier 分配的跟踪 ID）
 };
 
 // ============================================================================
