@@ -75,6 +75,11 @@ void start_predictor_node() {
             auto predict_time_since_epoch = predict_end.time_since_epoch();
             snapshot.predict_timestamp = std::chrono::duration<double>(predict_time_since_epoch).count();
 
+            // clone 原图像给火控调试用
+            if (!detection.img.empty()) {
+                snapshot.debug_img = detection.img.clone();
+            }
+
             // 写入共享对象 (火控通过 BasicObjManager 读取)
             battlefield->get() = snapshot;
 

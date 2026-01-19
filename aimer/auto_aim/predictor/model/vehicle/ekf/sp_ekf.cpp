@@ -256,13 +256,43 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
 void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     if (armors.empty()) return;
 
+    // ⭐ 追踪目标选择
+    // 规则：如果已追踪的面积 >= keep_ratio * max_area，继续追踪；否则切换到最大的
+    const auto& primary = [&]() -> const ArmorData& {
+        if (armors.size() == 1) {
+            return armors[0];
+        }
+
+        double keep_ratio = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.keep_tracking_area_ratio");
+
+        double max_area = 0;
+        int max_area_idx = 0;
+        double tracked_area = 0;
+        int tracked_idx = -1;
+
+        for (size_t i = 0; i < armors.size(); ++i) {
+            double area = aimer::math::get_area(armors[i].observation.pts);
+            if (area > max_area) {
+                max_area = area;
+                max_area_idx = static_cast<int>(i);
+            }
+            if (armors[i].id == last_detector_id_) {
+                tracked_idx = static_cast<int>(i);
+                tracked_area = area;
+            }
+        }
+
+        if (tracked_idx >= 0 && tracked_area >= keep_ratio * max_area) {
+            return armors[tracked_idx];
+        }
+        return armors[max_area_idx];
+    }();
+
+    // 单装甲板直接更新
     if (armors.size() == 1) {
-        update(armors[0], timestamp);
+        update(primary, timestamp);
         return;
     }
-
-    // ==================== 双装甲板处理 ====================
-    const auto& primary = armors[0];  // z_to_v 更小，更正对
 
     // ⭐ 前置过滤: z_to_v 异常值检测
     constexpr double Z_TO_V_MAX = 1.6;

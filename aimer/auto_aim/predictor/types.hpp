@@ -359,6 +359,9 @@ struct BattlefieldSnapshot {
     double predict_timestamp = 0;  // 预测完成时间戳 (predict_t)
     int frame_id = 0;
 
+    // 原图像 (供火控调试绘制用)
+    cv::Mat debug_img;
+
     // ==================== 辅助方法 ====================
 
     bool is_valid(int id) const {
