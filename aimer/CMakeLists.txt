@@ -2,3 +2,4 @@
 
 add_subdirectory(common)
 add_subdirectory(auto_aim)
+add_subdirectory(auto_buff)
