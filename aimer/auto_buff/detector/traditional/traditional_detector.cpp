@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -191,44 +192,203 @@ std::vector<TraditionalDetector::TargetCandidate> TraditionalDetector::find_targ
             continue;
         }
 
-        cv::RotatedRect rect = cv::minAreaRect(contour);
-        double w = rect.size.width;
-        double h = rect.size.height;
+        // 需要足够点做椭圆拟合
+        if (contour.size() < 5) {
+            continue;
+        }
+
+        // 使用椭圆拟合代替旋转矩形
+        cv::RotatedRect ellipse = cv::fitEllipse(contour);
+        double w = ellipse.size.width;
+        double h = ellipse.size.height;
         double aspect = std::max(w, h) / std::min(w, h);
 
-        // 长宽比过滤 (靶心接近正方形)
+        // 长宽比过滤 (靶心接近正方形/圆形)
         if (aspect < config_.target_aspect_min || aspect > config_.target_aspect_max) {
             continue;
         }
 
         TargetCandidate candidate;
         candidate.contour = contour;
-        candidate.rect = rect;
-        candidate.center = rect.center;
+        candidate.ellipse = ellipse;
+        candidate.center = ellipse.center;
         candidate.area = area;
         candidate.aspect_ratio = aspect;
 
-        // 检查子轮廓判断激活状态
-        // 未激活: 有4个以上子轮廓 (4个缺口)
-        // 已激活: 子轮廓呈同心圆结构
-        int child_count = 0;
+        // 收集缺口轮廓索引
         int child_idx = hierarchy[i][2];
         while (child_idx >= 0) {
-            candidate.inner_contours.push_back(contours[child_idx]);
-            child_count++;
+            candidate.gap_indices.push_back(child_idx);
             child_idx = hierarchy[child_idx][0];
         }
 
-        // 简单判断: 子轮廓数>=4为未激活
-        candidate.is_active = (child_count < 4);
+        // 简单判断激活状态: 子轮廓数>=4为未激活
+        candidate.is_active = (candidate.gap_indices.size() < 4);
 
-        // 置信度: 长宽比越接近1越好
-        candidate.confidence = 1.0f / aspect;
+        // 对未激活靶心检测缺口和扇叶尖端
+        if (!candidate.is_active && candidate.gap_indices.size() >= 4) {
+            detect_gaps_and_fan_tips(candidate, contours, hierarchy);
+        }
+
+        // 置信度: 长宽比越接近1越好，有扇叶尖端时额外加分
+        candidate.confidence = 1.0f / static_cast<float>(aspect);
+        if (candidate.has_fan_tips) {
+            candidate.confidence += 0.5f;
+        }
 
         candidates.push_back(candidate);
     }
 
     return candidates;
+}
+
+// ============================================================================
+// 缺口检测与扇叶尖端计算
+// ============================================================================
+
+std::pair<int, int> TraditionalDetector::get_left_right_idx(
+    const std::vector<cv::Point2f>& contour,
+    const cv::Point2f& center) {
+
+    if (contour.size() < 3) {
+        return {0, 0};
+    }
+
+    // 使用叉积找最左和最右点
+    // 叉积 = (p - center) × (next - center)
+    // 正值表示逆时针转，负值表示顺时针转
+    int left_idx = 0;
+    int right_idx = 0;
+    double max_cross = -std::numeric_limits<double>::max();
+    double min_cross = std::numeric_limits<double>::max();
+
+    int n = static_cast<int>(contour.size());
+    for (int i = 0; i < n; ++i) {
+        cv::Point2f v1 = contour[i] - center;
+        cv::Point2f v2 = contour[(i + 1) % n] - center;
+
+        // 叉积: v1.x * v2.y - v1.y * v2.x
+        double cross = v1.x * v2.y - v1.y * v2.x;
+
+        if (cross > max_cross) {
+            max_cross = cross;
+            left_idx = i;  // 叉积最大处为左角点
+        }
+        if (cross < min_cross) {
+            min_cross = cross;
+            right_idx = i;  // 叉积最小处为右角点
+        }
+    }
+
+    return {left_idx, right_idx};
+}
+
+bool TraditionalDetector::detect_gaps_and_fan_tips(
+    TargetCandidate& target,
+    const std::vector<std::vector<cv::Point>>& contours,
+    const std::vector<cv::Vec4i>& hierarchy) {
+
+    target.has_fan_tips = false;
+
+    // 需要至少4个缺口
+    if (target.gap_indices.size() < 4) {
+        return false;
+    }
+
+    // 1. 筛选有效缺口并计算角点
+    struct GapData {
+        int idx;
+        double angle;  // 相对靶心中心的角度
+        GapInfo info;
+    };
+    std::vector<GapData> valid_gaps;
+
+    for (int gap_idx : target.gap_indices) {
+        const auto& gap_contour = contours[gap_idx];
+        double gap_area = cv::contourArea(gap_contour);
+
+        // 面积比过滤
+        double area_ratio = gap_area / target.area;
+        if (area_ratio < config_.gap_area_ratio_min ||
+            area_ratio > config_.gap_area_ratio_max) {
+            continue;
+        }
+
+        // 需要足够点
+        if (gap_contour.size() < 5) {
+            continue;
+        }
+
+        // 长宽比过滤 (缺口是长条形)
+        cv::RotatedRect gap_rect = cv::minAreaRect(gap_contour);
+        double w = gap_rect.size.width;
+        double h = gap_rect.size.height;
+        double gap_aspect = std::max(w, h) / std::min(w, h);
+
+        if (gap_aspect < config_.gap_aspect_min ||
+            gap_aspect > config_.gap_aspect_max) {
+            continue;
+        }
+
+        // 转换为 Point2f
+        std::vector<cv::Point2f> contour_f(gap_contour.begin(), gap_contour.end());
+
+        // 用叉积找左右角点
+        auto [left_idx, right_idx] = get_left_right_idx(contour_f, target.center);
+
+        GapInfo gap_info;
+        gap_info.left_corner = contour_f[left_idx];
+        gap_info.right_corner = contour_f[right_idx];
+        gap_info.center = gap_rect.center;
+        gap_info.valid = true;
+
+        // 计算缺口相对靶心中心的角度
+        cv::Point2f diff = gap_info.center - target.center;
+        double angle = std::atan2(diff.y, diff.x);
+
+        valid_gaps.push_back({gap_idx, angle, gap_info});
+    }
+
+    // 需要恰好4个有效缺口
+    if (valid_gaps.size() != 4) {
+        return false;
+    }
+
+    // 2. 按角度排序缺口 (逆时针: 左上, 右上, 右下, 左下)
+    // 从 -135° 开始 (左上方向)
+    std::sort(valid_gaps.begin(), valid_gaps.end(),
+        [](const GapData& a, const GapData& b) {
+            // 调整角度使 -135° 为起点
+            auto normalize = [](double angle) {
+                double adjusted = angle + M_PI * 3 / 4;  // 加135°
+                if (adjusted < 0) adjusted += 2 * M_PI;
+                if (adjusted >= 2 * M_PI) adjusted -= 2 * M_PI;
+                return adjusted;
+            };
+            return normalize(a.angle) < normalize(b.angle);
+        });
+
+    // 存储排序后的缺口
+    target.gaps.clear();
+    for (const auto& gd : valid_gaps) {
+        target.gaps.push_back(gd.info);
+    }
+
+    // 3. 计算扇叶尖端 = 相邻缺口角点中点
+    // gap[0]=左上, gap[1]=右上, gap[2]=右下, gap[3]=左下
+    // fan_tips[0]=top    = (gap[0].right + gap[1].left) / 2
+    // fan_tips[1]=right  = (gap[1].right + gap[2].left) / 2
+    // fan_tips[2]=bottom = (gap[2].right + gap[3].left) / 2
+    // fan_tips[3]=left   = (gap[3].right + gap[0].left) / 2
+
+    for (int i = 0; i < 4; ++i) {
+        int next = (i + 1) % 4;
+        target.fan_tips[i] = (target.gaps[i].right_corner +
+                              target.gaps[next].left_corner) * 0.5f;
+    }
+
+    target.has_fan_tips = true;
+    return true;
 }
 
 // ============================================================================
@@ -372,6 +532,15 @@ void TraditionalDetector::filter_and_match_targets(
             targets[i].is_active = c->is_active;
             targets[i].confidence = c->confidence;
             targets[i].valid = true;
+
+            // 设置 landmarks: [center, top, right, bottom, left]
+            targets[i].landmarks.clear();
+            targets[i].landmarks.push_back(c->center);
+            if (c->has_fan_tips) {
+                for (int j = 0; j < 4; ++j) {
+                    targets[i].landmarks.push_back(c->fan_tips[j]);
+                }
+            }
         }
         return;
     }
@@ -439,13 +608,14 @@ void TraditionalDetector::filter_and_match_targets(
             targets[slot_id].confidence = at.candidate->confidence;
             targets[slot_id].valid = true;
 
-            // 存储landmarks (如果有内轮廓，提取缺口位置)
-            // 简化: 取旋转矩形4角点 + 中心
-            cv::Point2f vertices[4];
-            at.candidate->rect.points(vertices);
+            // 设置 landmarks: [center, top, right, bottom, left]
             targets[slot_id].landmarks.clear();
-            targets[slot_id].landmarks.assign(vertices, vertices + 4);
             targets[slot_id].landmarks.push_back(at.candidate->center);
+            if (at.candidate->has_fan_tips) {
+                for (int j = 0; j < 4; ++j) {
+                    targets[slot_id].landmarks.push_back(at.candidate->fan_tips[j]);
+                }
+            }
         }
     }
 }
@@ -597,6 +767,7 @@ void TraditionalDetector::draw_debug_image(const cv::Mat& src,
     cv::Scalar target_color(0, 255, 0);    // 绿色: 靶心
     cv::Scalar active_color(0, 0, 255);    // 红色: 待打击目标
     cv::Scalar arrow_color(255, 0, 255);   // 紫色: 箭头
+    cv::Scalar tip_color(255, 255, 0);     // 青色: 扇叶尖端
 
     // 绘制R标
     if (result.r_center.valid) {
@@ -619,6 +790,23 @@ void TraditionalDetector::draw_debug_image(const cv::Mat& src,
                     std::to_string(i) + (t.is_active ? "*" : ""),
                     t.center + cv::Point2f(20, 5),
                     cv::FONT_HERSHEY_SIMPLEX, 0.6, color, 2);
+
+        // 绘制扇叶尖端 (landmarks[1~4])
+        if (t.landmarks.size() >= 5) {
+            // landmarks: [center, top, right, bottom, left]
+            const char* labels[] = {"T", "R", "B", "L"};
+            for (int j = 1; j < 5; ++j) {
+                cv::circle(debug_image_, t.landmarks[j], 5, tip_color, -1);
+                cv::putText(debug_image_, labels[j-1],
+                            t.landmarks[j] + cv::Point2f(5, -5),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.4, tip_color, 1);
+            }
+            // 连接扇叶尖端形成菱形
+            cv::line(debug_image_, t.landmarks[1], t.landmarks[2], tip_color, 1);
+            cv::line(debug_image_, t.landmarks[2], t.landmarks[3], tip_color, 1);
+            cv::line(debug_image_, t.landmarks[3], t.landmarks[4], tip_color, 1);
+            cv::line(debug_image_, t.landmarks[4], t.landmarks[1], tip_color, 1);
+        }
     }
 
     // 绘制箭头

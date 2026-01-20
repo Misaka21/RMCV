@@ -37,6 +37,16 @@
     #@double 靶心最大长宽比
     target_aspect_max = 1.55
 
+    # 缺口检测参数
+    #@double 缺口面积/靶心面积 最小比
+    gap_area_ratio_min = 0.025
+    #@double 缺口面积/靶心面积 最大比
+    gap_area_ratio_max = 0.20
+    #@double 缺口长宽比最小
+    gap_aspect_min = 1.55
+    #@double 缺口长宽比最大
+    gap_aspect_max = 8.0
+
     # 箭头检测参数
     #@double 箭头最小面积
     arrow_area_min = 100.0

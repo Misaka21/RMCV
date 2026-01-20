@@ -6,6 +6,7 @@
 #ifndef AIMER_AUTOBUFF_TRADITIONAL_DETECTOR_HPP
 #define AIMER_AUTOBUFF_TRADITIONAL_DETECTOR_HPP
 
+#include <array>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -35,6 +36,12 @@ struct TraditionalDetectorConfig {
     double target_aspect_min = 0.99;
     double target_aspect_max = 1.55;
 
+    // 缺口检测参数
+    double gap_area_ratio_min = 0.025;   // 缺口面积/靶心面积 最小比
+    double gap_area_ratio_max = 0.20;    // 缺口面积/靶心面积 最大比
+    double gap_aspect_min = 1.55;        // 缺口长宽比最小
+    double gap_aspect_max = 8.0;         // 缺口长宽比最大
+
     // 箭头检测参数
     double arrow_area_min = 100;
     double arrow_area_max = 4000;
@@ -56,8 +63,9 @@ struct TraditionalDetectorConfig {
  * 1. 色差二值化
  * 2. 轮廓提取
  * 3. 特征分析 (R标/靶心/箭头)
- * 4. 几何约束过滤
- * 5. 特征关联
+ * 4. 缺口角点检测 → 扇叶尖端计算
+ * 5. 几何约束过滤
+ * 6. 特征关联
  */
 class TraditionalDetector : public BuffDetectorInterface {
 public:
@@ -70,6 +78,14 @@ public:
 
 private:
     // ========== 内部结构体 ==========
+
+    // 缺口信息
+    struct GapInfo {
+        cv::Point2f left_corner;   // 左角点 (叉积法)
+        cv::Point2f right_corner;  // 右角点
+        cv::Point2f center;        // 缺口中心
+        bool valid = false;
+    };
 
     // 候选R标
     struct RCenterCandidate {
@@ -84,13 +100,18 @@ private:
     // 候选靶心
     struct TargetCandidate {
         cv::Point2f center;
-        std::vector<cv::Point> contour;
-        std::vector<cv::Point> inner_contours;  // 子轮廓 (用于判断激活状态)
-        cv::RotatedRect rect;
+        cv::RotatedRect ellipse;           // 椭圆拟合
+        std::vector<cv::Point> contour;    // 外轮廓
+        std::vector<int> gap_indices;      // 缺口轮廓索引
+        std::vector<GapInfo> gaps;         // 排序后的缺口 (left_top, right_top, right_bottom, left_bottom)
         double area;
         double aspect_ratio;
-        bool is_active;  // 已击打
+        bool is_active;  // 已激打
         float confidence;
+
+        // 扇叶尖端 (top, right, bottom, left)
+        std::array<cv::Point2f, 4> fan_tips;
+        bool has_fan_tips = false;
     };
 
     // 候选箭头
@@ -110,8 +131,6 @@ private:
 
     /**
      * @brief 色差二值化
-     * diff = (enemy_color == RED) ? R - B : B - R
-     * bin = (diff > threshold) ? 255 : 0
      */
     cv::Mat binary_color_diff(const cv::Mat& src);
 
@@ -124,7 +143,7 @@ private:
         const std::vector<cv::Vec4i>& hierarchy);
 
     /**
-     * @brief 查找靶心候选
+     * @brief 查找靶心候选 (含缺口检测)
      */
     std::vector<TargetCandidate> find_targets(
         const cv::Mat& binary,
@@ -139,6 +158,19 @@ private:
         const std::vector<std::vector<cv::Point>>& contours);
 
     /**
+     * @brief 检测缺口并计算扇叶尖端
+     *
+     * 1. 找到4个缺口轮廓
+     * 2. 对每个缺口用叉积找左右角点
+     * 3. 按角度排序缺口
+     * 4. 计算扇叶尖端 = 相邻缺口角点中点
+     */
+    bool detect_gaps_and_fan_tips(
+        TargetCandidate& target,
+        const std::vector<std::vector<cv::Point>>& contours,
+        const std::vector<cv::Vec4i>& hierarchy);
+
+    /**
      * @brief 选择最佳R标
      */
     bool select_best_r_center(
@@ -147,7 +179,6 @@ private:
 
     /**
      * @brief 过滤并关联靶心
-     * 使用R标位置进行几何约束
      */
     void filter_and_match_targets(
         const std::vector<TargetCandidate>& candidates,
@@ -175,6 +206,15 @@ private:
      * @brief 绘制调试图像
      */
     void draw_debug_image(const cv::Mat& src, const BuffDetectionResult& result);
+
+    // ========== 辅助函数 ==========
+
+    /**
+     * @brief 用叉积找轮廓的最左和最右点
+     */
+    static std::pair<int, int> get_left_right_idx(
+        const std::vector<cv::Point2f>& contour,
+        const cv::Point2f& center);
 
     // ========== 成员变量 ==========
 
