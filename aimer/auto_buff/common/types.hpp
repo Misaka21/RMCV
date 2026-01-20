@@ -32,9 +32,10 @@ constexpr int ARROW_KEYPOINTS = 2;     // 箭头关键点: tip + tail
 // R标尺寸
 constexpr double R_CENTER_RADIUS = 0.040;       // R标半径 40mm
 
-// 靶心尺寸 (内环到外环)
-constexpr double TARGET_INNER_RADIUS = 0.040;   // 靶心内环半径
-constexpr double TARGET_OUTER_RADIUS = 0.070;   // 靶心外环半径
+// 靶心尺寸
+constexpr double TARGET_INNER_RADIUS = 0.040;   // 靶心内环半径 40mm
+constexpr double TARGET_OUTER_RADIUS = 0.070;   // 靶心外环半径 70mm
+constexpr double TARGET_TIP_RADIUS = 0.095;     // 扇叶尖端半径 95mm (PnP用)
 
 // 能量机关旋转半径 (R标到靶心中心)
 constexpr double RUNE_RADIUS = 0.700;           // 旋转半径 700mm
@@ -94,19 +95,20 @@ struct DetectedRCenter {
 /**
  * @brief 靶心检测结果
  *
- * 包含5个关键点: center + 4个缺口位置
- * 缺口顺序: top(0), right(1), bottom(2), left(3), center(4)
+ * 包含5个关键点: center + 4个扇叶尖端
+ * 顺序: center(0), top(1), right(2), bottom(3), left(4)
  *
- *      [0] (top gap)
- *         /\
- *    [3]/    \[1]
- *      \  *  /     * = center
- *    [2]\    /
- *         \/
+ *           [1] top
+ *            |
+ *    [4] ----●---- [2] right
+ *   left     |
+ *           [3] bottom
+ *
+ * 扇叶尖端是两个缺口角点的中点，检测精度高
  */
 struct DetectedTarget {
     cv::Point2f center;                         // 中心点 (必须)
-    std::vector<cv::Point2f> landmarks;         // 5点: 4 gaps + center
+    std::vector<cv::Point2f> landmarks;         // 5点: center + 4个扇叶尖端
     Eigen::Vector3d position = Eigen::Vector3d::Zero();  // 3D位置 (相机坐标系)
 
     int slot_id = -1;                           // 槽位ID (0-4)
@@ -118,26 +120,18 @@ struct DetectedTarget {
     /**
      * @brief 获取PnP用的物体坐标系点
      *
-     * 以靶心中心为原点，返回关键点
+     * 以靶心中心为原点，返回5个关键点 (单位: m)
+     * 顺序与 landmarks 一一对应
      */
     std::vector<cv::Point3f> object_points() const {
-        double r = TARGET_OUTER_RADIUS;
-        // 如果有5点关键点，返回对应的3D点
-        if (landmarks.size() >= 5) {
-            return {
-                cv::Point3f(0, -r, 0),   // top gap
-                cv::Point3f(r,  0, 0),   // right gap
-                cv::Point3f(0,  r, 0),   // bottom gap
-                cv::Point3f(-r, 0, 0),   // left gap
-                cv::Point3f(0,  0, 0)    // center
-            };
-        }
-        // 否则返回4角点
+        float r = static_cast<float>(TARGET_TIP_RADIUS);
+        // 5点: center + 4个扇叶尖端 (上右下左)
         return {
-            cv::Point3f(-r, -r, 0),
-            cv::Point3f(-r,  r, 0),
-            cv::Point3f( r,  r, 0),
-            cv::Point3f( r, -r, 0)
+            cv::Point3f(0,  0, 0),   // center
+            cv::Point3f(0, -r, 0),   // top    (y负方向)
+            cv::Point3f(r,  0, 0),   // right  (x正方向)
+            cv::Point3f(0,  r, 0),   // bottom (y正方向)
+            cv::Point3f(-r, 0, 0)    // left   (x负方向)
         };
     }
 };
