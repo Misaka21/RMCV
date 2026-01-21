@@ -1,3 +1,12 @@
+# 1.14
+重新新建了 RTT 测试项目，测试 UART / USB CDC / USB Bulk 三种协议的通信延迟。采用 NTP 四时间戳算法 RTT = (T4-T1) - (T3-T2)，T1 T4 为上位机时间戳（微秒精度），T2 T3 为 MCU 时间戳（HAL_GetTick），可分离纯传输延迟与 MCU 处理时间。
+50000 包测试结果：
+USB CDC: 0.170ms，抖动 0.031ms，P99 0.24ms
+USB Bulk: 0.200ms，抖动 0.062ms，P99 0.26ms
+UART 115200: 6.525ms，抖动 0.104ms，P99 6.76ms
+三者均 0% 丢包。CDC 延迟最低且抖动最小，Bulk 偶发尖峰较高（Max 4.1ms）。UART 延迟约为 USB 的 35 倍，受波特率限制，理论传输 24 字节往返需 4.2ms，实测多出的 2.3ms 来自 USB-UART 转换芯片。
+Clock Offset 测量存在精度限制。HAL_GetTick() 只有 1ms 精度，长时间测试会累积误差。RTT / Jitter / 丢包率数据可信，Clock Offset 相关数据在 UART 长测试中不准确。若需精确时钟同步，MCU 端应改用微秒级定时器。
+
 # 1.13
 移植 sp_vision_25 的 SP 整车运动模型。原 SpinMotion 用两个半径 r1、r2 表示四装甲板分布，切板时交换 r1 ↔ r2 导致状态量突变，协方差无法正确传递。SP 模型改用差量 L = r1 - r2、H = z1 - z2，切板只需 θ += π，状态连续。11维状态向量：[xc, vx, yc, vy, zc, vz, θ, ω, r, L, H]。配置 motion_model 可选 spin/lmtd/sp 三种模型。
 给AdaptiveEkf 新增马氏距离门限检查。计算 d² = (z - Hx̂)ᵀ S⁻¹ (z - Hx̂)，超过 χ² 门限判定为离群点，拒绝更新并增大过程噪声 Q 进入宽松模式。连续拒绝超过阈值则从当前观测重新初始化。χ² 门限取 p=0.01，3维观测 11.34，4维观 测 13.28。SpinMotion、ArmorMotion、OutpostMotion 均已适配。
