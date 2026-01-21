@@ -1,3 +1,13 @@
+# 1.17
+ 修复 predict_armor_position 陀螺分支语义错误。原代码用 armor_idx % 2 判断物理属性来选择半径，但 armors[] 是按相对顺序填充的（armors[0] = tracked），索引和物理奇偶性无关。改为用存储位置 + 绕 z 轴旋转 的方式预测，添加 SpinState::dz 字段支持高度差。
+重组 predictor 目录结构，使命名更清晰：
+enemy_state/ → observer/（PnP 观测 + 跟踪）
+enemy_model/ → model/（运动模型）
+*_motion → *_ekf（明确是 EKF 实现）
+3. 将陀螺等级判断从各 EKF 移至 VehicleModel。原先 SpinEKF/LmtdEKF/SpEKF 各自维护 spin_level_ 和 update_spin_level()，逻辑分散且重复。 现在统一由 VehicleModel 调用 SpinState::update_level(omega)，参数集 中在 [AutoAim.Predictor.Motion] 配置节。陀螺等级判断是业务逻辑，不应分散在各 EKF 实现中。
+分析 SpMotion 与 LmtdMotion 的设计差异。核心区别：SpMotion 把 L（半径差）和 H（高度差）放在状态向量中（11维），切板时不需要交换状态；LmtdMotion 外部维护 another_r_ 和 dz_，跳变时需要交换。sp_vision_25 的设计更优：把变化量放在状态里，让 EKF 自己估计，避免手动交换带来 的状态混乱风险。
+SpMotion 利用 armor.id 提高匹配稳定性。原先 match_armor() 每次 都重新计算 state_id，在快速加减速时 EKF 的 θ 预测可能偏离，导致匹配 抖动。改进：记录上一帧的 armor.id（ArmorIdentifier 分配的跟踪 ID），如果相同则保持 state_id 不变。原理：帧间时间 ~5ms，即使高速陀螺 500°/s 也只旋转 2.5°，不会跨越 90° 边界，所以同一物理装甲板的 state_id  不会变。
+
 # 1.15
   移植 sp_vision_25 的 SP 整车运动模型。原 SpinMotion 用两个半径 r1、r2 表示四装甲板分布，切板时交换 r1 ↔ r2 导致状态量突变，协方差无法正确传递。SP 模型改用差量 L = r1 - r2、H = z1 - z2，切板只需 θ += π，状态连续。11维状态向量：[xc, vx, yc, vy, zc, vz, θ, ω, r, L, H]。配置 motion_model 可选 spin/lmtd/sp 三种模型。
 
