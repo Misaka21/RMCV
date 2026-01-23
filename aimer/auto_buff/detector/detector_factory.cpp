@@ -7,7 +7,7 @@
 #include <stdexcept>
 
 #include "plugin/param/static_config.hpp"
-#include "plugin/debug/log.hpp"
+#include "plugin/debug/logger.hpp"
 
 #include "traditional/traditional_detector.hpp"
 

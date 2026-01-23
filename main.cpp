@@ -15,8 +15,9 @@
 // Project headers
 #include "aimer/auto_aim/detector/detector_node.hpp"
 #include "aimer/auto_aim/predictor/predictor_node.hpp"
-#include "aimer/common/transformer/transformer.hpp"
 #include "aimer/auto_aim/fire_control/fire_control_node.hpp"
+#include "aimer/auto_buff/detector/detector_node.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
@@ -155,6 +156,11 @@ int main(int argc, char* argv[]) {
         autoaim::fire_control::start_fire_control_node("aimer.toml");
     });
 
+    // 启动能量机关检测器节点线程
+    std::thread buff_detector_thread([]() {
+        autobuff::detector::background_buff_detector_run("buff.toml");
+    });
+
     // 启动录制节点线程
     std::thread recorder_thread([]() {
         rmcv_bag::start_recorder_node();
@@ -235,6 +241,9 @@ int main(int argc, char* argv[]) {
     }
     if (fire_control_thread.joinable()) {
         fire_control_thread.join();
+    }
+    if (buff_detector_thread.joinable()) {
+        buff_detector_thread.join();
     }
     if (recorder_thread.joinable()) {
         recorder_thread.join();

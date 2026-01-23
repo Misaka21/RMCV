@@ -13,6 +13,7 @@
 
 #include "detector_factory.hpp"
 #include "detector_helpers.hpp"
+#include "aimer/common/robot_state.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
@@ -81,6 +82,13 @@ void run_sync_loop(detector::DetectorInterface* det) {
             auto frame = sub.pop_for(1000);
             if (frame.image.empty() || !frame.serial_valid) continue;
 
+            // 非自瞄模式时跳过检测
+            auto aim_mode = aimer::to_aim_mode(frame.serial_data.aim_mode);
+            if (aim_mode != aimer::AimMode::AUTOAIM) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+
             // 更新颜色
             update_detector_color(det, frame.serial_data.enemy_color);
 
@@ -148,6 +156,13 @@ void run_async_loop(detector::DetectorInterface* det) {
             try {
                 auto frame = sub.pop_for(1000);
                 if (frame.image.empty() || !frame.serial_valid) continue;
+
+                // 非自瞄模式时跳过检测
+                auto aim_mode = aimer::to_aim_mode(frame.serial_data.aim_mode);
+                if (aim_mode != aimer::AimMode::AUTOAIM) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    continue;
+                }
 
                 // 更新颜色
                 if (frame.serial_data.enemy_color != 0) {

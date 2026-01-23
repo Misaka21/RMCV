@@ -54,6 +54,12 @@ void start_predictor_node() {
         try {
             auto detection = sub.pop_for(1000);
 
+            // 非自瞄模式时跳过预测
+            if (detection.state.aim_mode != aimer::AimMode::AUTOAIM) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+
             // 使用相机帧时间戳（从 SyncFrame 传递过来，微秒转秒）
             double timestamp = detection.state.timestamp_us / 1e6;
 
