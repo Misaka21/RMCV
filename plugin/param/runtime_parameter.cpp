@@ -7,8 +7,8 @@
 #include <chrono>
 #include <memory>
 
-// Third-party library headers
-#include <toml++/toml.hpp>
+// Third-party library headers (embedded)
+#include "thirdparty/toml.hpp"
 
 // Project headers
 #include "plugin/debug/logger.hpp"

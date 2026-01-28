@@ -78,7 +78,7 @@ find_package(OpenCV REQUIRED)
 find_package(fmt REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Threads REQUIRED)
-find_package(tomlplusplus CONFIG REQUIRED)
+# tomlplusplus: 使用内嵌的 header-only 版本 (plugin/param/thirdparty/toml.hpp)
 
 # Python/pybind11 可选 - 用于 Web UI (--web 参数)
 option(ENABLE_WEBVIEW "Enable Web UI (requires Python and pybind11)" ON)
@@ -240,12 +240,7 @@ if(Eigen3_FOUND)
 endif()
 
 # --- tomlplusplus ---
-if(TARGET tomlplusplus::tomlplusplus)
-    get_target_property(TOMLPP_INCLUDE_DIR tomlplusplus::tomlplusplus INTERFACE_INCLUDE_DIRECTORIES)
-    get_target_property(TOMLPP_LIBRARY_LOCATION tomlplusplus::tomlplusplus IMPORTED_LOCATION)
-    message(STATUS "tomlplusplus Library Location: ${TOMLPP_LIBRARY_LOCATION}")
-    message(STATUS "tomlplusplus Include Dirs: ${TOMLPP_INCLUDE_DIR}")
-endif()
+message(STATUS "tomlplusplus: using embedded header-only version")
 
 # --- Python ---
 if(ENABLE_WEBVIEW)

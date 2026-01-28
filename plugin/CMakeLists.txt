@@ -26,7 +26,6 @@ target_include_directories(${lib_name} PUBLIC
 target_link_libraries(${lib_name} PUBLIC
         ${OpenCV_LIBS}
         Eigen3::Eigen
-        tomlplusplus::tomlplusplus
         fmt::fmt
 )
 
