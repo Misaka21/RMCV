@@ -42,7 +42,7 @@
     #@bool 忽略CRC校验
     ignore_crc = false
     #@bool 不接串口时使用虚拟数据
-    use_fake_serial_data = true
+    use_fake_serial_data = false
 
     #@bool IMU符号修正: 如果云台左转时yaw变小，需要设为true
     imu_yaw_negate = false
@@ -84,23 +84,17 @@
     max_reconnect_attempts = -1
 
 [Serial.fake_data]
-    # 虚拟串口数据配置
-    #@double IMU yaw角度 (度)
-    yaw_deg = 0.0
-    #@double IMU pitch角度 (度)
-    pitch_deg = 0.0
-    #@double IMU roll角度 (度)
-    roll_deg = 0.0
-    #@int 机器人ID: 1-7红方, 101-107蓝方
-    robot_id = 3
-    #@int 敌方颜色: 0=未知, 1=红, 2=蓝
-    enemy_color = 1
+    # 虚拟串口数据配置 (新32字节协议)
+    #@double IMU yaw角度 (弧度)
+    yaw_rad = 0.0
+    #@double IMU pitch角度 (弧度)
+    pitch_rad = 0.0
+    #@double IMU roll角度 (弧度)
+    roll_rad = 0.0
     #@double 弹速 (m/s)
     bullet_speed = 15.0
     #@int 自瞄模式: 0=关闭, 1=自瞄, 2=小符, 3=大符
-    aim_mode = 3
-    #@bool 是否允许射击
-    allow_fire = true
+    aim_mode = 1
     #@bool 预瞄锁定 (模拟右键按下)
     aiming_lock = false
 

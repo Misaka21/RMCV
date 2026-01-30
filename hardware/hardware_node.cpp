@@ -94,24 +94,27 @@ void drain_subscriber_to_buffer(umt::Subscriber<serial::SerialReceiveData>& subs
 
 /**
  * @brief 欧拉角转四元数 (ZYX顺序: yaw-pitch-roll)
+ * @param yaw_rad 偏航角 (弧度)
+ * @param pitch_rad 俯仰角 (弧度)
+ * @param roll_rad 横滚角 (弧度)
  */
-inline Eigen::Quaterniond euler_to_quat(float yaw_deg, float pitch_deg, float roll_deg) {
-    double yaw = yaw_deg * M_PI / 180.0;
-    double pitch = pitch_deg * M_PI / 180.0;
-    double roll = roll_deg * M_PI / 180.0;
-    return Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ())
-         * Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY())
-         * Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX());
+inline Eigen::Quaterniond euler_to_quat(float yaw_rad, float pitch_rad, float roll_rad) {
+    return Eigen::AngleAxisd(static_cast<double>(yaw_rad), Eigen::Vector3d::UnitZ())
+         * Eigen::AngleAxisd(static_cast<double>(pitch_rad), Eigen::Vector3d::UnitY())
+         * Eigen::AngleAxisd(static_cast<double>(roll_rad), Eigen::Vector3d::UnitX());
 }
 
 /**
  * @brief 四元数转欧拉角 (ZYX顺序)
+ * @param yaw_rad 输出偏航角 (弧度)
+ * @param pitch_rad 输出俯仰角 (弧度)
+ * @param roll_rad 输出横滚角 (弧度)
  */
-inline void quat_to_euler(const Eigen::Quaterniond& q, float& yaw_deg, float& pitch_deg, float& roll_deg) {
+inline void quat_to_euler(const Eigen::Quaterniond& q, float& yaw_rad, float& pitch_rad, float& roll_rad) {
     Eigen::Vector3d euler = q.toRotationMatrix().eulerAngles(2, 1, 0);  // ZYX
-    yaw_deg = static_cast<float>(euler[0] * 180.0 / M_PI);
-    pitch_deg = static_cast<float>(euler[1] * 180.0 / M_PI);
-    roll_deg = static_cast<float>(euler[2] * 180.0 / M_PI);
+    yaw_rad = static_cast<float>(euler[0]);
+    pitch_rad = static_cast<float>(euler[1]);
+    roll_rad = static_cast<float>(euler[2]);
 }
 
 /**
@@ -181,11 +184,8 @@ std::optional<serial::SerialReceiveData> interpolate_serial_data(
 
     // 其他字段取最近的
     const auto& nearest = (t < 0.5) ? before.data : after.data;
-    result.robot_id = nearest.robot_id;
-    result.enemy_color = nearest.enemy_color;
     result.bullet_speed = nearest.bullet_speed;
     result.aim_mode = nearest.aim_mode;
-    result.allow_fire = nearest.allow_fire;
     result.aiming_lock = nearest.aiming_lock;
 
     // 时间戳设为目标时间
@@ -222,21 +222,17 @@ void start_hardware_node() {
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
         serial::SerialReceiveData fake_data;  // 预加载fake数据
         if (use_fake_serial) {
+            // fake_data 角度使用弧度
             fake_data.yaw = static_cast<float>(
-                static_param::get_param<double>(config, "Serial.fake_data", "yaw_deg"));
+                static_param::get_param<double>(config, "Serial.fake_data", "yaw_rad"));
             fake_data.pitch = static_cast<float>(
-                static_param::get_param<double>(config, "Serial.fake_data", "pitch_deg"));
+                static_param::get_param<double>(config, "Serial.fake_data", "pitch_rad"));
             fake_data.roll = static_cast<float>(
-                static_param::get_param<double>(config, "Serial.fake_data", "roll_deg"));
-            fake_data.robot_id = static_cast<uint8_t>(
-                static_param::get_param<int64_t>(config, "Serial.fake_data", "robot_id"));
-            fake_data.enemy_color = static_cast<uint8_t>(
-                static_param::get_param<int64_t>(config, "Serial.fake_data", "enemy_color"));
+                static_param::get_param<double>(config, "Serial.fake_data", "roll_rad"));
             fake_data.bullet_speed = static_cast<float>(
                 static_param::get_param<double>(config, "Serial.fake_data", "bullet_speed"));
             fake_data.aim_mode = static_cast<uint8_t>(
                 static_param::get_param<int64_t>(config, "Serial.fake_data", "aim_mode"));
-            fake_data.allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
             fake_data.aiming_lock = static_param::get_param<bool>(config, "Serial.fake_data", "aiming_lock");
         }
 
@@ -249,8 +245,8 @@ void start_hardware_node() {
             std::this_thread::sleep_for(100ms);  // Wait for serial threads to start
         } else {
             debug::print(debug::PrintMode::WARNING, "HardwareNode",
-                "Using fake serial: color={}, bullet_speed={:.1f}",
-                fake_data.enemy_color, fake_data.bullet_speed);
+                "Using fake serial: mode={}, bullet_speed={:.1f}",
+                fake_data.aim_mode, fake_data.bullet_speed);
         }
 
         // 2. Load camera config and open camera

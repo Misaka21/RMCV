@@ -46,6 +46,9 @@ inline AimMode to_aim_mode(uint8_t raw) {
 
 /**
  * @brief 机器人状态 - 从 hardware::SyncFrame 提取
+ *
+ * 注意: 新协议 (32字节) 不再包含 enemy_color 和 allow_fire 字段，
+ * 这些需要从配置文件或其他来源获取
  */
 struct RobotState {
     // IMU姿态 (云台坐标系 → 世界坐标系)
@@ -57,13 +60,13 @@ struct RobotState {
     // 弹速 (m/s)
     float bullet_speed = 15.0f;
 
-    // 敌方颜色 (0=未知, 1=红, 2=蓝)
+    // 敌方颜色 (0=未知, 1=红, 2=蓝) - 需要从配置获取
     uint8_t enemy_color = 0;
 
     // 自瞄模式
     AimMode aim_mode = AimMode::DISABLED;
 
-    // 是否允许射击
+    // 是否允许射击 - 需要从配置获取
     bool allow_fire = false;
 
     // 预瞄锁定 (右键按下=true, 释放=false)
@@ -79,24 +82,31 @@ struct RobotState {
         RobotState state;
         if (frame.serial_valid) {
             const auto& s = frame.serial_data;
-            state.set_euler(s.yaw, s.pitch, s.roll);
+            // 新协议: yaw/pitch/roll 已经是弧度
+            state.set_euler_rad(s.yaw, s.pitch, s.roll);
             state.bullet_speed = s.bullet_speed;
-            state.enemy_color = s.enemy_color;
             state.aim_mode = to_aim_mode(s.aim_mode);  // uint8_t → AimMode
-            state.allow_fire = s.allow_fire;
             state.aiming_lock = s.aiming_lock;
+            // 注: enemy_color 和 allow_fire 需要从配置获取
         }
         state.timestamp_us = frame.timestamp_us;
         return state;
     }
 
-    // 从欧拉角构建四元数 (ZYX顺序, 输入为角度)
+    // 从欧拉角构建四元数 (ZYX顺序, 输入为弧度)
+    void set_euler_rad(float yaw_rad, float pitch_rad, float roll_rad) {
+        Eigen::AngleAxisd yaw_rot(static_cast<double>(yaw_rad), Eigen::Vector3d::UnitZ());
+        Eigen::AngleAxisd pitch_rot(static_cast<double>(pitch_rad), Eigen::Vector3d::UnitY());
+        Eigen::AngleAxisd roll_rot(static_cast<double>(roll_rad), Eigen::Vector3d::UnitX());
+        q_imu = yaw_rot * pitch_rot * roll_rot;
+    }
+
+    // 从欧拉角构建四元数 (ZYX顺序, 输入为角度) - 兼容旧接口
     void set_euler(float yaw_deg, float pitch_deg, float roll_deg) {
         constexpr double deg2rad = M_PI / 180.0;
-        Eigen::AngleAxisd yaw_rot(yaw_deg * deg2rad, Eigen::Vector3d::UnitZ());
-        Eigen::AngleAxisd pitch_rot(pitch_deg * deg2rad, Eigen::Vector3d::UnitY());
-        Eigen::AngleAxisd roll_rot(roll_deg * deg2rad, Eigen::Vector3d::UnitX());
-        q_imu = yaw_rot * pitch_rot * roll_rot;
+        set_euler_rad(static_cast<float>(yaw_deg * deg2rad),
+                      static_cast<float>(pitch_deg * deg2rad),
+                      static_cast<float>(roll_deg * deg2rad));
     }
 };
 

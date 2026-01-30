@@ -194,15 +194,11 @@ SimulatorConfig load_config(const std::string& filename) {
         cfg.image_topic = static_param::get_param<std::string>(toml, "Simulator", "image_topic");
         cfg.gimbal_pose_topic = static_param::get_param<std::string>(toml, "Simulator", "gimbal_pose_topic");
 
-        cfg.robot_id = static_cast<uint8_t>(
-            static_param::get_param<int64_t>(toml, "Simulator.serial", "robot_id"));
-        cfg.enemy_color = static_cast<uint8_t>(
-            static_param::get_param<int64_t>(toml, "Simulator.serial", "enemy_color"));
         cfg.bullet_speed = static_cast<float>(
             static_param::get_param<double>(toml, "Simulator.serial", "bullet_speed"));
         cfg.aim_mode = static_cast<uint8_t>(
             static_param::get_param<int64_t>(toml, "Simulator.serial", "aim_mode"));
-        cfg.allow_fire = static_param::get_param<bool>(toml, "Simulator.serial", "allow_fire");
+        cfg.aiming_lock = static_param::get_param<bool>(toml, "Simulator.serial", "aiming_lock");
 
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::WARNING, "Simulator",
@@ -230,7 +226,7 @@ void start_simulator_node() {
     // 加载配置
     auto config = load_config("simulator.toml");
     debug::print(debug::PrintMode::INFO, "Simulator", "gimbal: {}", config.gimbal_pose_topic);
-    debug::print(debug::PrintMode::INFO, "Simulator", "enemy_color: {}", config.enemy_color);
+    debug::print(debug::PrintMode::INFO, "Simulator", "aim_mode: {}", config.aim_mode);
 
     // 创建共享内存读取器
     ShmReader shm_reader;
@@ -293,21 +289,18 @@ void start_simulator_node() {
         frame.timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
 
-        // 四元数转欧拉角 (ZYX顺序)
+        // 四元数转欧拉角 (ZYX顺序) - 新协议输出弧度
         Eigen::Vector3d euler = q_gimbal.toRotationMatrix().eulerAngles(2, 1, 0);
-        constexpr double R2D = 180.0 / M_PI;
 
-        frame.serial_data.yaw = static_cast<float>(euler[0] * R2D);
-        frame.serial_data.pitch = static_cast<float>(euler[1] * R2D);
-        frame.serial_data.roll = static_cast<float>(euler[2] * R2D);
+        frame.serial_data.yaw = static_cast<float>(euler[0]);
+        frame.serial_data.pitch = static_cast<float>(euler[1]);
+        frame.serial_data.roll = static_cast<float>(euler[2]);
         frame.serial_valid = true;
 
         // 填充模拟串口数据
-        frame.serial_data.robot_id = config.robot_id;
-        frame.serial_data.enemy_color = config.enemy_color;
         frame.serial_data.bullet_speed = config.bullet_speed;
         frame.serial_data.aim_mode = config.aim_mode;
-        frame.serial_data.allow_fire = config.allow_fire;
+        frame.serial_data.aiming_lock = config.aiming_lock;
 
         // 发布
         pub.push(frame);

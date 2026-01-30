@@ -28,17 +28,16 @@ using hardware::SyncFrame;
 // CSV Reader
 // ============================================================================
 
+// 新协议: 删除 robot_id, enemy_color, allow_fire
 struct ImuRecord {
     int64_t timestamp_us;
     int frame_id;
     float yaw;
     float pitch;
     float roll;
-    uint8_t robot_id;
-    uint8_t enemy_color;
     float bullet_speed;
     uint8_t aim_mode;
-    bool allow_fire;
+    bool aiming_lock;
     int64_t serial_timestamp;
 };
 
@@ -79,7 +78,7 @@ private:
             tokens.push_back(token);
         }
 
-        if (tokens.size() < 11) return false;
+        if (tokens.size() < 9) return false;
 
         try {
             record.timestamp_us = std::stoll(tokens[0]);
@@ -87,12 +86,10 @@ private:
             record.yaw = std::stof(tokens[2]);
             record.pitch = std::stof(tokens[3]);
             record.roll = std::stof(tokens[4]);
-            record.robot_id = static_cast<uint8_t>(std::stoi(tokens[5]));
-            record.enemy_color = static_cast<uint8_t>(std::stoi(tokens[6]));
-            record.bullet_speed = std::stof(tokens[7]);
-            record.aim_mode = static_cast<uint8_t>(std::stoi(tokens[8]));
-            record.allow_fire = (std::stoi(tokens[9]) != 0);
-            record.serial_timestamp = std::stoll(tokens[10]);
+            record.bullet_speed = std::stof(tokens[5]);
+            record.aim_mode = static_cast<uint8_t>(std::stoi(tokens[6]));
+            record.aiming_lock = (std::stoi(tokens[7]) != 0);
+            record.serial_timestamp = std::stoll(tokens[8]);
             return true;
         } catch (...) {
             return false;
@@ -185,11 +182,9 @@ void start_playback_node(const std::string& bag_path, double playback_speed) {
         sync_frame.serial_data.yaw = imu.yaw;
         sync_frame.serial_data.pitch = imu.pitch;
         sync_frame.serial_data.roll = imu.roll;
-        sync_frame.serial_data.robot_id = imu.robot_id;
-        sync_frame.serial_data.enemy_color = imu.enemy_color;
         sync_frame.serial_data.bullet_speed = imu.bullet_speed;
         sync_frame.serial_data.aim_mode = imu.aim_mode;
-        sync_frame.serial_data.allow_fire = imu.allow_fire;
+        sync_frame.serial_data.aiming_lock = imu.aiming_lock;
         sync_frame.serial_data.recv_time_us = imu.serial_timestamp;
         sync_frame.serial_valid = true;
         if (csv_index < csv_reader->size()) {

@@ -13,6 +13,7 @@
 // Third-party library headers
 
 // Project headers
+#include "crc16.hpp"
 #include "fixed_packet.hpp"
 #include "plugin/debug/logger.hpp"
 #include "protocol/protocol_interface.hpp"
@@ -111,7 +112,16 @@ bool TransceiverManager<Capacity>::check_packet(
         return false;
     }
 
-    // TODO(gezp): 检查check_byte(buffer[capacity-2]),可采用异或校验(BCC)
+    // CRC16 校验 (计算范围: buffer[1..Capacity-3]，CRC 在 buffer[Capacity-3..Capacity-2])
+    // 对于32字节包: 计算 [1..28]，CRC 在 [29..30]
+    if constexpr (Capacity >= 4) {
+        // CRC 验证: buffer[1] 到 buffer[Capacity-2] (含 CRC)
+        // 即 len = Capacity - 2 (不含 head 和 tail)
+        if (!crc16_verify(buffer + 1, Capacity - 2)) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -217,6 +227,7 @@ bool TransceiverManager<Capacity>::recv_packet(PacketType& packet) {
 
 // 常用的固定大小包工具类型别名
 using FixedPacketTool16 = TransceiverManager<16>;
+using FixedPacketTool32 = TransceiverManager<32>;
 
 } // namespace serial
 #endif //TRANSCEIVER_MANAGER_HPP

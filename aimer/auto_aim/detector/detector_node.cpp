@@ -30,13 +30,6 @@ using SteadyClock = std::chrono::steady_clock;
 
 namespace {
 
-// 更新检测器颜色
-void update_detector_color(detector::DetectorInterface* det, uint8_t serial_color) {
-    if (serial_color != 0) {
-        det->set_enemy_color(detector::serial_to_enemy_color(serial_color));
-    }
-}
-
 // 更新 Dashboard 数据
 void update_dashboard(float latency_ms, size_t armor_count, float fps) {
     dashboard::set("detector.latency_ms", latency_ms);
@@ -88,9 +81,6 @@ void run_sync_loop(detector::DetectorInterface* det) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
-
-            // 更新颜色
-            update_detector_color(det, frame.serial_data.enemy_color);
 
             // 检测
             auto t0 = SteadyClock::now();
@@ -145,8 +135,6 @@ void run_async_loop(detector::DetectorInterface* det) {
     stats::FpsStats push_stats("DetectorNode-Push", "");
     stats::FpsStats pop_stats("DetectorNode", "detected");
 
-    std::atomic<detector::EnemyColor> current_color{detector::EnemyColor::RED};
-
     // Push 线程: 从相机读取帧，推送给检测器
     std::thread push_thread([&]() {
         debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread started");
@@ -162,15 +150,6 @@ void run_async_loop(detector::DetectorInterface* det) {
                 if (aim_mode != aimer::AimMode::AUTOAIM) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     continue;
-                }
-
-                // 更新颜色
-                if (frame.serial_data.enemy_color != 0) {
-                    auto color = detector::serial_to_enemy_color(frame.serial_data.enemy_color);
-                    if (current_color.load() != color) {
-                        current_color.store(color);
-                        det->set_enemy_color(color);
-                    }
                 }
 
                 det->push(frame.image, frame.frame_id, frame.timestamp_us, frame.serial_data);

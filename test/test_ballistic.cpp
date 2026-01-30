@@ -55,24 +55,18 @@ void imu_receiver_thread() {
         serial::start_serial_communication();  // 从配置文件读取
         std::this_thread::sleep_for(100ms);
 
-        auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
+        // 使用 Subscriber 订阅串口数据
+        umt::Subscriber<serial::SerialReceiveData> subscriber("serial_receive");
 
         while (g_running) {
-            serial::ReceiveQueue& queue = recv_queue->get();
+            try {
+                serial::SerialReceiveData data = subscriber.pop_for(10);
 
-            while (!queue.empty()) {
-                serial::SerialReceiveData data = queue.front();
-                queue.pop();
-
-                // 欧拉角转四元数
-                double yaw_rad = data.yaw * M_PI / 180.0;
-                double pitch_rad = data.pitch * M_PI / 180.0;
-                double roll_rad = data.roll * M_PI / 180.0;
-
+                // 新协议: yaw/pitch/roll 已经是弧度
                 Eigen::Quaterniond q =
-                    Eigen::AngleAxisd(yaw_rad, Eigen::Vector3d::UnitZ()) *
-                    Eigen::AngleAxisd(pitch_rad, Eigen::Vector3d::UnitY()) *
-                    Eigen::AngleAxisd(roll_rad, Eigen::Vector3d::UnitX());
+                    Eigen::AngleAxisd(data.yaw, Eigen::Vector3d::UnitZ()) *
+                    Eigen::AngleAxisd(data.pitch, Eigen::Vector3d::UnitY()) *
+                    Eigen::AngleAxisd(data.roll, Eigen::Vector3d::UnitX());
 
                 {
                     std::lock_guard lock(g_imu_mutex);
@@ -80,9 +74,9 @@ void imu_receiver_thread() {
                     g_bullet_speed = data.bullet_speed;
                     g_imu_valid = true;
                 }
+            } catch (const umt::MessageError_Timeout&) {
+                // 超时，继续
             }
-
-            std::this_thread::sleep_for(1ms);
         }
     } catch (const std::exception& e) {
         fmt::print(fmt::fg(fmt::color::red), "串口线程异常: {}\n", e.what());

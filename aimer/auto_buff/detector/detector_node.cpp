@@ -31,18 +31,12 @@ using SteadyClock = std::chrono::steady_clock;
 namespace {
 
 // 串口颜色转换为检测器颜色
+// 注: 新协议不含 enemy_color，此函数保留但颜色需要从配置获取
 EnemyColor serial_to_enemy_color(uint8_t serial_color) {
     switch (serial_color) {
         case 1: return EnemyColor::RED;
         case 2: return EnemyColor::BLUE;
         default: return EnemyColor::UNKNOWN;
-    }
-}
-
-// 更新检测器颜色
-void update_detector_color(BuffDetectorInterface* det, uint8_t serial_color) {
-    if (serial_color != 0) {
-        det->set_enemy_color(serial_to_enemy_color(serial_color));
     }
 }
 
@@ -55,15 +49,16 @@ void update_dashboard(float latency_ms, int target_count, float fps, DetectionSt
 }
 
 // 构建 RobotState
+// 注: 新协议不含 enemy_color 和 allow_fire，需要从配置获取
 aimer::RobotState build_robot_state(const serial::SerialReceiveData& data, int64_t timestamp_us) {
     aimer::RobotState state;
-    state.set_euler(data.yaw, data.pitch, data.roll);
+    // 新协议: yaw/pitch/roll 已经是弧度
+    state.set_euler_rad(data.yaw, data.pitch, data.roll);
     state.bullet_speed = data.bullet_speed;
-    state.enemy_color = data.enemy_color;
     state.aim_mode = aimer::to_aim_mode(data.aim_mode);
-    state.allow_fire = data.allow_fire;
     state.aiming_lock = data.aiming_lock;
     state.timestamp_us = timestamp_us;
+    // 注: enemy_color 和 allow_fire 需要从配置获取
     return state;
 }
 
@@ -149,9 +144,6 @@ void BuffDetectorNode::process_frame_sync() {
                 continue;  // 不是能量机关模式，跳过
             }
 
-            // 更新颜色
-            update_detector_color(detector_.get(), frame.serial_data.enemy_color);
-
             // 检测
             auto t0 = SteadyClock::now();
             double timestamp_sec = frame.timestamp_us / 1e6;
@@ -202,8 +194,6 @@ void BuffDetectorNode::process_frame_async() {
     stats::FpsStats push_stats("BuffDetectorNode-Push", "");
     stats::FpsStats pop_stats("BuffDetectorNode", "detected");
 
-    std::atomic<EnemyColor> current_color{EnemyColor::RED};
-
     // Push 线程
     std::thread push_thread([&]() {
         debug::print(debug::PrintMode::INFO, "BuffDetectorNode", "Push thread started");
@@ -222,15 +212,6 @@ void BuffDetectorNode::process_frame_async() {
                 if (aim_mode != aimer::AimMode::ENERGY_SMALL &&
                     aim_mode != aimer::AimMode::ENERGY_LARGE) {
                     continue;
-                }
-
-                // 更新颜色
-                if (frame.serial_data.enemy_color != 0) {
-                    auto color = serial_to_enemy_color(frame.serial_data.enemy_color);
-                    if (current_color.load() != color) {
-                        current_color.store(color);
-                        detector_->set_enemy_color(color);
-                    }
                 }
 
                 detector_->push(frame.image, frame.frame_id,

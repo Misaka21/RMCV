@@ -30,18 +30,20 @@ inline EnemyColor serial_to_enemy_color(uint8_t serial_color) {
 
 /**
  * @brief 从串口数据构建 RobotState
+ * 注: 新协议不含 enemy_color 和 allow_fire，需要从配置获取
  */
 inline aimer::RobotState build_robot_state(
     const serial::SerialReceiveData& s,
     int64_t timestamp_us
 ) {
     aimer::RobotState state;
-    state.set_euler(s.yaw, s.pitch, s.roll);
+    // 新协议: yaw/pitch/roll 已经是弧度
+    state.set_euler_rad(s.yaw, s.pitch, s.roll);
     state.bullet_speed = s.bullet_speed;
-    state.enemy_color = s.enemy_color;
     state.aim_mode = aimer::to_aim_mode(s.aim_mode);  // uint8_t → AimMode
-    state.allow_fire = s.allow_fire;
+    state.aiming_lock = s.aiming_lock;
     state.timestamp_us = timestamp_us;
+    // 注: enemy_color 和 allow_fire 需要从配置获取
     return state;
 }
 

@@ -16,6 +16,7 @@ namespace simulator {
 
 /**
  * @brief 模拟器配置
+ * 注: 新协议不含 robot_id, enemy_color, allow_fire
  */
 struct SimulatorConfig {
     // ROS2 Topics
@@ -23,11 +24,9 @@ struct SimulatorConfig {
     std::string gimbal_pose_topic = "/gimbal_pose";
 
     // 模拟串口数据
-    uint8_t robot_id = 1;
-    uint8_t enemy_color = 2;      // 1=红, 2=蓝
     float bullet_speed = 15.0f;
     uint8_t aim_mode = 1;
-    bool allow_fire = true;
+    bool aiming_lock = false;
 };
 
 /**

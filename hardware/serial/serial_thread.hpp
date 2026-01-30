@@ -46,35 +46,36 @@ namespace serial {
 //   4. LatencyEstimator::build() 用实测 RTT/2 替代 get_param("send_to_control")
 // ============================================================================
 
-// 视觉数据结构体（示例，可根据实际需求修改）
+// 视觉数据结构体 (视觉 → 电控, 32字节协议)
+// 协议布局:
+//   [0] head=0xff, [1] control, [2] shoot,
+//   [3-6] yaw, [7-10] pitch, [11-28] reserved,
+//   [29-30] crc16, [31] tail=0x0d
 struct VisionData_t {
-    uint8_t  cmd_id;      // 数据类型，例如 0x01 = 自瞄数据
-    float    yaw;         // 目标偏航角（°）
-    float    pitch;       // 目标俯仰角（°）
-    float    distance;    // 与目标距离（m）
-    uint8_t  target_id;   // 打击对象ID（0~7：对应装甲板 or 英雄/工程）
-    uint8_t  is_found;    // 是否发现目标 0=无 1=发现
+    uint8_t control;      // 控制标志: 1=控制
+    uint8_t shoot;        // 射击标志: 1=射击
+    float   yaw;          // 目标偏航角（弧度）
+    float   pitch;        // 目标俯仰角（弧度）
 
-    VisionData_t() : cmd_id(0x01), yaw(0.0f), pitch(0.0f), distance(0.0f), target_id(0), is_found(0) {}
+    VisionData_t() : control(0), shoot(0), yaw(0.0f), pitch(0.0f) {}
 };
 
-// 接收到的串口数据结构体 - 从电控接收
+// 接收到的串口数据结构体 (电控 → 视觉, 32字节协议)
+// 协议布局:
+//   [0] head=0xff, [1] mode, [2] aiming_lock,
+//   [3-6] bullet_speed, [7-10] yaw, [11-14] pitch, [15-18] roll,
+//   [19-28] reserved, [29-30] crc16, [31] tail=0x0d
 struct SerialReceiveData {
-    // IMU 姿态数据
-    float yaw;            // 偏航角 (°)
-    float pitch;          // 俯仰角 (°)
-    float roll;           // 横滚角 (°)
-
-    // 机器人状态
-    uint8_t robot_id;     // 机器人ID (1-7红方, 101-107蓝方)
-    uint8_t enemy_color;  // 敌方颜色 (0=未知, 1=红, 2=蓝)
+    // IMU 姿态数据 (弧度)
+    float yaw;            // 偏航角 (rad)
+    float pitch;          // 俯仰角 (rad)
+    float roll;           // 横滚角 (rad)
 
     // 射击参数
     float bullet_speed;   // 弹速 (m/s)
 
     // 模式控制
     uint8_t aim_mode;     // 自瞄模式 (原始字节: 0=关闭, 1=自瞄, 2=小符, 3=大符)
-    bool allow_fire;      // 是否允许射击
     bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 
     // 时间戳 (上位机接收时刻，微秒)
@@ -82,9 +83,8 @@ struct SerialReceiveData {
 
     SerialReceiveData()
         : yaw(0.0f), pitch(0.0f), roll(0.0f)
-        , robot_id(0), enemy_color(0)
         , bullet_speed(15.0f)
-        , aim_mode(0), allow_fire(false), aiming_lock(false)
+        , aim_mode(0), aiming_lock(false)
         , recv_time_us(0) {}
 };
 
@@ -92,13 +92,13 @@ struct SerialReceiveData {
  * @brief 串口发送线程主函数（内部使用）
  * @param transceiver 共享的TransceiverManager实例
  */
-void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver);
+void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver);
 
 /**
  * @brief 串口接收线程主函数（内部使用）
  * @param transceiver 共享的TransceiverManager实例
  */
-void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver);
+void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver);
 
 /**
  * @brief 启动串口通信（从配置文件 hardware.toml 读取设置）
@@ -113,7 +113,7 @@ void start_serial_communication();
  */
 class SerialUtils {
 public:
-    using PacketType = FixedPacket<16>;
+    using PacketType = FixedPacket<32>;
 
     /**
      * @brief 将视觉数据转换为数据包

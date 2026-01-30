@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 
+#include "crc16.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
@@ -19,7 +20,7 @@ namespace serial {
 namespace umt = ::umt;
 using namespace std::chrono_literals;
 
-void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
+void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
     try {
         // 视觉数据状态管理
         auto vision_transmit = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
@@ -44,7 +45,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
 
                 // 转换为数据包并发送
                 bool sent = false;
-                FixedPacket<16> packet;
+                FixedPacket<32> packet;
                 if (SerialUtils::vision_data_to_packet(vision_data, packet)) {
                     if (transceiver->send_packet(packet)) {
                         sent = true;
@@ -70,7 +71,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
     }
 }
 
-void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
+void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
     try {
         // 使用 Message 系统发布接收数据（线程安全）
         umt::Publisher<SerialReceiveData> publisher("serial_receive");
@@ -91,7 +92,7 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                 }
 
                 // 接收数据包
-                FixedPacket<16> packet;
+                FixedPacket<32> packet;
                 bool received = transceiver->recv_packet(packet);
 
                 if (received) {
@@ -259,7 +260,7 @@ public:
 
         try {
             // 创建TransceiverManager（共享）
-            auto transceiver = std::make_shared<TransceiverManager<16>>(protocol);
+            auto transceiver = std::make_shared<TransceiverManager<32>>(protocol);
 
             // 启动发送线程
             std::thread([transceiver]() { serial_sender_run(transceiver); }).detach();
@@ -285,16 +286,34 @@ void start_serial_communication() {
 }
 
 // SerialUtils实现
+// VisionToBoard 协议布局 (视觉 → 电控, 32字节):
+//   [0] head=0xff, [1] control, [2] shoot,
+//   [3-6] yaw, [7-10] pitch, [11-28] reserved,
+//   [29-30] crc16, [31] tail=0x0d
+// CRC 计算范围: buffer[1..28] (28字节)
 bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& packet) {
     try {
         // 清空数据包
         packet.clear();
 
-        // 填充数据（根据实际协议调整格式）
-        packet.load_data(static_cast<float>(cmd.cmd_id), 1);
-        packet.load_data(cmd.yaw, 5);
-        packet.load_data(cmd.pitch, 9);
-        packet.load_data(cmd.distance, 13);
+        // [1] control
+        packet.load_data(cmd.control, 1);
+
+        // [2] shoot
+        packet.load_data(cmd.shoot, 2);
+
+        // [3-6] yaw (弧度)
+        packet.load_data(cmd.yaw, 3);
+
+        // [7-10] pitch (弧度)
+        packet.load_data(cmd.pitch, 7);
+
+        // [11-28] reserved (默认0)
+
+        // 计算并填充 CRC16
+        // CRC 范围: buffer[1..28]，存入 buffer[29..30]
+        uint8_t* buf = const_cast<uint8_t*>(packet.buffer());
+        crc16_append(buf + 1, 30);  // 计算 [1..28]，写入 [29..30]
 
         return true;
     } catch (const std::exception& e) {
@@ -303,21 +322,57 @@ bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& pac
     }
 }
 
+// BoardToVision 协议布局 (电控 → 视觉, 32字节):
+//   [0] head=0xff, [1] mode, [2] aiming_lock,
+//   [3-6] bullet_speed, [7-10] yaw, [11-14] pitch, [15-18] roll,
+//   [19-28] reserved, [29-30] crc16, [31] tail=0x0d
+// CRC 计算范围: buffer[1..28] (28字节)
 bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceiveData& data) {
     try {
-        // 从数据包提取数据 (格式需与电控约定)
-        // 目前简单解析: [1]yaw [5]pitch [9]roll
-        float yaw, pitch, roll;
-        if (packet.unload_data(yaw, 1)) {
+        const uint8_t* buf = packet.buffer();
+
+        // 验证 CRC16
+        // CRC 范围: buffer[1..30] (含 CRC 本身)
+        if (!crc16_verify(buf + 1, 30)) {
+            debug::print(debug::PrintMode::WARNING, "SerialUtils", "CRC16 verification failed");
+            return false;
+        }
+
+        // [1] mode
+        uint8_t mode = 0;
+        if (packet.unload_data(mode, 1)) {
+            data.aim_mode = mode;
+        }
+
+        // [2] aiming_lock
+        uint8_t aiming_lock = 0;
+        if (packet.unload_data(aiming_lock, 2)) {
+            data.aiming_lock = (aiming_lock != 0);
+        }
+
+        // [3-6] bullet_speed (m/s)
+        float bullet_speed = 15.0f;
+        if (packet.unload_data(bullet_speed, 3)) {
+            data.bullet_speed = bullet_speed;
+        }
+
+        // [7-10] yaw (弧度)
+        float yaw = 0.0f;
+        if (packet.unload_data(yaw, 7)) {
             data.yaw = yaw;
         }
-        if (packet.unload_data(pitch, 5)) {
+
+        // [11-14] pitch (弧度)
+        float pitch = 0.0f;
+        if (packet.unload_data(pitch, 11)) {
             data.pitch = pitch;
         }
-        if (packet.unload_data(roll, 9)) {
+
+        // [15-18] roll (弧度)
+        float roll = 0.0f;
+        if (packet.unload_data(roll, 15)) {
             data.roll = roll;
         }
-        // TODO: 其他字段需要和电控约定后添加
 
         return true;
     } catch (const std::exception& e) {

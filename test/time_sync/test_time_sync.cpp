@@ -169,15 +169,12 @@ void imu_receiver_thread() {
         // 等待接收队列就绪
         std::this_thread::sleep_for(100ms);
 
-        auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
+        // 使用 Subscriber 订阅串口数据
+        umt::Subscriber<serial::SerialReceiveData> subscriber("serial_receive");
 
         while (g_running) {
-            // 从队列中获取数据
-            serial::ReceiveQueue& queue = recv_queue->get();
-
-            while (!queue.empty()) {
-                serial::SerialReceiveData data = queue.front();
-                queue.pop();
+            try {
+                serial::SerialReceiveData data = subscriber.pop_for(10);
 
                 // 使用串口线程记录的时间戳 (关键修复!)
                 // 之前错误地在队列处理时才记录时间，导致IMU时间戳偏晚
@@ -186,9 +183,15 @@ void imu_receiver_thread() {
                 );
 
                 // 存入缓冲区
+                // 新协议: yaw/pitch/roll 已经是弧度，转换为角度供时间同步
+                constexpr double rad2deg = 180.0 / M_PI;
+                double yaw_deg = data.yaw * rad2deg;
+                double pitch_deg = data.pitch * rad2deg;
+                double roll_deg = data.roll * rad2deg;
                 {
                     std::lock_guard lock(g_imu_mutex);
-                    g_imu_buffer.push_back({recv_time, data.yaw, data.pitch, data.roll});
+                    g_imu_buffer.push_back({recv_time, static_cast<float>(yaw_deg),
+                                            static_cast<float>(pitch_deg), static_cast<float>(roll_deg)});
 
                     // 限制缓冲区大小
                     while (g_imu_buffer.size() > MAX_IMU_BUFFER) {
@@ -200,12 +203,13 @@ void imu_receiver_thread() {
                 if (g_state == State::COLLECTING) {
                     std::lock_guard lock(g_data_mutex);
                     g_imu_samples.push_back(
-                        time_sync::ImuSample::from_euler_deg(recv_time, data.yaw, data.pitch, data.roll)
+                        time_sync::ImuSample::from_euler_deg(recv_time,
+                            static_cast<float>(yaw_deg), static_cast<float>(pitch_deg), static_cast<float>(roll_deg))
                     );
                 }
+            } catch (const umt::MessageError_Timeout&) {
+                // 超时，继续
             }
-
-            std::this_thread::sleep_for(1ms);
         }
 
     } catch (const std::exception& e) {

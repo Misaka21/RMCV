@@ -19,26 +19,26 @@ int main() {
         // Start serial communication (从配置文件读取)
         serial::start_serial_communication();
 
-        // Get receive queue
-        auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
+        // 订阅串口数据 (使用 Message 系统)
+        umt::Subscriber<serial::SerialReceiveData> subscriber("serial_receive");
 
-        debug::print(debug::PrintMode::INFO, "TestSerial", "Serial started, monitoring receive queue...");
+        debug::print(debug::PrintMode::INFO, "TestSerial", "Serial started, monitoring receive...");
 
         // Monitor loop
         int count = 0;
         auto start_time = std::chrono::steady_clock::now();
 
         while (true) {
-            auto& queue = recv_queue->get();
-
-            while (!queue.empty()) {
-                auto data = queue.front();
-                queue.pop();
+            try {
+                auto data = subscriber.pop_for(100);  // 100ms 超时
                 count++;
-                if (count%100==0)
+                if (count % 100 == 0) {
                     debug::print(debug::PrintMode::DEBUG, "TestSerial",
                         "[{}] yaw: {:.5f}, pitch: {:.5f}, roll: {:.5f}",
                         count, data.yaw, data.pitch, data.roll);
+                }
+            } catch (const umt::MessageError_Timeout&) {
+                // 超时，继续
             }
 
             // Print stats every second
@@ -50,8 +50,6 @@ int main() {
                 count = 0;
                 start_time = now;
             }
-
-            std::this_thread::sleep_for(1ms);
         }
 
     } catch (const std::exception& e) {
