@@ -1,3 +1,52 @@
+# 1.17
+ 修复 predict_armor_position 陀螺分支语义错误。原代码用 armor_idx % 2 判断物理属性来选择半径，但 armors[] 是按相对顺序填充的（armors[0] = tracked），索引和物理奇偶性无关。改为用存储位置 + 绕 z 轴旋转 的方式预测，添加 SpinState::dz 字段支持高度差。
+重组 predictor 目录结构，使命名更清晰：
+enemy_state/ → observer/（PnP 观测 + 跟踪）
+enemy_model/ → model/（运动模型）
+*_motion → *_ekf（明确是 EKF 实现）
+3. 将陀螺等级判断从各 EKF 移至 VehicleModel。原先 SpinEKF/LmtdEKF/SpEKF 各自维护 spin_level_ 和 update_spin_level()，逻辑分散且重复。 现在统一由 VehicleModel 调用 SpinState::update_level(omega)，参数集 中在 [AutoAim.Predictor.Motion] 配置节。陀螺等级判断是业务逻辑，不应分散在各 EKF 实现中。
+分析 SpMotion 与 LmtdMotion 的设计差异。核心区别：SpMotion 把 L（半径差）和 H（高度差）放在状态向量中（11维），切板时不需要交换状态；LmtdMotion 外部维护 another_r_ 和 dz_，跳变时需要交换。sp_vision_25 的设计更优：把变化量放在状态里，让 EKF 自己估计，避免手动交换带来 的状态混乱风险。
+SpMotion 利用 armor.id 提高匹配稳定性。原先 match_armor() 每次 都重新计算 state_id，在快速加减速时 EKF 的 θ 预测可能偏离，导致匹配 抖动。改进：记录上一帧的 armor.id（ArmorIdentifier 分配的跟踪 ID），如果相同则保持 state_id 不变。原理：帧间时间 ~5ms，即使高速陀螺 500°/s 也只旋转 2.5°，不会跨越 90° 边界，所以同一物理装甲板的 state_id  不会变。
+
+# 1.15
+  移植 sp_vision_25 的 SP 整车运动模型。原 SpinMotion 用两个半径 r1、r2 表示四装甲板分布，切板时交换 r1 ↔ r2 导致状态量突变，协方差无法正确传递。SP 模型改用差量 L = r1 - r2、H = z1 - z2，切板只需 θ += π，状态连续。11维状态向量：[xc, vx, yc, vy, zc, vz, θ, ω, r, L, H]。配置 motion_model 可选 spin/lmtd/sp 三种模型。
+
+  AdaptiveEkf 新增马氏距离门限检查。计算 d² = (z - Hx̂)ᵀ S⁻¹ (z - Hx̂)，超过 χ² 门限判定为离群点，拒绝更新并增大过程噪声 Q 进入宽松模式。连续拒绝超过阈值则从当前观测重新初始化。χ² 门限取 p=0.01，3维观测 11.34，4维观 测 13.28。SpinMotion、ArmorMotion、OutpostMotion 均已适配。
+
+  sp_motion Gating 失效问题。自适应观测噪声 R 使用观测值计算，当观测本身为离群点时 R 偏大，任何观测都能通过 门限。改为使用预测位置计算 R。
+
+  SpinMotion 跳变检测坐标系不匹配。检测逻辑位于 vehicle_model 外部，使用观测坐标系角度，与 EKF 内部状态坐标 系存在 θ 偏移。将跳变检测移至 SpinMotion 内部，直接使用状态量比较。
+
+  LmtdMotion 切板时交换 r1、r2 后 predict_armor_position() 返回值跳变，原因是 recommended_armor_idx 未同步更新。
+
+  Predictor 与 FireControl 数据共享问题。Predictor 使用 Publisher 发布 BattlefieldSnapshot，FireControl 使用 BasicObjManager 读取，两者机制不同导致数据不通。统一改为 BasicObjManager。
+
+  火控可视化改为准心 + 圆环模型。准心固定于图像中心表示枪口指向，圆环位置为弹道解算后的瞄准方向，圆环半径对 应开火容许误差。准心落入圆环内即表示可开火。
+
+  Motion 工厂抽象重构。vehicle_model.cpp 存在 20+ 处 if-else 分支判断 use_sp/use_lmtd，每次调用 predict_center()、get_velocity() 都要三选一，添加新模型要改十几处。新增 MotionInterface 抽象基类定义统一接口，工厂函数 create_motion(type, armor_num) 根据配置创建模型。VehicleModel 改用 unique_ptr 单指针替代三个成员变量，ensure_motion_model() 实现延迟初始化和运行时热切换。代码量从 1019 行减至 835 行，添加新模型只需实现接口 + 注册工厂 。
+
+  接口设计细节。get_velocity() 统一返回中心速度，LmtdMotion 原有 get_center_velocity() 保留为内部实现。compute_all_armors(dt) 替代原 compute_all_armors_from_observation()，直接从 EKF 状态生成装甲板位置不依赖外部观测 。SpinState 相位计算修正：原代码 LmtdMotion 的 theta 是当前追踪装甲板角度，需转换车体角度 phase = theta - tracked_id × 2π/N，三种模型统一处理。
+
+# 1.14
+重新新建了 RTT 测试项目，测试 UART / USB CDC / USB Bulk 三种协议的通信延迟。采用 NTP 四时间戳算法 RTT = (T4-T1) - (T3-T2)，T1 T4 为上位机时间戳（微秒精度），T2 T3 为 MCU 时间戳（HAL_GetTick），可分离纯传输延迟与 MCU 处理时间。
+50000 包测试结果：
+USB CDC: 0.170ms，抖动 0.031ms，P99 0.24ms
+USB Bulk: 0.200ms，抖动 0.062ms，P99 0.26ms
+UART 115200: 6.525ms，抖动 0.104ms，P99 6.76ms
+三者均 0% 丢包。CDC 延迟最低且抖动最小，Bulk 偶发尖峰较高（Max 4.1ms）。UART 延迟约为 USB 的 35 倍，受波特率限制，理论传输 24 字节往返需 4.2ms，实测多出的 2.3ms 来自 USB-UART 转换芯片。
+Clock Offset 测量存在精度限制。HAL_GetTick() 只有 1ms 精度，长时间测试会累积误差。RTT / Jitter / 丢包率数据可信，Clock Offset 相关数据在 UART 长测试中不准确。若需精确时钟同步，MCU 端应改用微秒级定时器。
+
+# 1.13
+移植 sp_vision_25 的 SP 整车运动模型。原 SpinMotion 用两个半径 r1、r2 表示四装甲板分布，切板时交换 r1 ↔ r2 导致状态量突变，协方差无法正确传递。SP 模型改用差量 L = r1 - r2、H = z1 - z2，切板只需 θ += π，状态连续。11维状态向量：[xc, vx, yc, vy, zc, vz, θ, ω, r, L, H]。配置 motion_model 可选 spin/lmtd/sp 三种模型。
+给AdaptiveEkf 新增马氏距离门限检查。计算 d² = (z - Hx̂)ᵀ S⁻¹ (z - Hx̂)，超过 χ² 门限判定为离群点，拒绝更新并增大过程噪声 Q 进入宽松模式。连续拒绝超过阈值则从当前观测重新初始化。χ² 门限取 p=0.01，3维观测 11.34，4维观 测 13.28。SpinMotion、ArmorMotion、OutpostMotion 均已适配。
+解决sp_motion Gating 失效问题。自适应观测噪声 R 使用观测值计算，当观测本身为离群点时 R 偏大，任何观测都能通过 门限。改为使用预测位置计算 R。
+SpinMotion 跳变检测坐标系不匹配。检测逻辑位于 vehicle_model 外部，使用观测坐标系角度，与 EKF 内部状态坐标 系存在 θ 偏移。将跳变检测移至 SpinMotion 内部，直接使用状态量比较。
+LmtdMotion 切板时交换 r1、r2 后 predict_armor_position() 返回值跳变，原因是 recommended_armor_idx 未同步更新。
+Predictor 与 FireControl 数据共享问题。Predictor 使用 Publisher 发布 BattlefieldSnapshot，FireControl 使用 BasicObjManager 读取，两者机制不同导致数据不通。统一改为 BasicObjManager。
+火控可视化改为准心 + 圆环模型。准心固定于图像中心表示枪口指向，圆环位置为弹道解算后的瞄准方向，圆环半径对 应开火容许误差。准心落入圆环内即表示可开火。
+Motion 工厂抽象重构。vehicle_model.cpp 存在 20+ 处 if-else 分支判断 use_sp/use_lmtd，每次调用 predict_center()、get_velocity() 都要三选一，添加新模型要改十几处。新增 MotionInterface 抽象基类定义统一接口，工厂函数 create_motion(type, armor_num) 根据配置创建模型。VehicleModel 改用 unique_ptr 单指针替代三个成员变量，ensure_motion_model() 实现延迟初始化和运行时热切换。添加新模型只需实现接口 + 注册工厂 。
+完善接口设计细节。get_velocity() 统一返回中心速度，LmtdMotion 原有 get_center_velocity() 保留为内部实现。compute_all_armors(dt) 替代原 compute_all_armors_from_observation()，直接从 EKF 状态生成装甲板位置不依赖外部观测 。SpinState 相位计算修正：原代码 LmtdMotion 的 theta 是当前追踪装甲板角度，需转换车体角度 phase = theta - tracked_id × 2π/N，三种模型统一处理。
+
 # 1.12
 1. 发现 fire_control 反向依赖 hardware/serial 层，原因是 AimMode 枚举定义在 serial 层。依赖方向应该是 hardware → aimer，不能反过来。重构后 serial 层只保留 uint8_t aim_mode 原始字节，业务枚举 AimMode 定义在 aimer/common/，转换边界在 RobotState::from_sync_frame()。这样 fire_control 完全不知道 serial 层的存在。
 2. 串口超时导致 FPS 异常低的问题。之前 recv_len == 0（超时无数据）会触发断线重连，实际上这是正常情况，只有 recv_len < 0（读取错误）才需要重连。修复后 SerialReceiver FPS 从 71 恢复到 500+。另外 UART 配置 VMIN=1 会导致无数据时 read() 永久阻塞，改为 VMIN=0 后 0.1s 超时返回。
