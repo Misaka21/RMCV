@@ -8,7 +8,6 @@
 // C++ system headers
 #include <cstdint>
 #include <string>
-#include <queue>
 
 // Third-party library headers
 
@@ -88,9 +87,6 @@ struct SerialReceiveData {
         , aim_mode(0), allow_fire(false), aiming_lock(false)
         , recv_time_us(0) {}
 };
-
-// 接收数据队列类型别名 - 使用STL queue
-using ReceiveQueue = std::queue<SerialReceiveData>;
 
 /**
  * @brief 串口发送线程主函数（内部使用）

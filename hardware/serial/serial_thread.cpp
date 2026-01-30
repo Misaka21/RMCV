@@ -72,8 +72,8 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
 
 void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
     try {
-        // 创建接收数据队列并通过BasicObjManager共享
-        auto receive_queue = umt::BasicObjManager<ReceiveQueue>::find_or_create("receive_queue");
+        // 使用 Message 系统发布接收数据（线程安全）
+        umt::Publisher<SerialReceiveData> publisher("serial_receive");
         auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
         auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
@@ -107,13 +107,8 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<16>> transceiver) {
                         // 设置时间戳
                         receive_data.recv_time_us = recv_time_us;
 
-                        // 限制队列大小，最多300条
-                        if (receive_queue->get().size() >= 300) {
-                            receive_queue->get().pop();  // 移除最旧的
-                        }
-
-                        // 添加到队列
-                        receive_queue->get().push(receive_data);
+                        // 通过 Message 发布（线程安全，Subscriber 自动管理缓冲区）
+                        publisher.push(receive_data);
                     }
                 } else {
                     std::this_thread::sleep_for(1ms);

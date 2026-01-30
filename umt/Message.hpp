@@ -9,6 +9,7 @@
 #include <list>
 #include <mutex>
 #include <queue>
+#include <vector>
 
 // Third-party library headers (optional)
 #ifdef ENABLE_WEBVIEW
@@ -159,6 +160,21 @@ namespace umt {
         void clear() {
             std::unique_lock lock(mtx);
             fifo = std::queue<T>();
+        }
+
+        /**
+   * @brief 一次性取出所有可用消息（非阻塞）
+   * @return 当前缓冲区中的所有消息
+   */
+        std::vector<T> drain() {
+            std::unique_lock lock(mtx);
+            std::vector<T> result;
+            result.reserve(fifo.size());
+            while (!fifo.empty()) {
+                result.push_back(std::move(fifo.front()));
+                fifo.pop();
+            }
+            return result;
         }
 
         /**

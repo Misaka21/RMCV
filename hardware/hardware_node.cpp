@@ -74,17 +74,16 @@ camera::CameraConfig load_camera_config(const toml::table& config) {
 }
 
 /**
- * @brief 将接收队列中的数据转移到缓冲区
- * 使用串口线程记录的精确时间戳
+ * @brief 从 Subscriber 取出所有消息并转移到缓冲区
  */
-void drain_queue_to_buffer(serial::ReceiveQueue& queue,
-                           std::deque<TimestampedSerialData>& buffer,
-                           size_t max_buffer_size) {
-    while (!queue.empty()) {
+void drain_subscriber_to_buffer(umt::Subscriber<serial::SerialReceiveData>& subscriber,
+                                std::deque<TimestampedSerialData>& buffer,
+                                size_t max_buffer_size) {
+    auto messages = subscriber.drain();
+    for (auto& data : messages) {
         TimestampedSerialData ts_data;
-        ts_data.data = queue.front();
-        ts_data.recv_time_us = ts_data.data.recv_time_us;  // 使用串口线程记录的时间戳
-        queue.pop();
+        ts_data.data = data;
+        ts_data.recv_time_us = data.recv_time_us;
 
         buffer.push_back(ts_data);
         while (buffer.size() > max_buffer_size) {
@@ -252,8 +251,6 @@ void start_hardware_node() {
             debug::print(debug::PrintMode::WARNING, "HardwareNode",
                 "Using fake serial: color={}, bullet_speed={:.1f}",
                 fake_data.enemy_color, fake_data.bullet_speed);
-            // 创建空的接收队列
-            umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
         }
 
         // 2. Load camera config and open camera
@@ -263,7 +260,8 @@ void start_hardware_node() {
 
         // 3. Setup UMT
         umt::Publisher<SyncFrame> pub("sync_frame");
-        auto recv_queue = umt::BasicObjManager<serial::ReceiveQueue>::find_or_create("receive_queue");
+        // 订阅串口数据（线程安全，缓冲区大小 300）
+        umt::Subscriber<serial::SerialReceiveData> serial_subscriber("serial_receive", 300);
 
         // 通知其他线程硬件节点已开始发布（初始为false，发布后设为true）
         auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
@@ -312,7 +310,7 @@ void start_hardware_node() {
                     frame.serial_valid = true;
                     synced = true;
                 } else {
-                    drain_queue_to_buffer(recv_queue->get(), serial_buffer, max_buffer_size);
+                    drain_subscriber_to_buffer(serial_subscriber, serial_buffer, max_buffer_size);
 
                     int64_t target_time_us = cam_time_us - delta_t_us;
                     if (auto data = interpolate_serial_data(serial_buffer, target_time_us)) {
@@ -334,7 +332,7 @@ void start_hardware_node() {
                         frame.serial_data.roll = -frame.serial_data.roll;
                     }
                 }
-
+                frame.serial_data.aim_mode =1;
                 // Publish
                 pub.push(frame);
 
