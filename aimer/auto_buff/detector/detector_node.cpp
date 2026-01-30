@@ -49,7 +49,6 @@ void update_dashboard(float latency_ms, int target_count, float fps, DetectionSt
 }
 
 // 构建 RobotState
-// 注: 新协议不含 enemy_color 和 allow_fire，需要从配置获取
 aimer::RobotState build_robot_state(const serial::SerialReceiveData& data, int64_t timestamp_us) {
     aimer::RobotState state;
     // 新协议: yaw/pitch/roll 已经是弧度
@@ -57,8 +56,10 @@ aimer::RobotState build_robot_state(const serial::SerialReceiveData& data, int64
     state.bullet_speed = data.bullet_speed;
     state.aim_mode = aimer::to_aim_mode(data.aim_mode);
     state.aiming_lock = data.aiming_lock;
+    // enemy_color 和 allow_fire 从配置加载（不在协议中）
+    state.enemy_color = data.enemy_color;
+    state.allow_fire = data.allow_fire;
     state.timestamp_us = timestamp_us;
-    // 注: enemy_color 和 allow_fire 需要从配置获取
     return state;
 }
 

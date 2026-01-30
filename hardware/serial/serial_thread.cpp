@@ -26,6 +26,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
         auto vision_transmit = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
         auto send_enabled = umt::BasicObjManager<bool>::find_or_create("serial_send_enabled", true);
         auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
+        auto debug_print = umt::BasicObjManager<bool>::find_or_create("serial_debug_print", false);
 
         debug::print(debug::PrintMode::INFO, "SerialSender", "Sender thread started");
 
@@ -47,6 +48,15 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                 bool sent = false;
                 FixedPacket<32> packet;
                 if (SerialUtils::vision_data_to_packet(vision_data, packet)) {
+                    // 调试打印
+                    if (debug_print->get()) {
+                        std::string hex;
+                        for (size_t i = 0; i < 32; ++i) {
+                            hex += fmt::format("{:02X} ", packet.buffer()[i]);
+                        }
+                        debug::print(debug::PrintMode::DEBUG, "SerialTX", "{}", hex);
+                    }
+
                     if (transceiver->send_packet(packet)) {
                         sent = true;
                     }
@@ -77,6 +87,7 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
         umt::Publisher<SerialReceiveData> publisher("serial_receive");
         auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
         auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
+        auto debug_print = umt::BasicObjManager<bool>::find_or_create("serial_debug_print", false);
 
         debug::print(debug::PrintMode::INFO, "SerialReceiver", "Receiver thread started");
 
@@ -96,6 +107,15 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                 bool received = transceiver->recv_packet(packet);
 
                 if (received) {
+                    // 调试打印
+                    if (debug_print->get()) {
+                        std::string hex;
+                        for (size_t i = 0; i < 32; ++i) {
+                            hex += fmt::format("{:02X} ", packet.buffer()[i]);
+                        }
+                        debug::print(debug::PrintMode::DEBUG, "SerialRX", "{}", hex);
+                    }
+
                     // 立即记录接收时间戳 (关键: 减少延迟抖动)
                     auto recv_time = std::chrono::steady_clock::now();
                     int64_t recv_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -210,6 +230,14 @@ public:
         // 加载配置
         auto config = static_param::parse_file("hardware.toml");
 
+        // 读取调试配置
+        bool ignore_crc = static_param::get_param<bool>(config, "Serial", "ignore_crc");
+        bool data_print_debug = static_param::get_param<bool>(config, "Serial", "data_print_debug");
+
+        // 设置调试打印标志 (供收发线程使用)
+        auto debug_print = umt::BasicObjManager<bool>::find_or_create("serial_debug_print", data_print_debug);
+        debug_print->get() = data_print_debug;
+
         std::shared_ptr<ProtocolInterface> protocol = nullptr;
         int retry_count = 0;
         int64_t reconnect_interval_ms = RETRY_INTERVAL_MS;
@@ -260,7 +288,7 @@ public:
 
         try {
             // 创建TransceiverManager（共享）
-            auto transceiver = std::make_shared<TransceiverManager<32>>(protocol);
+            auto transceiver = std::make_shared<TransceiverManager<32>>(protocol, ignore_crc);
 
             // 启动发送线程
             std::thread([transceiver]() { serial_sender_run(transceiver); }).detach();

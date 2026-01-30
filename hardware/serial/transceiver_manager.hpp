@@ -31,10 +31,12 @@ public:
     /**
      * @brief 构造函数，创建数据包收发工具
      * @param transporter transport interface
+     * @param ignore_crc 是否跳过 CRC 校验 (调试用)
      * @throws std::invalid_argument if transporter is nullptr
      */
-    explicit TransceiverManager(std::shared_ptr<ProtocolInterface> transporter):
+    explicit TransceiverManager(std::shared_ptr<ProtocolInterface> transporter, bool ignore_crc = false):
         _transporter(std::move(transporter)),
+        _ignore_crc(ignore_crc),
         _recv_buf_len(0) {
         if (!_transporter) {
             throw std::invalid_argument("transporter is nullptr");
@@ -43,6 +45,11 @@ public:
         // 初始化缓冲区
         _tmp_buffer.fill(0);
         _recv_buffer.fill(0);
+
+        if (_ignore_crc) {
+            debug::print(debug::PrintMode::WARNING, "TransceiverManager",
+                "CRC verification DISABLED (debug mode)");
+        }
     }
 
     /**
@@ -88,6 +95,9 @@ private:
 private:
     std::shared_ptr<ProtocolInterface> _transporter;
 
+    // CRC 校验开关
+    bool _ignore_crc;
+
     // 数据缓冲区（只被接收线程使用，无需保护）
     std::array<uint8_t, Capacity> _tmp_buffer;
     std::array<uint8_t, Capacity * 2> _recv_buffer;
@@ -112,13 +122,14 @@ bool TransceiverManager<Capacity>::check_packet(
         return false;
     }
 
-    // CRC16 校验 (计算范围: buffer[1..Capacity-3]，CRC 在 buffer[Capacity-3..Capacity-2])
-    // 对于32字节包: 计算 [1..28]，CRC 在 [29..30]
+    // CRC16 校验 (可通过 ignore_crc 跳过)
     if constexpr (Capacity >= 4) {
-        // CRC 验证: buffer[1] 到 buffer[Capacity-2] (含 CRC)
-        // 即 len = Capacity - 2 (不含 head 和 tail)
-        if (!crc16_verify(buffer + 1, Capacity - 2)) {
-            return false;
+        if (!_ignore_crc) {
+            // CRC 验证: buffer[1] 到 buffer[Capacity-2] (含 CRC)
+            // 即 len = Capacity - 2 (不含 head 和 tail)
+            if (!crc16_verify(buffer + 1, Capacity - 2)) {
+                return false;
+            }
         }
     }
 

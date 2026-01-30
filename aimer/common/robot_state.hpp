@@ -87,7 +87,9 @@ struct RobotState {
             state.bullet_speed = s.bullet_speed;
             state.aim_mode = to_aim_mode(s.aim_mode);  // uint8_t → AimMode
             state.aiming_lock = s.aiming_lock;
-            // 注: enemy_color 和 allow_fire 需要从配置获取
+            // enemy_color 和 allow_fire 从配置加载（不在协议中）
+            state.enemy_color = s.enemy_color;
+            state.allow_fire = s.allow_fire;
         }
         state.timestamp_us = frame.timestamp_us;
         return state;

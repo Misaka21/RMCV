@@ -78,6 +78,10 @@ struct SerialReceiveData {
     uint8_t aim_mode;     // 自瞄模式 (原始字节: 0=关闭, 1=自瞄, 2=小符, 3=大符)
     bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 
+    // 以下字段不在协议中，由配置文件提供
+    uint8_t enemy_color;  // 敌方颜色 (0=未知, 1=红, 2=蓝)
+    bool allow_fire;      // 是否允许射击
+
     // 时间戳 (上位机接收时刻，微秒)
     int64_t recv_time_us = 0;
 
@@ -85,6 +89,7 @@ struct SerialReceiveData {
         : yaw(0.0f), pitch(0.0f), roll(0.0f)
         , bullet_speed(15.0f)
         , aim_mode(0), aiming_lock(false)
+        , enemy_color(0), allow_fire(false)
         , recv_time_us(0) {}
 };
 
