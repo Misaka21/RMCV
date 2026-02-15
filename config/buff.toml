@@ -37,6 +37,12 @@
     #@double 靶心最大长宽比
     target_aspect_max = 1.55
 
+    # Lit(Active) 目标判定: 子轮廓面积比例
+    #@double Active目标: 单个子轮廓面积/外轮廓面积 最小比
+    active_min_sub_area_ratio = 0.10
+    #@double Active目标: (子轮廓面积总和)/外轮廓面积 最大比 (十环过滤)
+    active_max_total_sub_area_ratio = 0.65
+
     # 缺口检测参数
     #@double 缺口面积/靶心面积 最小比
     gap_area_ratio_min = 0.025
@@ -47,19 +53,13 @@
     #@double 缺口长宽比最大
     gap_aspect_max = 8.0
 
-    # 箭头检测参数
-    #@double 箭头最小面积
-    arrow_area_min = 100.0
-    #@double 箭头最大面积
-    arrow_area_max = 4000.0
-    #@double 箭头最小长宽比
-    arrow_aspect_min = 2.0
-    #@double 箭头最大长宽比
-    arrow_aspect_max = 6.0
-
-    # 准确度阈值
-    #@double 准确度阈值 (低于此值的检测结果会被丢弃)
-    accuracy_threshold = 0.8
+    # gap 椭圆矫正后的几何约束 (比例基于 correction_radius)
+    #@double gap中心到外椭圆中心的距离/修正半径 最小比
+    gap_min_center_dist_ratio = 0.10
+    #@double gap中心到外椭圆中心的距离/修正半径 最大比
+    gap_max_center_dist_ratio = 0.90
+    #@double 将gap角点投影到圆上的比例
+    gap_circle_radius_ratio = 0.85
 
     # 调试选项
     #@bool 是否显示 OpenCV 窗口

@@ -17,6 +17,8 @@
 #include "aimer/auto_aim/predictor/predictor_node.hpp"
 #include "aimer/auto_aim/fire_control/fire_control_node.hpp"
 #include "aimer/auto_buff/detector/detector_node.hpp"
+#include "aimer/auto_buff/predictor/predictor_node.hpp"
+#include "aimer/auto_buff/fire_control/fire_control_node.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
@@ -159,6 +161,16 @@ int main(int argc, char* argv[]) {
     // 启动能量机关检测器节点线程
     std::thread buff_detector_thread([]() {
         autobuff::detector::background_buff_detector_run("buff.toml");
+    });
+
+    // 启动能量机关预测器节点线程
+    std::thread buff_predictor_thread([]() {
+        autobuff::predictor::start_predictor_node();
+    });
+
+    // 启动能量机关火控节点线程
+    std::thread buff_fire_control_thread([]() {
+        autobuff::fire_control::start_fire_control_node("aimer.toml");
     });
 
     // 启动录制节点线程

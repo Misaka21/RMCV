@@ -70,6 +70,12 @@ std::unique_ptr<BuffDetectorInterface> create_traditional_detector(
     detector_config.target_aspect_min = tgt_asp_min > 0 ? tgt_asp_min : 0.99;
     detector_config.target_aspect_max = tgt_asp_max > 0 ? tgt_asp_max : 1.55;
 
+    // Lit(Active) 子轮廓面积比阈值
+    auto active_min_sub = static_param::get_param<double>(config, "TraditionalDetector", "active_min_sub_area_ratio");
+    auto active_max_total_sub = static_param::get_param<double>(config, "TraditionalDetector", "active_max_total_sub_area_ratio");
+    detector_config.active_min_sub_area_ratio = active_min_sub > 0 ? active_min_sub : 0.10;
+    detector_config.active_max_total_sub_area_ratio = active_max_total_sub > 0 ? active_max_total_sub : 0.65;
+
     // 缺口参数
     auto gap_ratio_min = static_param::get_param<double>(config, "TraditionalDetector", "gap_area_ratio_min");
     auto gap_ratio_max = static_param::get_param<double>(config, "TraditionalDetector", "gap_area_ratio_max");
@@ -80,19 +86,13 @@ std::unique_ptr<BuffDetectorInterface> create_traditional_detector(
     detector_config.gap_aspect_min = gap_asp_min > 0 ? gap_asp_min : 1.55;
     detector_config.gap_aspect_max = gap_asp_max > 0 ? gap_asp_max : 8.0;
 
-    // 箭头参数
-    auto arr_area_min = static_param::get_param<double>(config, "TraditionalDetector", "arrow_area_min");
-    auto arr_area_max = static_param::get_param<double>(config, "TraditionalDetector", "arrow_area_max");
-    auto arr_asp_min = static_param::get_param<double>(config, "TraditionalDetector", "arrow_aspect_min");
-    auto arr_asp_max = static_param::get_param<double>(config, "TraditionalDetector", "arrow_aspect_max");
-    detector_config.arrow_area_min = arr_area_min > 0 ? arr_area_min : 100.0;
-    detector_config.arrow_area_max = arr_area_max > 0 ? arr_area_max : 4000.0;
-    detector_config.arrow_aspect_min = arr_asp_min > 0 ? arr_asp_min : 2.0;
-    detector_config.arrow_aspect_max = arr_asp_max > 0 ? arr_asp_max : 6.0;
-
-    // 准确度阈值
-    auto accuracy = static_param::get_param<double>(config, "TraditionalDetector", "accuracy_threshold");
-    detector_config.accuracy_threshold = accuracy > 0 ? accuracy : 0.8;
+    // gap 椭圆矫正后的几何约束
+    auto gap_min_cd = static_param::get_param<double>(config, "TraditionalDetector", "gap_min_center_dist_ratio");
+    auto gap_max_cd = static_param::get_param<double>(config, "TraditionalDetector", "gap_max_center_dist_ratio");
+    auto gap_circle_r = static_param::get_param<double>(config, "TraditionalDetector", "gap_circle_radius_ratio");
+    detector_config.gap_min_center_dist_ratio = gap_min_cd > 0 ? gap_min_cd : 0.10;
+    detector_config.gap_max_center_dist_ratio = gap_max_cd > 0 ? gap_max_cd : 0.90;
+    detector_config.gap_circle_radius_ratio = gap_circle_r > 0 ? gap_circle_r : 0.85;
 
     // 调试选项
     detector_config.show_window = static_param::get_param<bool>(config, "TraditionalDetector", "show_window");

@@ -31,7 +31,7 @@ using SteadyClock = std::chrono::steady_clock;
 namespace {
 
 // 串口颜色转换为检测器颜色
-// 注: 新协议不含 enemy_color，此函数保留但颜色需要从配置获取
+// 注: enemy_color 不在协议中，由 hardware 从配置注入到 serial_data
 EnemyColor serial_to_enemy_color(uint8_t serial_color) {
     switch (serial_color) {
         case 1: return EnemyColor::RED;
@@ -97,7 +97,7 @@ void BuffDetectorNode::detection_loop() {
 
     try {
         // 创建检测器
-        detector_ = create_detector_from_config(EnemyColor::RED, config_.config_file);
+        detector_ = create_detector_from_config(EnemyColor::UNKNOWN, config_.config_file);
         debug::print(debug::PrintMode::INFO, "BuffDetectorNode", "Detector created");
 
         if (detector_->is_async()) {
@@ -148,6 +148,7 @@ void BuffDetectorNode::process_frame_sync() {
             // 检测
             auto t0 = SteadyClock::now();
             double timestamp_sec = frame.timestamp_us / 1e6;
+            detector_->set_enemy_color(serial_to_enemy_color(frame.serial_data.enemy_color));
             auto result = detector_->detect(frame.image, timestamp_sec);
             auto t1 = SteadyClock::now();
 
@@ -215,6 +216,7 @@ void BuffDetectorNode::process_frame_async() {
                     continue;
                 }
 
+                detector_->set_enemy_color(serial_to_enemy_color(frame.serial_data.enemy_color));
                 detector_->push(frame.image, frame.frame_id,
                                frame.timestamp_us, frame.serial_data);
                 push_stats.update();

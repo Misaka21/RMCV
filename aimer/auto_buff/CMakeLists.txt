@@ -2,3 +2,5 @@
 
 add_subdirectory(common)
 add_subdirectory(detector)
+add_subdirectory(predictor)
+add_subdirectory(fire_control)

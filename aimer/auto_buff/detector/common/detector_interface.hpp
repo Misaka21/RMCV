@@ -1,7 +1,6 @@
-//
-// 能量机关检测器抽象接口
-// 所有检测器实现都必须继承此接口
-//
+// 能量机关检测器抽象接口 (2026)
+// - 同步 detect() 或异步 push()/pop()
+// - 输出类型: autobuff::BuffDetectionResult
 
 #ifndef AIMER_AUTOBUFF_DETECTOR_INTERFACE_HPP
 #define AIMER_AUTOBUFF_DETECTOR_INTERFACE_HPP
@@ -25,7 +24,6 @@ using autobuff::EnemyColor;
 using autobuff::DetectionStatus;
 using autobuff::DetectedRCenter;
 using autobuff::DetectedTarget;
-using autobuff::DetectedArrow;
 using autobuff::BuffDetectionResult;
 
 /**

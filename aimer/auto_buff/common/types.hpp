@@ -1,13 +1,15 @@
+// 能量机关模块公共类型 (2026 规则)
 //
-// 能量机关检测公共类型定义
-// 所有能量机关模块共享的类型
-//
+// 关键变化:
+// - 不再依赖“箭头”指示目标
+// - 直接输出“被点亮的装甲模块”集合 (small=1, large=2)
+// - slot_id 仅表示 72deg 网格上的槽位编号 (0~4)，本身没有物理身份含义
 
 #ifndef AIMER_AUTOBUFF_COMMON_TYPES_HPP
 #define AIMER_AUTOBUFF_COMMON_TYPES_HPP
 
 #include <array>
-#include <cmath>
+#include <cstdint>
 #include <vector>
 
 #include <Eigen/Core>
@@ -21,43 +23,39 @@ namespace autobuff {
 // 常量定义
 // ============================================================================
 
-constexpr int NUM_SLOTS = 5;           // 能量机关扇叶数
-constexpr int TARGET_KEYPOINTS = 5;    // 靶心关键点: 4 gaps + center
-constexpr int ARROW_KEYPOINTS = 2;     // 箭头关键点: tip + tail
+constexpr int NUM_SLOTS = 5;  // 能量机关扇叶数
 
 // ============================================================================
-// 能量机关尺寸常量 (单位: m)
+// 尺寸常量 (单位: m)
 // ============================================================================
 
-// R标尺寸
-constexpr double R_CENTER_RADIUS = 0.040;       // R标半径 40mm
+// R 标 / 中心
+constexpr double R_CENTER_RADIUS = 0.040;  // 40mm (仅调试用)
 
-// 靶心尺寸
-constexpr double TARGET_INNER_RADIUS = 0.040;   // 靶心内环半径 40mm
-constexpr double TARGET_OUTER_RADIUS = 0.070;   // 靶心外环半径 70mm
-constexpr double TARGET_TIP_RADIUS = 0.095;     // 扇叶尖端半径 95mm (PnP用)
+// 扇叶尖端半径 (PnP/调试可用，具体用法由 predictor 决定)
+constexpr double TARGET_TIP_RADIUS = 0.095;  // 95mm
 
-// 能量机关旋转半径 (R标到靶心中心)
-constexpr double RUNE_RADIUS = 0.700;           // 旋转半径 700mm
+// R 标到靶心中心的旋转半径
+constexpr double RUNE_RADIUS = 0.700;  // 700mm
 
 // ============================================================================
 // 枚举类型
 // ============================================================================
 
-// 敌方颜色 (与 autoaim 保持一致但独立定义)
+// 敌方颜色 (与串口约定一致: 0/1/2)
 enum class EnemyColor : uint8_t {
     UNKNOWN = 0,
     RED = 1,
     BLUE = 2
 };
 
-// 检测状态
+// 检测状态 (面向 pipeline 的粗粒度状态)
 enum class DetectionStatus : uint8_t {
-    NONE,           // 无检测
-    R_ONLY,         // 仅检测到R标
-    TARGET_ONLY,    // 仅检测到靶心
-    PARTIAL,        // 部分检测 (R标 + 部分靶心)
-    COMPLETE        // 完整检测 (R标 + 靶心 + 箭头)
+    NONE = 0,        // 无检测
+    R_ONLY = 1,      // 仅检测到 R 标
+    TARGETS_ONLY = 2,// 仅检测到靶心
+    PARTIAL = 3,     // R + 部分靶心
+    COMPLETE = 4     // R + 靶心 (足以预测/火控)
 };
 
 // ============================================================================
@@ -65,172 +63,81 @@ enum class DetectionStatus : uint8_t {
 // ============================================================================
 
 /**
- * @brief R标检测结果
- *
- * 能量机关中心的 R 字标识
+ * @brief R 标检测结果
  */
 struct DetectedRCenter {
-    cv::Point2f center;                         // 中心点 (必须)
-    std::vector<cv::Point2f> landmarks;         // 可选: R字4角点或轮廓点
-    Eigen::Vector3d position = Eigen::Vector3d::Zero();  // 3D位置 (相机坐标系)
+    cv::Point2f center{};
+    std::vector<cv::Point2f> landmarks;  // 可选: 角点/轮廓点，用于调试或PnP扩展
     bool valid = false;
-    float confidence = 0;
-
-    /**
-     * @brief 获取PnP用的物体坐标系点
-     *
-     * 以R标中心为原点，返回4个角点用于PnP
-     */
-    std::vector<cv::Point3f> object_points() const {
-        double r = R_CENTER_RADIUS;
-        return {
-            cv::Point3f(-r, -r, 0),  // 左上
-            cv::Point3f(-r,  r, 0),  // 左下
-            cv::Point3f( r,  r, 0),  // 右下
-            cv::Point3f( r, -r, 0)   // 右上
-        };
-    }
+    float confidence = 0.f;
 };
 
 /**
- * @brief 靶心检测结果
+ * @brief 单个扇叶靶心检测结果
  *
- * 包含5个关键点: center + 4个扇叶尖端
- * 顺序: center(0), top(1), right(2), bottom(3), left(4)
- *
- *           [1] top
- *            |
- *    [4] ----●---- [2] right
- *   left     |
- *           [3] bottom
- *
- * 扇叶尖端是两个缺口角点的中点，检测精度高
+ * 注意: 这里的 is_lit 表示“被点亮(可打)” (对应 2026 规则)。
+ * slot_id 仅表示 72deg 网格编号 (0~4)，用于构造刚体点集 / 相位展开，不代表物理身份。
  */
 struct DetectedTarget {
-    cv::Point2f center;                         // 中心点 (必须)
-    std::vector<cv::Point2f> landmarks;         // 5点: center + 4个扇叶尖端
-    Eigen::Vector3d position = Eigen::Vector3d::Zero();  // 3D位置 (相机坐标系)
+    cv::Point2f center{};
 
-    int slot_id = -1;                           // 槽位ID (0-4)
-    double angle_from_center = 0;               // 相对R标的角度 (rad)
-    bool is_active = false;                     // true=已击打(亮), false=待击打(暗)
+    // 可选关键点: [center, top, right, bottom, left]
+    // - Inactive(暗) 通常能得到 4 个 fan tips
+    // - Active(亮) 可能只有 center
+    std::vector<cv::Point2f> landmarks;
+
+    int slot_id = -1;     // 0~4
+
+    // 相对 R 标的角度 (rad)，采用数学坐标系 (x 右, y 上)，范围 (-pi, pi]
+    double angle = 0.0;
+
+    bool is_lit = false;  // 是否“被点亮”(可打)
     bool valid = false;
-    float confidence = 0;
-
-    /**
-     * @brief 获取PnP用的物体坐标系点
-     *
-     * 以靶心中心为原点，返回5个关键点 (单位: m)
-     * 顺序与 landmarks 一一对应
-     */
-    std::vector<cv::Point3f> object_points() const {
-        float r = static_cast<float>(TARGET_TIP_RADIUS);
-        // 5点: center + 4个扇叶尖端 (上右下左)
-        return {
-            cv::Point3f(0,  0, 0),   // center
-            cv::Point3f(0, -r, 0),   // top    (y负方向)
-            cv::Point3f(r,  0, 0),   // right  (x正方向)
-            cv::Point3f(0,  r, 0),   // bottom (y正方向)
-            cv::Point3f(-r, 0, 0)    // left   (x负方向)
-        };
-    }
+    float confidence = 0.f;
 };
 
-/**
- * @brief 箭头检测结果
- *
- * 箭头指向待打击的靶心
- */
-struct DetectedArrow {
-    cv::Point2f tip;                            // 箭头尖端 (指向R标方向)
-    cv::Point2f tail;                           // 箭头尾部 (指向靶心方向)
-
-    std::vector<cv::Point2f> get_landmarks() const { return {tip, tail}; }
-
-    double direction_angle = 0;                 // 箭头方向角 (rad, 相对水平)
-    int target_slot_id = -1;                    // 指向的靶心槽位ID
-    bool valid = false;
-    float confidence = 0;
-
-    /**
-     * @brief 获取箭头中心点
-     */
-    cv::Point2f center() const {
-        return (tip + tail) * 0.5f;
-    }
-};
+inline bool is_valid_slot(int id) { return id >= 0 && id < NUM_SLOTS; }
 
 // ============================================================================
-// 检测结果
+// 帧级检测结果 (detector -> predictor)
 // ============================================================================
 
-/**
- * @brief 能量机关检测结果 (检测器 -> 预测器)
- */
 struct BuffDetectionResult {
-    // 检测到的特征
     DetectedRCenter r_center;
-    std::array<DetectedTarget, NUM_SLOTS> targets;
-    DetectedArrow arrow;
+    std::array<DetectedTarget, NUM_SLOTS> targets{};
 
-    // 汇总信息
-    int active_slot_id = -1;                    // 待打击靶心的槽位ID (箭头指向)
-    int target_count = 0;                       // 检测到的靶心数量
+    // bit i = 1 表示 slot i 被点亮 (可打)
+    uint8_t lit_mask = 0;
+
+    int target_count = 0;
+    int lit_count = 0;
+
     DetectionStatus status = DetectionStatus::NONE;
     EnemyColor enemy_color = EnemyColor::UNKNOWN;
 
-    // 帧信息
     int frame_id = 0;
-    double timestamp = 0;                       // 秒
-    float latency_ms = 0;                       // 检测耗时
+    double timestamp = 0.0;     // 秒 (steady_clock)
+    float latency_ms = 0.0f;
     aimer::RobotState robot_state;
 
-    // 调试图像 (可选)
+    // 原图像 (可选，调试/录制用)
     cv::Mat image;
 
-    // ========== 辅助方法 ==========
+    // ========= helpers =========
 
     bool has_r_center() const { return r_center.valid; }
 
-    bool has_active_target() const {
-        return active_slot_id >= 0 && active_slot_id < NUM_SLOTS
-               && targets[active_slot_id].valid;
-    }
-
-    const DetectedTarget* get_active_target() const {
-        if (has_active_target()) {
-            return &targets[active_slot_id];
-        }
-        return nullptr;
-    }
-
-    /**
-     * @brief 获取所有有效靶心
-     */
-    std::vector<const DetectedTarget*> get_valid_targets() const {
-        std::vector<const DetectedTarget*> result;
-        for (const auto& t : targets) {
-            if (t.valid) {
-                result.push_back(&t);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * @brief 检测是否完整
-     */
-    bool is_complete() const {
-        return status == DetectionStatus::COMPLETE;
-    }
-
-    /**
-     * @brief 更新检测状态
-     */
-    void update_status() {
+    void update_summary() {
         target_count = 0;
-        for (const auto& t : targets) {
-            if (t.valid) target_count++;
+        lit_count = 0;
+        lit_mask = 0;
+        for (int i = 0; i < NUM_SLOTS; ++i) {
+            if (!targets[i].valid) continue;
+            target_count++;
+            if (targets[i].is_lit) {
+                lit_count++;
+                lit_mask |= static_cast<uint8_t>(1u << i);
+            }
         }
 
         if (!r_center.valid && target_count == 0) {
@@ -238,12 +145,26 @@ struct BuffDetectionResult {
         } else if (r_center.valid && target_count == 0) {
             status = DetectionStatus::R_ONLY;
         } else if (!r_center.valid && target_count > 0) {
-            status = DetectionStatus::TARGET_ONLY;
-        } else if (r_center.valid && arrow.valid && active_slot_id >= 0) {
+            status = DetectionStatus::TARGETS_ONLY;
+        } else if (r_center.valid && target_count > 0) {
             status = DetectionStatus::COMPLETE;
         } else {
             status = DetectionStatus::PARTIAL;
         }
+    }
+
+    std::vector<int> get_lit_slots() const {
+        std::vector<int> ids;
+        for (int i = 0; i < NUM_SLOTS; ++i) {
+            if ((lit_mask & (1u << i)) != 0) ids.push_back(i);
+        }
+        return ids;
+    }
+
+    const DetectedTarget* get_slot(int slot_id) const {
+        if (!is_valid_slot(slot_id)) return nullptr;
+        if (!targets[slot_id].valid) return nullptr;
+        return &targets[slot_id];
     }
 };
 

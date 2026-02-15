@@ -463,3 +463,17 @@
     still_speed_scale = 2.0
     #@double 最大有效距离 (m)
     max_distance = 10.0
+
+# ==================== 能量机关火控 (2026) ====================
+
+[AutoBuff.FireControl]
+    #@double 射击误差阈值 (rad)
+    fire_threshold = 0.02
+    #@double 最小置信度
+    min_confidence = 0.30
+
+[AutoBuff.FireControl.Latency]
+    #@double 发送→控制器响应延迟 (s)
+    send_to_control = 0.003
+    #@double 控制→出膛延迟 (s)
+    control_to_fire = 0.020
