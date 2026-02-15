@@ -110,6 +110,9 @@ FireCommand FireController::control(
         vehicle.confidence
     );
 
+    // 上层允许开火开关 (来自硬件层注入；不影响瞄准，只影响发射)
+    can_fire = can_fire && snapshot.self_state.allow_fire;
+
     // INDIRECT 模式额外检查开火时机
     if (can_fire && armor_result.mode == AimMode::INDIRECT) {
         double fire_advance = runtime_param::get_param<double>(

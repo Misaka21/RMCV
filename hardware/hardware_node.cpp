@@ -222,6 +222,14 @@ void start_hardware_node() {
 
         // Fake serial config
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
+
+        // enemy_color / allow_fire 不在新协议中：统一从配置注入（fake/real 串口都需要）
+        // 目前复用 Serial.fake_data.* 字段作为注入源，避免再加一套配置表。
+        // NOTE: 若未来下位机协议加入这两个字段，需要改为“仅当值未知/未提供时才注入”，避免覆盖真实值。
+        uint8_t injected_enemy_color = static_cast<uint8_t>(
+            static_param::get_param<int64_t>(config, "Serial.fake_data", "enemy_color"));
+        bool injected_allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
+
         serial::SerialReceiveData fake_data;  // 预加载fake数据
         if (use_fake_serial) {
             // fake_data 角度使用弧度
@@ -322,6 +330,12 @@ void start_hardware_node() {
                     }
                 }
 
+                // 注入不在协议中的字段（上层需要）
+                if (frame.serial_valid) {
+                    frame.serial_data.enemy_color = injected_enemy_color;
+                    frame.serial_data.allow_fire = injected_allow_fire;
+                }
+
                 // 应用IMU pitch/roll/yaw取反
                 if (frame.serial_valid) {
                     if (imu_yaw_negate) {
@@ -334,7 +348,6 @@ void start_hardware_node() {
                         frame.serial_data.roll = -frame.serial_data.roll;
                     }
                 }
-                frame.serial_data.aim_mode =1;
                 // Publish
                 pub.push(frame);
 

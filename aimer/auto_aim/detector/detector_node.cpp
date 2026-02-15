@@ -82,6 +82,13 @@ void run_sync_loop(detector::DetectorInterface* det) {
                 continue;
             }
 
+            // 敌方颜色 (来自硬件层注入；0=未知则保持 detector 当前值)
+            if (frame.serial_data.enemy_color == 1) {
+                det->set_enemy_color(detector::EnemyColor::RED);
+            } else if (frame.serial_data.enemy_color == 2) {
+                det->set_enemy_color(detector::EnemyColor::BLUE);
+            }
+
             // 检测
             auto t0 = SteadyClock::now();
             auto armors = det->detect(frame.image);
@@ -150,6 +157,13 @@ void run_async_loop(detector::DetectorInterface* det) {
                 if (aim_mode != aimer::AimMode::AUTOAIM) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     continue;
+                }
+
+                // 敌方颜色 (来自硬件层注入；0=未知则保持 detector 当前值)
+                if (frame.serial_data.enemy_color == 1) {
+                    det->set_enemy_color(detector::EnemyColor::RED);
+                } else if (frame.serial_data.enemy_color == 2) {
+                    det->set_enemy_color(detector::EnemyColor::BLUE);
                 }
 
                 det->push(frame.image, frame.frame_id, frame.timestamp_us, frame.serial_data);

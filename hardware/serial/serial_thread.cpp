@@ -9,8 +9,13 @@
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "protocol/uart_protocol.hpp"
+#ifdef HAVE_LIBUSB_1_0
 #include "protocol/usb_bulk_protocol.hpp"
+#endif
 #include "serial_thread.hpp"
+
+// FireCommand -> VisionData_t bridge
+#include "aimer/common/fire_control_types.hpp"
 
 // UMT相关头文件
 #include "umt/umt.hpp"
@@ -22,7 +27,9 @@ using namespace std::chrono_literals;
 
 void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
     try {
-        // 视觉数据状态管理
+        // 输出到下位机的数据源: fire_command (autoaim/autobuff 写入)
+        auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
+        // 兼容/调试: 暴露一个“最终将要发送”的 VisionData_t 供其他模块查看
         auto vision_transmit = umt::BasicObjManager<VisionData_t>::find_or_create("vision_transmit");
         auto send_enabled = umt::BasicObjManager<bool>::find_or_create("serial_send_enabled", true);
         auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
@@ -41,8 +48,16 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                     continue;
                 }
 
-                // 从ObjManager获取视觉数据
-                VisionData_t vision_data = vision_transmit->get();
+                // fire_command -> VisionData_t (保持 32B 协议不变)
+                const auto cmd = fire_cmd->get();
+                VisionData_t vision_data;
+                vision_data.control = cmd.control_enabled ? 1 : 0;
+                vision_data.shoot = (cmd.control_enabled && cmd.allow_fire && cmd.fire_now) ? 1 : 0;
+                vision_data.yaw = cmd.yaw;
+                vision_data.pitch = cmd.pitch;
+
+                // 写回调试对象
+                vision_transmit->get() = vision_data;
 
                 // 转换为数据包并发送
                 bool sent = false;
@@ -198,6 +213,7 @@ public:
      * @brief 创建 USB Bulk 协议
      */
     static std::shared_ptr<ProtocolInterface> create_usb_bulk_protocol(const toml::table& config) {
+#ifdef HAVE_LIBUSB_1_0
         std::string vendor_id = static_param::get_param<std::string>(config, "Serial.usb_bulk", "vendor_id");
         std::string product_id = static_param::get_param<std::string>(config, "Serial.usb_bulk", "product_id");
         std::string serial_number = static_param::get_param<std::string>(config, "Serial.usb_bulk", "serial_number");
@@ -218,6 +234,12 @@ public:
             bulk_out,
             static_cast<int>(timeout_ms)
         );
+#else
+        (void)config;
+        debug::print(debug::PrintMode::ERROR, "SerialManager",
+            "USB bulk protocol requested but this build has no libusb-1.0 support (HAVE_LIBUSB_1_0 is not defined)");
+        return nullptr;
+#endif
     }
 
     /**

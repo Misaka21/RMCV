@@ -121,6 +121,7 @@ void fire_control_run(const std::string& /* config_path */) {
 
         // 获取当前模式
         aimer::AimMode mode = snapshot.self_state.aim_mode;
+        aimer::AimMode prev_mode = last_mode;
 
         // 检测新帧，更新延迟估计
         if (snapshot.frame_id != last_frame_id && snapshot.predict_timestamp > 0) {
@@ -151,6 +152,7 @@ void fire_control_run(const std::string& /* config_path */) {
 
         // 根据模式处理
         ::fire_control::FireCommand cmd{};
+        bool should_write = true;
 
         switch (mode) {
         case aimer::AimMode::AUTOAIM:
@@ -161,6 +163,8 @@ void fire_control_run(const std::string& /* config_path */) {
         case aimer::AimMode::ENERGY_LARGE:
             // 能量机关模式 - 由 autobuff 模块处理
             cmd.control_enabled = false;
+            // 只在进入能量机关模式时写一次 disable，避免持续覆盖 autobuff 的 fire_command
+            should_write = (prev_mode != mode);
             break;
 
         case aimer::AimMode::DISABLED:
@@ -170,7 +174,9 @@ void fire_control_run(const std::string& /* config_path */) {
         }
 
         // 输出控制指令
-        fire_cmd->get() = cmd;
+        if (should_write) {
+            fire_cmd->get() = cmd;
+        }
 
         // 等待下一周期
         next_time += period;
