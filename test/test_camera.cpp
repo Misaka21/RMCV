@@ -5,8 +5,11 @@
 #include <chrono>
 #include <thread>
 
-#include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+
+#ifdef RMCV_WITH_OPENCV_HIGHGUI
+#include <opencv2/highgui.hpp>
+#endif
 
 #include "hardware/hik_cam/hik_camera.hpp"
 #include "plugin/debug/logger.hpp"
@@ -81,7 +84,8 @@ int main() {
                 fps_time = now;
             }
 
-            // Display image (optional, comment out if no display)
+#ifdef RMCV_WITH_OPENCV_HIGHGUI
+            // Display image
             cv::Mat display;
             cv::resize(img, display, cv::Size(720, 540));
             cv::imshow("Camera Test", display);
@@ -90,9 +94,12 @@ int main() {
             if (key == 27 || key == 'q') {  // ESC or 'q' to quit
                 break;
             }
+#endif
         }
 
+#ifdef RMCV_WITH_OPENCV_HIGHGUI
         cv::destroyAllWindows();
+#endif
 
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::ERROR, "TestCamera", "Error: {}", e.what());

@@ -5,8 +5,11 @@
 #include "detector_helpers.hpp"
 
 #include <fmt/format.h>
-#include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+
+#ifdef RMCV_WITH_OPENCV_HIGHGUI
+#include <opencv2/highgui.hpp>
+#endif
 
 #include "aimer/common/transformer/transformer.hpp"
 
@@ -209,12 +212,18 @@ void draw_debug_visualization(
     }
 
     // 显示窗口
+#ifdef RMCV_WITH_OPENCV_HIGHGUI
     cv::imshow(DEBUG_WINDOW_NAME, debug_img);
     cv::waitKey(1);
+#else
+    (void)debug_img;
+#endif
 }
 
 void close_debug_window() {
+#ifdef RMCV_WITH_OPENCV_HIGHGUI
     cv::destroyWindow(DEBUG_WINDOW_NAME);
+#endif
 }
 
 }  // namespace autoaim::detector

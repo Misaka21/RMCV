@@ -26,7 +26,6 @@
 #include <opencv2/core/base.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
-#include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 // 3rd party
 #include <fmt/format.h>

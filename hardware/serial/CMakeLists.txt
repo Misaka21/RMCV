@@ -1,13 +1,19 @@
-aux_source_directory(. serial_src)
-aux_source_directory(protocol serial_protocol_src)
+set(serial_src
+    serial_thread.cpp
+)
 
-# 创建串口静态库
-add_library(hardware_serial STATIC ${serial_src} ${serial_protocol_src})
+set(serial_protocol_src
+    protocol/uart_protocol.cpp
+)
 
 # 设置包含目录
+add_library(hardware_serial STATIC ${serial_src} ${serial_protocol_src})
 target_include_directories(hardware_serial PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# 依赖: fmt (logger / hex dump)
+target_link_libraries(hardware_serial PUBLIC fmt::fmt)
 
 # 查找并链接libusb-1.0依赖
 find_path(LIBUSB_INCLUDE_DIR
@@ -28,6 +34,8 @@ find_library(LIBUSB_LIBRARY
 )
 
 if(LIBUSB_INCLUDE_DIR AND LIBUSB_LIBRARY)
+    target_sources(hardware_serial PRIVATE protocol/usb_bulk_protocol.cpp)
+
     target_include_directories(hardware_serial PRIVATE ${LIBUSB_INCLUDE_DIR})
     target_link_libraries(hardware_serial PRIVATE ${LIBUSB_LIBRARY})
     target_compile_definitions(hardware_serial PRIVATE HAVE_LIBUSB_1_0)
@@ -37,7 +45,7 @@ endif()
 
 # 链接系统库
 target_link_libraries(hardware_serial PRIVATE
-    pthread  # 用于多线程支持
+    Threads::Threads  # 用于多线程支持
 )
 
 # 平台特定设置

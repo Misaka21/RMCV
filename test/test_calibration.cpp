@@ -11,8 +11,11 @@
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/calib3d.hpp>
-#include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
+
+#ifdef RMCV_WITH_OPENCV_HIGHGUI
+#include <opencv2/highgui.hpp>
+#endif
 
 #include "hardware/hik_cam/hik_camera.hpp"
 #include "plugin/debug/logger.hpp"
@@ -169,6 +172,10 @@ void save_captured_images(const std::string& dir) {
 }
 
 int main() {
+#ifndef RMCV_WITH_OPENCV_HIGHGUI
+    std::cerr << "OpenCV highgui is not available in this build; test_calibration requires GUI support.\n";
+    return 1;
+#else
     std::cout << "\n========== 海康相机标定工具 ==========\n";
     std::cout << "标定板: " << BOARD_WIDTH << "x" << BOARD_HEIGHT << " 角点\n";
     std::cout << "操作: 空格=拍照  c=标定  u=撤销  q=退出\n";
@@ -271,4 +278,5 @@ int main() {
     }
 
     return 0;
+#endif
 }

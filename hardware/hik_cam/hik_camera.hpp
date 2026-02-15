@@ -1,6 +1,13 @@
 #ifndef HIK_CAMERA_H
 #define HIK_CAMERA_H
 
+// Build option (from CMake):
+// - 1: use HikRobot MVS SDK backend
+// - 0: use OpenCV VideoCapture fallback backend
+#ifndef RMCV_WITH_HIK_CAMERA
+#define RMCV_WITH_HIK_CAMERA 0
+#endif
+
 // C system headers
 #include <cstdio>
 
@@ -13,14 +20,20 @@
 #include <vector>
 
 // Third-party library headers
-#include <MvCameraControl.h>
 #include <fmt/core.h>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
+
+#if RMCV_WITH_HIK_CAMERA
+#include <MvCameraControl.h>
+#endif
 
 // Project headers
-#include "hik_log.hpp"
 #include "plugin/debug/logger.hpp"
+#if RMCV_WITH_HIK_CAMERA
+#include "hik_log.hpp"
+#endif
 
 namespace camera {
 
@@ -58,7 +71,9 @@ struct CameraConfig {
 
 constexpr int MAX_RETRY_ATTEMPTS = 3;
 constexpr int RETRY_DELAY_SECONDS = 3;
+#if RMCV_WITH_HIK_CAMERA
 constexpr int INFO_BUFFER_SIZE = INFO_MAX_BUFFER_SIZE;
+#endif
 
 // ============================================================================
 // HikCam Class
@@ -95,6 +110,7 @@ public:
 
 private:
     CameraConfig _config;
+#if RMCV_WITH_HIK_CAMERA
     uint32_t _nRet = MV_OK;
     void* _handle = nullptr;
     unsigned char* _pDstData = nullptr;
@@ -130,6 +146,10 @@ private:
     inline void set_camera_info(const std::string& key, bool value) {
         HIKCAM_WARN(MV_CC_SetBoolValue(this->_handle, key.c_str(), value));
     }
+#else
+    cv::VideoCapture cap_;
+    cv::Mat _srcImage;
+#endif
 };
 
 }  // namespace camera

@@ -4,6 +4,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #set(CMAKE_BUILD_TYPE Release)
 
+# Local find modules (e.g. Eigen3 fallback for dependency subprojects).
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
 # VTune 性能分析选项
 option(ENABLE_PROFILING "Enable profiling support for VTune/perf" OFF)
 
@@ -76,7 +79,132 @@ message(STATUS "--------------------ENABLE_PROFILING: ${ENABLE_PROFILING}-------
 
 find_package(OpenCV REQUIRED)
 find_package(fmt REQUIRED)
-find_package(Eigen3 REQUIRED)
+
+# OpenCV highgui is optional (some minimal OpenCV builds omit it).
+set(RMCV_WITH_OPENCV_HIGHGUI OFF)
+foreach(_inc IN LISTS OpenCV_INCLUDE_DIRS)
+    if(EXISTS "${_inc}/opencv2/highgui.hpp")
+        set(RMCV_WITH_OPENCV_HIGHGUI ON)
+        break()
+    endif()
+endforeach()
+if(RMCV_WITH_OPENCV_HIGHGUI)
+    add_compile_definitions(RMCV_WITH_OPENCV_HIGHGUI)
+endif()
+
+# OpenCV calib3d is required (solvePnP / PnP pipeline).
+set(RMCV_WITH_OPENCV_CALIB3D OFF)
+foreach(_inc IN LISTS OpenCV_INCLUDE_DIRS)
+    if(EXISTS "${_inc}/opencv2/calib3d.hpp")
+        set(RMCV_WITH_OPENCV_CALIB3D ON)
+        break()
+    endif()
+endforeach()
+if(RMCV_WITH_OPENCV_CALIB3D)
+    add_compile_definitions(RMCV_WITH_OPENCV_CALIB3D)
+else()
+    message(FATAL_ERROR "OpenCV module 'calib3d' is required but opencv2/calib3d.hpp was not found in OpenCV_INCLUDE_DIRS. Please install/build OpenCV with calib3d.")
+endif()
+
+# Eigen3 (header-only). Prefer the CMake package; fall back to a manual include-path search.
+option(RMCV_FETCH_EIGEN3 "Fetch Eigen3 automatically if not found" ON)
+
+find_package(Eigen3 QUIET CONFIG)
+if(NOT Eigen3_FOUND)
+    find_package(Eigen3 QUIET)  # module mode (if available)
+endif()
+if(NOT Eigen3_FOUND)
+    find_path(EIGEN3_INCLUDE_DIR
+        NAMES Eigen/Core
+        PATHS
+            /usr/include/eigen3
+            /usr/local/include/eigen3
+            /opt/homebrew/include/eigen3
+            /opt/local/include/eigen3
+            /usr/include
+            /usr/local/include
+            /opt/homebrew/include
+            /opt/local/include
+    )
+    if(EIGEN3_INCLUDE_DIR)
+        add_library(Eigen3::Eigen INTERFACE IMPORTED)
+        set_target_properties(Eigen3::Eigen PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}"
+        )
+        set(Eigen3_FOUND TRUE)
+    endif()
+endif()
+
+if(NOT Eigen3_FOUND AND RMCV_FETCH_EIGEN3)
+    message(STATUS "Eigen3 not found - fetching Eigen3 via FetchContent...")
+    include(FetchContent)
+    FetchContent_Declare(
+        rmcv_eigen3_git
+        GIT_REPOSITORY https://github.com/eigen-mirror/eigen.git
+        GIT_TAG 3.4.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_GetProperties(rmcv_eigen3_git)
+    if(NOT rmcv_eigen3_git_POPULATED)
+        FetchContent_Populate(rmcv_eigen3_git)
+    endif()
+
+    set(EIGEN3_INCLUDE_DIR "${rmcv_eigen3_git_SOURCE_DIR}")
+    if(NOT TARGET Eigen3::Eigen)
+        add_library(Eigen3::Eigen INTERFACE IMPORTED)
+        set_target_properties(Eigen3::Eigen PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}"
+        )
+    endif()
+    set(Eigen3_FOUND TRUE)
+endif()
+
+if(NOT Eigen3_FOUND)
+    message(FATAL_ERROR "Eigen3 not found. Install eigen (e.g. 'brew install eigen') or set Eigen3_DIR/EIGEN3_INCLUDE_DIR.")
+endif()
+
+# Normalize include dir var for legacy include_directories() usage.
+if(TARGET Eigen3::Eigen AND NOT EIGEN3_INCLUDE_DIR)
+    get_target_property(EIGEN3_INCLUDE_DIR Eigen3::Eigen INTERFACE_INCLUDE_DIRECTORIES)
+endif()
+
+# Ceres Solver (required by aimer/common: AdaptiveEkf uses ceres::Jet).
+option(RMCV_FETCH_CERES "Fetch Ceres Solver automatically if not found" ON)
+find_package(Ceres QUIET CONFIG)
+if(NOT Ceres_FOUND)
+    find_package(Ceres QUIET)
+endif()
+if(NOT Ceres_FOUND AND RMCV_FETCH_CERES)
+    message(STATUS "Ceres not found - fetching ceres-solver via FetchContent...")
+    include(FetchContent)
+
+    # Configure Ceres to build with minimal external deps.
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(MINIGLOG ON CACHE BOOL "" FORCE)
+    set(GFLAGS OFF CACHE BOOL "" FORCE)
+    set(SUITESPARSE OFF CACHE BOOL "" FORCE)
+    set(LAPACK OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        rmcv_ceres
+        URL https://github.com/ceres-solver/ceres-solver/archive/refs/tags/2.2.0.tar.gz
+    )
+    FetchContent_MakeAvailable(rmcv_ceres)
+
+    # Ceres builds a 'ceres' target; normalize to Ceres::ceres.
+    if(TARGET ceres AND NOT TARGET Ceres::ceres)
+        add_library(Ceres::ceres ALIAS ceres)
+    endif()
+    if(TARGET Ceres::ceres)
+        set(Ceres_FOUND TRUE)
+    endif()
+endif()
+if(NOT Ceres_FOUND)
+    message(FATAL_ERROR "Ceres not found. Install ceres-solver (Ubuntu: libceres-dev; macOS: brew install ceres-solver) or set Ceres_DIR (or disable RMCV_FETCH_CERES and provide a Ceres installation).")
+endif()
+
 find_package(Threads REQUIRED)
 # tomlplusplus: 使用内嵌的 header-only 版本 (plugin/param/thirdparty/toml.hpp)
 
@@ -113,15 +241,16 @@ add_subdirectory(simulator)
 add_executable(RMCV2026 main.cpp)
 # 使用 whole-archive 确保 pybind11 嵌入模块不被链接器优化掉
 if(ENABLE_WEBVIEW)
-    target_link_libraries(RMCV2026
-        ${OpenCV_LIBS} fmt::fmt
-        -Wl,--whole-archive plugin -Wl,--no-whole-archive
-        hardware detector predictor autoaim_fire_control buff_detector rmcv_bag
-        ${Python_LIBRARIES}
-    )
-else()
-    target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control buff_detector rmcv_bag)
-endif()
+	    target_link_libraries(RMCV2026
+	        ${OpenCV_LIBS} fmt::fmt
+	        -Wl,--whole-archive plugin -Wl,--no-whole-archive
+	        hardware detector predictor autoaim_fire_control buff_detector rmcv_bag
+	        buff_predictor buff_fire_control
+	        ${Python_LIBRARIES}
+	    )
+	else()
+	    target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control buff_detector buff_predictor buff_fire_control rmcv_bag)
+	endif()
 
 add_executable(test_param test/test_param.cpp)
 target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin Threads::Threads)
@@ -156,20 +285,19 @@ target_link_libraries(test_calibration ${OpenCV_LIBS} fmt::fmt plugin hardware)
 add_executable(test_playback test/test_playback.cpp)
 target_link_libraries(test_playback ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor rmcv_bag)
 
-# 相机-IMU时间戳标定 (需要Ceres)
-find_package(Ceres QUIET)
-if(Ceres_FOUND)
-    add_executable(3.test_time_sync test/time_sync/test_time_sync.cpp)
-    target_include_directories(3.test_time_sync PRIVATE ${PROJECT_SOURCE_DIR}/test ${CERES_INCLUDE_DIRS})
-    target_link_libraries(3.test_time_sync ${OpenCV_LIBS} fmt::fmt plugin hardware detector aimer_common ${CERES_LIBRARIES})
-    message(STATUS "3.test_time_sync will be built (Ceres found)")
-
-    # 相机外参自动标定 (使用Ceres)
-    add_executable(2.test_extrinsic_calib test/extrinsic_calib/test_extrinsic_calib.cpp)
-    target_include_directories(2.test_extrinsic_calib PRIVATE ${PROJECT_SOURCE_DIR}/test ${CERES_INCLUDE_DIRS})
-    target_link_libraries(2.test_extrinsic_calib ${OpenCV_LIBS} fmt::fmt plugin hardware aimer_common ${CERES_LIBRARIES})
-    message(STATUS "2.test_extrinsic_calib will be built (Ceres found)")
-else()
+	# 相机-IMU时间戳标定 (需要Ceres)
+		if(Ceres_FOUND)
+		    add_executable(3.test_time_sync test/time_sync/test_time_sync.cpp)
+		    target_include_directories(3.test_time_sync PRIVATE ${PROJECT_SOURCE_DIR}/test)
+		    target_link_libraries(3.test_time_sync ${OpenCV_LIBS} fmt::fmt plugin hardware detector aimer_common Ceres::ceres)
+		    message(STATUS "3.test_time_sync will be built (Ceres found)")
+	
+	    # 相机外参自动标定 (使用Ceres)
+	    add_executable(2.test_extrinsic_calib test/extrinsic_calib/test_extrinsic_calib.cpp)
+	    target_include_directories(2.test_extrinsic_calib PRIVATE ${PROJECT_SOURCE_DIR}/test)
+	    target_link_libraries(2.test_extrinsic_calib ${OpenCV_LIBS} fmt::fmt plugin hardware aimer_common Ceres::ceres)
+	    message(STATUS "2.test_extrinsic_calib will be built (Ceres found)")
+	else()
     message(STATUS "3.test_time_sync will NOT be built (Ceres not found)")
 
     # 相机外参自动标定 (无Ceres，只用网格搜索)
