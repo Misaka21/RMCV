@@ -214,11 +214,14 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
-    // ⭐ 关键修正: 用 EKF 预测的角度计算自适应因子，而不是观测值
-    // 这样离群点不会因为 z_to_v 大而获得更大的 R，反而会被 Gating 正确拒绝
-    // predicted_z_to_v = |armor_yaw - camera_yaw| (从预测值计算)
+    // ⭐ 关键修正: 自适应因子要与 sp_vision 的定义保持一致
+    // sp_vision 使用的是 INWARD 装甲板朝向:
+    //   delta = armor_yaw_inward - position_yaw
+    // 当前状态里 inner_z[ARMOR_YAW] 是 OUTWARD，需要先转回 INWARD 再比较，
+    // 否则会出现整体偏移 π，导致自适应因子长期饱和。
+    double predicted_armor_yaw_inward = inner_z[sp_model::ARMOR_YAW] - M_PI;
     double predicted_z_to_v = std::abs(aimer::math::angle_diff(
-        inner_z[sp_model::ARMOR_YAW], inner_z[sp_model::YAW]));
+        predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
 
     // 观测更新
     MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v);
@@ -358,9 +361,10 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
-    // ⭐ 关键修正: 用 EKF 预测的角度计算自适应因子
+    // ⭐ 与单板更新保持一致：OUTWARD -> INWARD 后再计算自适应角差
+    double predicted_armor_yaw_inward = inner_z[sp_model::ARMOR_YAW] - M_PI;
     double predicted_z_to_v = std::abs(aimer::math::angle_diff(
-        inner_z[sp_model::ARMOR_YAW], inner_z[sp_model::YAW]));
+        predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
 
     // 双装甲板时观测噪声更小
     MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v, 2);
@@ -477,6 +481,11 @@ Eigen::Vector3d SpMotion::predict_center(double dt) const {
 }
 
 Eigen::Vector3d SpMotion::predict_armor_pos(int armor_idx, double dt) const {
+    // MotionInterface 约定: armor_idx=0 表示当前追踪装甲板。
+    // Sp 状态内部用的是绝对 state_id(0..N-1)，这里做一次相对->绝对映射。
+    int rel_idx = ((armor_idx % armor_num_) + armor_num_) % armor_num_;
+    int abs_id = (tracked_armor_id_ + rel_idx) % armor_num_;
+
     VectorX x = ekf_.get_x();
 
     // 预测中心
@@ -488,10 +497,10 @@ Eigen::Vector3d SpMotion::predict_armor_pos(int armor_idx, double dt) const {
     double theta = x[sp_model::THETA] + x[sp_model::OMEGA] * dt;
 
     // 装甲板角度
-    double armor_angle = theta + armor_idx * (2.0 * M_PI / armor_num_);
+    double armor_angle = theta + abs_id * (2.0 * M_PI / armor_num_);
 
     // 选择半径和高度
-    bool use_l_h = (armor_num_ == 4) && (armor_idx % 2 == 1);
+    bool use_l_h = (armor_num_ == 4) && (abs_id % 2 == 1);
     double r_actual = use_l_h ? (x[sp_model::R] + x[sp_model::L]) : x[sp_model::R];
     double z_actual = use_l_h ? (zc + x[sp_model::H]) : zc;
 
@@ -503,12 +512,21 @@ Eigen::Vector3d SpMotion::predict_armor_pos(int armor_idx, double dt) const {
 }
 
 Eigen::Vector3d SpMotion::get_armor_pos() const {
-    return predict_armor_pos(tracked_armor_id_, 0);
+    // MotionInterface 约定: idx=0 为当前追踪装甲板
+    return predict_armor_pos(0, 0);
 }
 
 Eigen::Vector3d SpMotion::get_velocity() const {
     VectorX x = ekf_.get_x();
     return Eigen::Vector3d(x[sp_model::VX], x[sp_model::VY], x[sp_model::VZ]);
+}
+
+double SpMotion::get_theta() const {
+    // 对齐 Spin/Lmtd 的外部语义: 返回“当前追踪装甲板”的 OUTWARD 朝向。
+    // 内部状态 x[THETA] 存的是绝对 state_id=0 的朝向。
+    VectorX x = ekf_.get_x();
+    double theta = x[sp_model::THETA] + tracked_armor_id_ * (2.0 * M_PI / armor_num_);
+    return aimer::math::reduced_angle(theta);
 }
 
 std::vector<Eigen::Vector3d> SpMotion::compute_all_armors_from_observation(

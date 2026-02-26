@@ -210,7 +210,7 @@ public:
 
     Eigen::Vector3d get_velocity() const override;
     Eigen::Vector3d get_armor_pos() const override;
-    double get_theta() const override { return ekf_.get_x()[sp_model::THETA]; }
+    double get_theta() const override;
     double get_omega() const override { return ekf_.get_x()[sp_model::OMEGA]; }
     double get_radius() const override { return ekf_.get_x()[sp_model::R]; }
     double get_another_radius() const override {
