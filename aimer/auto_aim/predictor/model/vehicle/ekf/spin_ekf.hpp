@@ -216,7 +216,7 @@ public:
     double get_radius() const override { return ekf_.get_x()[spin_model::R]; }
     double get_another_radius() const override { return another_r_; }
     double get_dz() const override { return ekf_.get_x()[spin_model::DZ]; }
-    int get_tracked_id() const override { return tracked_armor_id_; }
+    int get_tracked_id() const override { return tracked_state_id_; }
 
     std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
     void output_to_plotter(const std::string& prefix) const override;
@@ -283,17 +283,20 @@ private:
     // ==================== 追踪状态 ====================
     double last_yaw_ = 0;       // 上一帧观测的 armor_yaw (用于连续化)
 
-    // ==================== 跳变检测 (与 LmtdMotion 一致) ====================
-    int tracked_armor_id_ = -1;  // 当前追踪的装甲板 ID
+    // ==================== 追踪状态 ====================
+    // tracked_state_id_: 当前追踪的装甲板序号 (0..armor_num-1)，用于统一对外语义
+    // tracked_detector_id_: ArmorIdentifier 分配的线程 ID，仅用于跨帧关联同一物理装甲板
+    int tracked_state_id_ = 0;
+    int tracked_detector_id_ = -1;
 
     /**
      * @brief 检测并处理装甲板跳变 (内部调用，在 predict 之后)
      *
      * @param armor 当前观测装甲板
-     * @param out_tracked_id 输出: 新的追踪 ID
+     * @param out_tracked_state_id 输出: 新的追踪装甲板序号 (0..N-1)
      * @return 是否发生跳变
      */
-    bool detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id);
+    bool detect_and_handle_jump(const ArmorData& armor, int& out_tracked_state_id);
 };
 
 }  // namespace autoaim::predictor

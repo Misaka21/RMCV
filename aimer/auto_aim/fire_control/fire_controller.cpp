@@ -68,9 +68,11 @@ FireCommand FireController::control(
     const auto& vehicle = snapshot.vehicles[selection.target_id];
 
     // 更新选择结果的预测位置 (用于调试显示)
-    selection.predicted_pos = vehicle.predict_armor_position(
-        vehicle.recommended_armor_idx, latency.prediction_latency()
-    );
+    int debug_armor_idx = vehicle.recommended_armor_idx;
+    if (debug_armor_idx < 0 || debug_armor_idx >= vehicle.armor_count) {
+        debug_armor_idx = 0;
+    }
+    selection.predicted_pos = vehicle.predict_armor_position(debug_armor_idx, latency.prediction_latency());
     last_selection_ = selection;
 
     // 4. 装甲板瞄准

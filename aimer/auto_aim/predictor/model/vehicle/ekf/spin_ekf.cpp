@@ -60,7 +60,8 @@ void SpinMotion::init(const ArmorData& armor, double timestamp) {
     // 重置状态
     another_dz_ = 0;
     last_yaw_ = theta;  // 保存 OUTWARD 角度
-    tracked_armor_id_ = armor.id;  // 记录追踪的装甲板 ID
+    tracked_state_id_ = 0;         // 当前观测装甲板定义为相对序号 0
+    tracked_detector_id_ = armor.id;  // detector 线程 ID 仅用于跨帧关联
 
     last_update_time_ = timestamp;
     initialized_ = true;
@@ -83,8 +84,8 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
     ekf_.predict_forward_scaled(predict_func, Q);
 
     // 2. 跳变检测 (在 predict 之后，观测更新之前)
-    int new_tracked_id;
-    detect_and_handle_jump(armor, new_tracked_id);
+    int new_tracked_state_id;
+    detect_and_handle_jump(armor, new_tracked_state_id);
 
     // 3. 观测的装甲板朝向 (INWARD → OUTWARD)
     double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
@@ -121,8 +122,9 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
         chi2_threshold, max_reject, q_scale_increase, q_scale_decay
     );
 
-    // 5. 更新追踪 ID (在 EKF 更新之后，与 LmtdMotion 一致)
-    tracked_armor_id_ = new_tracked_id;
+    // 5. 更新追踪状态 (在 EKF 更新之后，与 LmtdMotion 一致)
+    tracked_state_id_ = new_tracked_state_id;
+    tracked_detector_id_ = armor.id;
 
     // 处理更新结果
     if (status == aimer::filter::UpdateStatus::RESET) {
@@ -130,7 +132,8 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
         double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
         another_r_ = init_r;
         another_dz_ = 0;
-        tracked_armor_id_ = armor.id;  // 重置时也更新 ID
+        tracked_state_id_ = 0;
+        tracked_detector_id_ = armor.id;
         debug::print(debug::PrintMode::WARNING, "SpinMotion",
             "EKF reset due to {} consecutive rejections", max_reject);
     } else if (status == aimer::filter::UpdateStatus::REJECTED) {
@@ -197,7 +200,8 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 
         another_r_ = init_r;  // 两个半径初始相同
         another_dz_ = 0;
-        tracked_armor_id_ = primary.id;  // 记录追踪 ID
+        tracked_state_id_ = 0;
+        tracked_detector_id_ = primary.id;
 
         last_update_time_ = timestamp;
         initialized_ = true;
@@ -214,8 +218,8 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     ekf_.predict_forward_scaled(predict_func, Q);
 
     // 2. 跳变检测 (在 predict 之后)
-    int new_tracked_id;
-    detect_and_handle_jump(primary, new_tracked_id);
+    int new_tracked_state_id;
+    detect_and_handle_jump(primary, new_tracked_state_id);
 
     // 3. 用主装甲板做观测更新
     const auto& obs = primary.observation;
@@ -258,16 +262,20 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
         double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
         another_r_ = init_r;
         another_dz_ = 0;
-        tracked_armor_id_ = primary.id;  // 重置时也更新 ID
+        tracked_state_id_ = 0;
+        tracked_detector_id_ = primary.id;
         debug::print(debug::PrintMode::WARNING, "SpinMotion",
             "EKF reset due to {} consecutive rejections (dual armor)", max_reject);
-    } else if (status == aimer::filter::UpdateStatus::REJECTED) {
-        debug::print(debug::PrintMode::DEBUG, "SpinMotion",
-            "Observation rejected (dual armor), q_scale={:.2f}", ekf_.get_q_scale());
-    }
+    } else {
+        // 更新追踪状态 (在 EKF 更新之后，与 LmtdMotion 一致)
+        tracked_state_id_ = new_tracked_state_id;
+        tracked_detector_id_ = primary.id;
 
-    // 更新追踪 ID (在 EKF 更新之后，与 LmtdMotion 一致)
-    tracked_armor_id_ = new_tracked_id;
+        if (status == aimer::filter::UpdateStatus::REJECTED) {
+            debug::print(debug::PrintMode::DEBUG, "SpinMotion",
+                "Observation rejected (dual armor), q_scale={:.2f}", ekf_.get_q_scale());
+        }
+    }
 
     // 后处理
     x = ekf_.get_x();
@@ -288,11 +296,11 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     last_update_time_ = timestamp;
 }
 
-bool SpinMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id) {
-    out_tracked_id = armor.id;
+bool SpinMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked_state_id) {
+    out_tracked_state_id = tracked_state_id_;
 
-    // 如果 ID 相同，没有跳变
-    if (armor.id == tracked_armor_id_) {
+    // detector ID 相同，认为是同一物理装甲板，序号不变
+    if (armor.id == tracked_detector_id_) {
         return false;
     }
 
@@ -318,6 +326,10 @@ bool SpinMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
         }
     }
 
+    // 计算新的追踪序号 (0..N-1)
+    int new_state_id = (tracked_state_id_ + most_like_index) % armor_num_;
+    out_tracked_state_id = new_state_id;
+
     if (most_like_index == 0) {
         // 没有实际跳变，只是 ID 变了
         return false;
@@ -326,7 +338,7 @@ bool SpinMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
     // 真的跳变了
     debug::print(debug::PrintMode::DEBUG, "SpinMotion",
         "Jump detected: {} -> {}, index={}, state_theta={:.1f}°, new_orient={:.1f}°",
-        tracked_armor_id_, armor.id, most_like_index,
+        tracked_state_id_, armor.id, most_like_index,
         state_theta * 180.0 / M_PI, new_orient * 180.0 / M_PI);
 
     // 4装甲板: 奇数跳变交换半径和高度差
@@ -402,6 +414,8 @@ void SpinMotion::notify_jump(int jump_index, const ArmorData& new_armor) {
         new_theta * 180.0 / M_PI, x[spin_model::R]);
 
     ekf_.set_x(x);
+    tracked_state_id_ = (tracked_state_id_ + jump_index) % armor_num_;
+    tracked_detector_id_ = new_armor.id;
 }
 
 SpinMotion::MatrixXX SpinMotion::build_Q(double dt) const {
@@ -543,14 +557,16 @@ void SpinMotion::output_to_plotter(const std::string& prefix) const {
     plotter::add(prefix + "/dz", x[spin_model::DZ]);
     plotter::add(prefix + "/another_r", another_r_);
     plotter::add(prefix + "/another_dz", another_dz_);
-    plotter::add(prefix + "/tracked_id", tracked_armor_id_);
+    plotter::add(prefix + "/tracked_id", tracked_state_id_);
+    plotter::add(prefix + "/tracked_detector_id", tracked_detector_id_);
 }
 
 void SpinMotion::reset() {
     initialized_ = false;
     another_dz_ = 0;
     another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.init_r");
-    tracked_armor_id_ = -1;  // 重置追踪 ID
+    tracked_state_id_ = 0;
+    tracked_detector_id_ = -1;
 }
 
 SpinMotion::VectorX SpinMotion::build_reset_state(const ArmorData& armor) const {

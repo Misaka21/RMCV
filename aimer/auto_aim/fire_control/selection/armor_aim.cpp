@@ -41,19 +41,20 @@ ArmorAimResult ArmorAim::compute_non_spin(
     ArmorAimResult result;
     result.mode = AimMode::DIRECT;
 
-    // 使用推荐装甲板
-    const auto* armor = vehicle.get_recommended_armor();
-    if (!armor) {
+    // 使用推荐装甲板索引 (统一语义: armor_idx 是 vehicle.armors[] 的下标)
+    int armor_idx = vehicle.recommended_armor_idx;
+    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
         return result;
     }
+    const auto& armor = vehicle.armors[armor_idx];
 
     result.valid = true;
-    result.armor_idx = armor->id;
-    result.target_pos = armor->predict_position(predict_dt);
-    result.target_vel = armor->velocity;
-    result.z_to_v = armor->z_to_v;
-    result.armor_width = armor->width();
-    result.armor_height = armor->height();
+    result.armor_idx = armor_idx;
+    result.target_pos = vehicle.predict_armor_position(armor_idx, predict_dt);
+    result.target_vel = armor.velocity;
+    result.z_to_v = armor.z_to_v;
+    result.armor_width = armor.width();
+    result.armor_height = armor.height();
 
     return result;
 }
@@ -200,23 +201,20 @@ Eigen::Vector3d ArmorAim::compute_armor_velocity(
     int armor_idx
 ) const
 {
+    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
+        return Eigen::Vector3d::Zero();
+    }
+
     if (!vehicle.spin.active) {
         return vehicle.armors[armor_idx].velocity;
     }
 
-    // 陀螺模式: v = ω × r
+    // 陀螺模式: v = v_center + ω × (armor_pos - center)
     double omega = vehicle.spin.omega;
-    double r = (armor_idx % 2 == 0) ? vehicle.spin.radius : vehicle.spin.radius_2;
-
-    // 装甲板相对于中心的位置角度
-    double armor_angle = vehicle.spin.phase + armor_idx * (2.0 * M_PI / vehicle.armor_count);
-
-    // 切向速度 (垂直于半径方向)
-    // v_x = -ω * r * sin(θ)
-    // v_y = +ω * r * cos(θ)
+    Eigen::Vector3d offset = vehicle.armors[armor_idx].position - vehicle.center;
     Eigen::Vector3d tangent_vel(
-        -omega * r * std::sin(armor_angle),
-        +omega * r * std::cos(armor_angle),
+        -omega * offset.y(),
+        +omega * offset.x(),
         0
     );
 

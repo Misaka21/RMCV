@@ -85,8 +85,18 @@ TargetSelection TargetSelector::select(
 
     // 当前目标无效，检查是否在保持期内
     if (current_target_id_ >= 0 && (current_time - last_seen_time_) < keep_time) {
-        // 在保持期内，不切换目标，返回空结果
-        // 这样 FireController 会使用上次的预测继续追踪
+        // 在保持期内，不切换目标；若模型仍有效则继续输出当前目标
+        if (snapshot.is_valid(current_target_id_)) {
+            const auto& vehicle = snapshot.vehicles[current_target_id_];
+            int armor_idx = vehicle.recommended_armor_idx;
+            if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
+                armor_idx = 0;
+            }
+
+            result.has_target = true;
+            result.target_id = current_target_id_;
+            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+        }
         return result;
     }
 

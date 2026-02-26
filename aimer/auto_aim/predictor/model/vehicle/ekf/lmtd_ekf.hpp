@@ -203,7 +203,7 @@ public:
     double get_radius() const override { return ekf_.get_x()[lmtd_model::R]; }
     double get_another_radius() const override { return another_r_; }
     double get_dz() const override { return dz_; }
-    int get_tracked_id() const override { return tracked_armor_id_; }
+    int get_tracked_id() const override { return tracked_state_id_; }
 
     std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
     void output_to_plotter(const std::string& prefix) const override;
@@ -242,14 +242,14 @@ private:
     /**
      * @brief 内部跳变检测和处理 (LMTD 核心 trick)
      *
-     * 通过比较 tracked_armor_id 和当前观测的 armor.id 判断是否跳变
+     * 通过比较 tracked_detector_id 和当前观测的 armor.id 判断是否跳变
      * 如果跳变，计算跳了几块装甲板，交换半径/高度差
      *
      * @param armor 当前观测的装甲板
-     * @param out_tracked_id [输出] 新的 tracked_armor_id (EKF 更新后才真正更新成员)
+     * @param out_tracked_state_id [输出] 新的追踪装甲板序号 (EKF 更新后才真正更新成员)
      * @return 是否发生跳变
      */
-    bool detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id);
+    bool detect_and_handle_jump(const ArmorData& armor, int& out_tracked_state_id);
 
     /**
      * @brief 选择要追踪的装甲板 (多装甲板时)
@@ -276,7 +276,8 @@ private:
     double dz_ = 0;             // 高度差 (当前 z - 下一块 z)
 
     // ==================== 追踪状态 ====================
-    int tracked_armor_id_ = -1;  // 当前追踪的装甲板 ID (用于内部跳变检测)
+    int tracked_state_id_ = 0;    // 当前追踪装甲板序号 (0..armor_num-1)
+    int tracked_detector_id_ = -1;  // ArmorIdentifier 的线程 ID，仅用于跨帧关联
 };
 
 // ============================================================================

@@ -3,7 +3,7 @@
  * @brief LMTD 整车旋转模型实现
  *
  * 关键 trick (来自 rm.cv.fans):
- * 1. 内部跳变检测 - 通过 tracked_armor_id 判断
+ * 1. 内部跳变检测 - 通过 tracked_detector_id 判断同一物理板
  * 2. 装甲板选择 - 优先保持追踪 + keep_tracking_area_ratio
  * 3. credit 时间判断 - 超时重新 init
  * 4. 位置 yaw 也要连续化 - 防止 ±π 跳变
@@ -62,7 +62,8 @@ void LmtdMotion::init(const ArmorData& armor, double timestamp) {
 
     // 重置状态
     dz_ = 0;
-    tracked_armor_id_ = armor.id;  // 记录追踪的装甲板 ID
+    tracked_state_id_ = 0;
+    tracked_detector_id_ = armor.id;
 
     last_update_time_ = timestamp;
     predict_t_ = timestamp;
@@ -75,13 +76,12 @@ bool LmtdMotion::credit(double current_time) const {
     return current_time - update_t_ <= credit_dt;
 }
 
-bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked_id) {
-    // 返回新的 tracked_id，但不在这里更新成员变量
-    // 参考 rm.cv.fans: tracked_armor_id 在 EKF 更新之后才更新
-    out_tracked_id = armor.id;
+bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked_state_id) {
+    // 返回新的追踪装甲板序号，但不在这里更新成员变量
+    out_tracked_state_id = tracked_state_id_;
 
-    // 如果 ID 相同，没有跳变
-    if (armor.id == tracked_armor_id_) {
+    // detector ID 相同，认为是同一物理装甲板
+    if (armor.id == tracked_detector_id_) {
         return false;
     }
 
@@ -108,6 +108,9 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
         }
     }
 
+    int new_state_id = (tracked_state_id_ + most_like_index) % armor_num_;
+    out_tracked_state_id = new_state_id;
+
     if (most_like_index == 0) {
         // 没有实际跳变，只是 ID 变了
         return false;
@@ -116,7 +119,7 @@ bool LmtdMotion::detect_and_handle_jump(const ArmorData& armor, int& out_tracked
     // 真的跳变了
     debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
         "Jump detected: {} -> {}, index={}, state_theta={:.1f}°, new_orient={:.1f}°",
-        tracked_armor_id_, armor.id, most_like_index,
+        tracked_state_id_, armor.id, most_like_index,
         state_theta * 180.0 / M_PI, new_orient * 180.0 / M_PI);
 
     // 4装甲板: 奇数跳变交换半径和高度差
@@ -180,7 +183,7 @@ int LmtdMotion::select_armor_to_track(const std::vector<ArmorData>& armors) cons
             max_area = area;
             max_area_idx = static_cast<int>(i);
         }
-        if (armors[i].id == tracked_armor_id_) {
+        if (armors[i].id == tracked_detector_id_) {
             tracked_idx = static_cast<int>(i);
             tracked_area = area;
         }
@@ -212,9 +215,9 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
     predict_t_ = timestamp;
 
     // 内部跳变检测 (LMTD 核心 trick)
-    // 参考 rm.cv.fans: tracked_armor_id 在 EKF 更新后才更新
-    int new_tracked_id;
-    detect_and_handle_jump(armor, new_tracked_id);
+    // 参考 rm.cv.fans: tracked_state_id 在 EKF 更新后才更新
+    int new_tracked_state_id;
+    detect_and_handle_jump(armor, new_tracked_state_id);
 
     // 构建观测
     const auto& obs = armor.observation;
@@ -241,8 +244,9 @@ void LmtdMotion::update(const ArmorData& armor, double timestamp) {
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
     ekf_.update_forward(measure_func, z, R);
 
-    // 参考 rm.cv.fans: EKF 更新后才更新 tracked_armor_id
-    tracked_armor_id_ = new_tracked_id;
+    // 参考 rm.cv.fans: EKF 更新后才更新追踪状态
+    tracked_state_id_ = new_tracked_state_id;
+    tracked_detector_id_ = armor.id;
 
     // 后处理
     x = ekf_.get_x();
@@ -306,7 +310,8 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
 
         ekf_.init(x0);
 
-        tracked_armor_id_ = primary.id;
+        tracked_state_id_ = 0;
+        tracked_detector_id_ = primary.id;
 
         debug::print(debug::PrintMode::DEBUG, "LmtdMotion",
             "Init with dual armors: r={:.3f}, another_r={:.3f}, dz={:.3f}",
@@ -329,8 +334,8 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     predict_t_ = timestamp;
 
     // 跳变检测
-    int new_tracked_id;
-    detect_and_handle_jump(primary, new_tracked_id);
+    int new_tracked_state_id;
+    detect_and_handle_jump(primary, new_tracked_state_id);
 
     // 观测更新 (用主装甲板)
     const auto& obs = primary.observation;
@@ -354,8 +359,9 @@ void LmtdMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     MatrixZZ R = build_R(obs.z[obs::DIST], primary.z_to_v(), 2);
     ekf_.update_forward(measure_func, z, R);
 
-    // EKF 更新后才更新 tracked_armor_id
-    tracked_armor_id_ = new_tracked_id;
+    // EKF 更新后才更新追踪状态
+    tracked_state_id_ = new_tracked_state_id;
+    tracked_detector_id_ = primary.id;
 
     // rm.cv.fans 原版设计：不做几何融合，让 EKF 自己收敛半径
     // 半径通过 EKF 观测模型自然收敛
@@ -504,13 +510,15 @@ void LmtdMotion::output_to_plotter(const std::string& prefix) const {
     plotter::add(prefix + "/r", x[lmtd_model::R]);
     plotter::add(prefix + "/another_r", another_r_);
     plotter::add(prefix + "/dz", dz_);
-    plotter::add(prefix + "/tracked_id", tracked_armor_id_);
+    plotter::add(prefix + "/tracked_id", tracked_state_id_);
+    plotter::add(prefix + "/tracked_detector_id", tracked_detector_id_);
 }
 
 void LmtdMotion::reset() {
     initialized_ = false;
     dz_ = 0;
-    tracked_armor_id_ = -1;
+    tracked_state_id_ = 0;
+    tracked_detector_id_ = -1;
     another_r_ = runtime_param::get_param<double>("AutoAim.Predictor.LmtdEKF.init_r");
 }
 

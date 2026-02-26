@@ -172,7 +172,7 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     if (get_use_double_z_fit()) {
         apply_vehicle_double_fit(filtered);
         std::sort(filtered.begin(), filtered.end(), [](const auto& a, const auto& b) {
-            return a.z_to_v < b.z_to_v;
+            return std::abs(a.z_to_v) < std::abs(b.z_to_v);
         });
     }
 
@@ -190,6 +190,9 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
 
     // 3. ArmorMotion: EKF 滤波
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
+    std::sort(armors_with_id.begin(), armors_with_id.end(), [](const auto& a, const auto& b) {
+        return std::abs(a.z_to_v()) < std::abs(b.z_to_v());
+    });
     armor_motion_.update(armors_with_id, timestamp);
 
     // 4. 整车 EKF 滤波: 使用统一接口
@@ -371,7 +374,7 @@ std::vector<ArmorObservation> VehicleModel::filter(
 
     // 按 z_to_v 排序 (正对的优先)
     std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
-        return a.z_to_v < b.z_to_v;
+        return std::abs(a.z_to_v) < std::abs(b.z_to_v);
     });
 
     // 最多保留 4 块装甲板
@@ -406,9 +409,6 @@ VehicleState VehicleModel::predict(double timestamp) const {
         vs.center = motion_->predict_center(dt);
         vs.velocity = motion_->get_velocity();
 
-        // 获取当前追踪装甲板的 ID
-        int tracking_id = motion_->get_tracked_id();
-
         // 预测所有装甲板位置
         int armor_num = motion_->armor_num();
         vs.armor_count = armor_num;
@@ -420,7 +420,8 @@ VehicleState VehicleModel::predict(double timestamp) const {
 
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
-            as.id = (i == 0) ? tracking_id : -1;  // 只有当前追踪的有 ID
+            // 统一语义: ArmorState.id 表示当前数组中的装甲板索引
+            as.id = i;
 
             as.position = motion_->predict_armor_pos(i, dt);
             as.velocity = vs.velocity;  // 近似用中心速度
@@ -431,8 +432,9 @@ VehicleState VehicleModel::predict(double timestamp) const {
             // 评分: 越正对越好 (用 cos(装甲板朝向 - 视线方向))
             double armor_yaw = as.yaw;
             double view_yaw = std::atan2(as.position.y(), as.position.x());
-            double angle_diff = std::abs(aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI));
-            as.score = std::cos(angle_diff);
+            // 保留符号: z_to_v 的方向信息会被 INDIRECT 选板逻辑使用
+            double angle_diff = aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI);
+            as.score = std::cos(std::abs(angle_diff));
 
             // 装甲板类型和朝向角
             as.type = correct_armor_type(ArmorType::SMALL, enemy_type_);
