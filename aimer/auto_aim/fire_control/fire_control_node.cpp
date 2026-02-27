@@ -17,6 +17,7 @@
 #include "umt/BasicObjManager.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
+#include "plugin/webview/dashboard.hpp"
 
 namespace autoaim::fire_control {
 
@@ -177,6 +178,12 @@ void fire_control_run(const std::string& /* config_path */) {
         if (should_write) {
             fire_cmd->get() = cmd;
         }
+
+        // 遥测数据
+        dashboard::set("fire.yaw", cmd.yaw);
+        dashboard::set("fire.pitch", cmd.pitch);
+        dashboard::set("fire.control", cmd.control_enabled ? 1 : 0);
+        dashboard::set("fire.fire_now", cmd.fire_now ? 1 : 0);
 
         // 等待下一周期
         next_time += period;

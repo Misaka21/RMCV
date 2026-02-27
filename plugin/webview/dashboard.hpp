@@ -11,6 +11,7 @@
 
 #ifdef ENABLE_WEBVIEW
 
+#include <atomic>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
@@ -35,6 +36,7 @@ public:
     void set(const std::string& key, const T& value) {
         std::unique_lock lock(mutex_);
         data_[key] = value;
+        version_.fetch_add(1, std::memory_order_relaxed);
     }
 
     // 获取值
@@ -64,16 +66,23 @@ public:
         return data_;
     }
 
+    // 版本号 (每次 set 递增)
+    uint64_t version() const {
+        return version_.load(std::memory_order_relaxed);
+    }
+
     // 清空
     void clear() {
         std::unique_lock lock(mutex_);
         data_.clear();
+        version_.fetch_add(1, std::memory_order_relaxed);
     }
 
 private:
     Registry() = default;
     mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, Value> data_;
+    std::atomic<uint64_t> version_{0};
 };
 
 // 便捷函数
@@ -92,6 +101,10 @@ inline std::vector<std::string> keys() {
 
 inline std::unordered_map<std::string, Value> all() {
     return Registry::instance().all();
+}
+
+inline uint64_t version() {
+    return Registry::instance().version();
 }
 
 }  // namespace dashboard

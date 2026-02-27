@@ -62,6 +62,8 @@ void start_predictor_node() {
             dashboard::set("buff_predictor.fps", stats.last_fps);
             dashboard::set("buff_predictor.valid", snap.valid ? 1 : 0);
             dashboard::set("buff_predictor.lit_count", snap.lit_count);
+            dashboard::set("buff_predictor.omega", snap.omega);
+            dashboard::set("buff_predictor.model", static_cast<int>(snap.model));
 
         } catch (const umt::MessageError_Timeout&) {
             // continue

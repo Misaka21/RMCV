@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RMCV Dashboard</title>
     <script src="{{ url_for('static', filename='css/tailwind.js') }}"></script>
+    <!-- uPlot: 尝试本地，回退 CDN -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/uplot.min.css') }}"
+          onerror="this.href='https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css'">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -24,23 +27,23 @@
         body { font-family: 'Consolas', 'Monaco', monospace; }
         .data-row:hover { background: rgba(255,255,255,0.05); }
         .resizer {
-            width: 4px;
-            cursor: col-resize;
-            background: transparent;
-            transition: background 0.2s;
+            width: 4px; cursor: col-resize; background: transparent; transition: background 0.2s;
         }
-        .resizer:hover {
-            background: rgba(59, 130, 246, 0.5);
+        .resizer:hover { background: rgba(59, 130, 246, 0.5); }
+        .resizer.resizing { background: rgb(59, 130, 246); }
+        .resizer-h {
+            height: 4px; cursor: row-resize; background: transparent; transition: background 0.2s;
         }
-        .resizer.resizing {
-            background: rgb(59, 130, 246);
-        }
-        #log-panel {
-            transition: height 0.3s ease;
-        }
-        #log {
-            transition: opacity 0.2s ease;
-        }
+        .resizer-h:hover { background: rgba(59, 130, 246, 0.5); }
+        .resizer-h.resizing { background: rgb(59, 130, 246); }
+        #log-panel { transition: height 0.3s ease; }
+        #log { transition: opacity 0.2s ease; }
+        /* 图表区域 */
+        .chart-var-item { padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; user-select: none; }
+        .chart-var-item.selected { background: rgba(59, 130, 246, 0.3); border: 1px solid rgba(59, 130, 246, 0.6); }
+        .chart-var-item:not(.selected) { background: rgba(255,255,255,0.05); border: 1px solid transparent; }
+        .chart-var-item:hover:not(.selected) { background: rgba(255,255,255,0.1); }
+        .u-wrap { background: transparent !important; }
     </style>
 </head>
 <body class="bg-background text-foreground h-screen flex flex-col overflow-hidden">
@@ -49,6 +52,7 @@
         <div class="flex items-center gap-3">
             <span class="text-lg font-bold">RMCV</span>
             <span id="fps" class="text-sm text-muted-foreground">--</span>
+            <span id="transport" class="text-xs text-muted-foreground px-1.5 py-0.5 rounded bg-muted">--</span>
         </div>
         <div class="flex items-center gap-3">
             <select id="topic-select" class="bg-muted border border-border rounded px-2 py-1 text-sm">
@@ -58,8 +62,8 @@
         </div>
     </header>
 
-    <!-- Main Content -->
-    <div class="flex-1 flex min-h-0">
+    <!-- Main Content (top) -->
+    <div id="top-area" class="flex min-h-0" style="flex: 1 1 60%;">
         <!-- Left: Image -->
         <div id="left-panel" class="border-r border-border p-2 flex flex-col" style="width: 50%;">
             <div class="flex-1 bg-black rounded flex items-center justify-center overflow-hidden">
@@ -67,10 +71,8 @@
                 <span id="video-placeholder" class="text-muted-foreground text-sm">Select topic to view</span>
             </div>
         </div>
-
         <!-- Resizer -->
         <div id="resizer" class="resizer shrink-0"></div>
-
         <!-- Right: Data -->
         <div id="right-panel" class="flex flex-col min-h-0" style="flex: 1;">
             <div class="flex-1 overflow-auto p-2">
@@ -81,11 +83,27 @@
         </div>
     </div>
 
+    <!-- Horizontal Resizer -->
+    <div id="resizer-h" class="resizer-h shrink-0 border-t border-border"></div>
+
+    <!-- Chart Area (bottom) -->
+    <div id="chart-area" class="flex flex-col shrink-0 border-t border-border" style="height: 240px;">
+        <!-- 变量选择栏 -->
+        <div class="px-2 py-1 flex items-center gap-1 border-b border-border overflow-x-auto shrink-0" style="min-height: 28px;">
+            <span class="text-xs text-muted-foreground shrink-0 mr-1">Chart:</span>
+            <div id="chart-vars" class="flex gap-1 flex-wrap"></div>
+        </div>
+        <!-- 图表容器 -->
+        <div id="chart-container" class="flex-1 min-h-0 relative">
+            <div id="chart-mount" class="absolute inset-0"></div>
+        </div>
+    </div>
+
     <!-- Bottom: Log -->
-    <div id="log-panel" class="border-t border-border shrink-0 flex flex-col" style="height: 8rem;">
+    <div id="log-panel" class="border-t border-border shrink-0 flex flex-col" style="height: 5rem;">
         <div class="px-2 py-1 text-xs text-muted-foreground border-b border-border flex justify-between items-center">
             <div class="flex items-center gap-2">
-                <button id="toggle-log" class="hover:text-foreground">▼</button>
+                <button id="toggle-log" class="hover:text-foreground">&#x25BC;</button>
                 <span>Log</span>
             </div>
             <button id="clear-log" class="hover:text-foreground">Clear</button>
@@ -93,207 +111,598 @@
         <div id="log" class="flex-1 overflow-auto p-2 text-xs font-mono"></div>
     </div>
 
+    <!-- uPlot: 尝试本地，回退 CDN -->
+    <script src="{{ url_for('static', filename='js/uplot.min.js') }}"
+            onerror="
+                var s=document.createElement('script');
+                s.src='https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js';
+                document.head.appendChild(s);
+            "></script>
+
     <script>
-        // Resizer logic
-        const resizer = document.getElementById('resizer');
-        const leftPanel = document.getElementById('left-panel');
-        const rightPanel = document.getElementById('right-panel');
+    // ======================== Minimal msgpack decoder ========================
+    // 只解码我们需要的类型: map, str, int, float, double, bool, nil
+    const MsgPack = (() => {
+        function decode(buffer) {
+            const view = new DataView(buffer.buffer || buffer, buffer.byteOffset || 0, buffer.byteLength);
+            let offset = 0;
 
-        let isResizing = false;
-        let lastX = 0;
+            function read() {
+                const b = view.getUint8(offset++);
+                // positive fixint
+                if (b <= 0x7f) return b;
+                // fixmap
+                if ((b & 0xf0) === 0x80) return readMap(b & 0x0f);
+                // fixarray
+                if ((b & 0xf0) === 0x90) return readArray(b & 0x0f);
+                // fixstr
+                if ((b & 0xe0) === 0xa0) return readStr(b & 0x1f);
+                // negative fixint
+                if (b >= 0xe0) return b - 256;
 
-        resizer.addEventListener('mousedown', (e) => {
-            isResizing = true;
+                switch (b) {
+                    case 0xc0: return null;
+                    case 0xc2: return false;
+                    case 0xc3: return true;
+                    // bin8/16/32
+                    case 0xc4: { const n = view.getUint8(offset++); return readBin(n); }
+                    case 0xc5: { const n = view.getUint16(offset); offset += 2; return readBin(n); }
+                    case 0xc6: { const n = view.getUint32(offset); offset += 4; return readBin(n); }
+                    // float32
+                    case 0xca: { const v = view.getFloat32(offset); offset += 4; return v; }
+                    // float64
+                    case 0xcb: { const v = view.getFloat64(offset); offset += 8; return v; }
+                    // uint8/16/32/64
+                    case 0xcc: return view.getUint8(offset++);
+                    case 0xcd: { const v = view.getUint16(offset); offset += 2; return v; }
+                    case 0xce: { const v = view.getUint32(offset); offset += 4; return v; }
+                    case 0xcf: { const hi = view.getUint32(offset); const lo = view.getUint32(offset+4); offset += 8; return hi * 0x100000000 + lo; }
+                    // int8/16/32/64
+                    case 0xd0: { const v = view.getInt8(offset++); return v; }
+                    case 0xd1: { const v = view.getInt16(offset); offset += 2; return v; }
+                    case 0xd2: { const v = view.getInt32(offset); offset += 4; return v; }
+                    case 0xd3: { const hi = view.getInt32(offset); const lo = view.getUint32(offset+4); offset += 8; return hi * 0x100000000 + lo; }
+                    // str8/16/32
+                    case 0xd9: { const n = view.getUint8(offset++); return readStr(n); }
+                    case 0xda: { const n = view.getUint16(offset); offset += 2; return readStr(n); }
+                    case 0xdb: { const n = view.getUint32(offset); offset += 4; return readStr(n); }
+                    // array16/32
+                    case 0xdc: { const n = view.getUint16(offset); offset += 2; return readArray(n); }
+                    case 0xdd: { const n = view.getUint32(offset); offset += 4; return readArray(n); }
+                    // map16/32
+                    case 0xde: { const n = view.getUint16(offset); offset += 2; return readMap(n); }
+                    case 0xdf: { const n = view.getUint32(offset); offset += 4; return readMap(n); }
+                    default: return undefined;
+                }
+            }
+
+            function readStr(n) {
+                const bytes = new Uint8Array(buffer.buffer || buffer, (buffer.byteOffset || 0) + offset, n);
+                offset += n;
+                return new TextDecoder().decode(bytes);
+            }
+
+            function readBin(n) {
+                const bytes = new Uint8Array(buffer.buffer || buffer, (buffer.byteOffset || 0) + offset, n);
+                offset += n;
+                return bytes.slice();
+            }
+
+            function readMap(n) {
+                const obj = {};
+                for (let i = 0; i < n; i++) {
+                    const key = read();
+                    obj[key] = read();
+                }
+                return obj;
+            }
+
+            function readArray(n) {
+                const arr = new Array(n);
+                for (let i = 0; i < n; i++) arr[i] = read();
+                return arr;
+            }
+
+            return read();
+        }
+        return { decode };
+    })();
+
+    // ======================== 列分隔拖拽 ========================
+    const resizer = document.getElementById('resizer');
+    const leftPanel = document.getElementById('left-panel');
+    let isResizing = false, lastX = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true; lastX = e.clientX;
+        resizer.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const container = leftPanel.parentElement;
+        const cw = container.offsetWidth;
+        const lw = leftPanel.offsetWidth + (e.clientX - lastX);
+        if (lw >= cw * 0.15 && lw <= cw * 0.85) {
+            leftPanel.style.width = (lw / cw * 100) + '%';
             lastX = e.clientX;
-            resizer.classList.add('resizing');
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
+        }
+    });
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            resizer.classList.remove('resizing');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+
+    // ======================== 行分隔拖拽 (图表高度) ========================
+    const resizerH = document.getElementById('resizer-h');
+    const topArea = document.getElementById('top-area');
+    const chartArea = document.getElementById('chart-area');
+    let isResizingH = false, lastY = 0;
+
+    resizerH.addEventListener('mousedown', (e) => {
+        isResizingH = true; lastY = e.clientY;
+        resizerH.classList.add('resizing');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizingH) return;
+        const dy = e.clientY - lastY;
+        const newChartH = chartArea.offsetHeight - dy;
+        if (newChartH >= 100 && newChartH <= window.innerHeight * 0.6) {
+            chartArea.style.height = newChartH + 'px';
+            lastY = e.clientY;
+        }
+    });
+    document.addEventListener('mouseup', () => {
+        if (isResizingH) {
+            isResizingH = false;
+            resizerH.classList.remove('resizing');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+
+    // ======================== DOM 元素引用 ========================
+    const topicSelect = document.getElementById('topic-select');
+    const video = document.getElementById('video');
+    const placeholder = document.getElementById('video-placeholder');
+    const statusDot = document.getElementById('status');
+    const dataTable = document.getElementById('data-table');
+    const logDiv = document.getElementById('log');
+    const fpsEl = document.getElementById('fps');
+    const transportEl = document.getElementById('transport');
+    const logPanel = document.getElementById('log-panel');
+    const toggleLogBtn = document.getElementById('toggle-log');
+    const chartVarsDiv = document.getElementById('chart-vars');
+    const chartMount = document.getElementById('chart-mount');
+
+    let lastUpdate = Date.now();
+    let frameCount = 0;
+    let logCollapsed = false;
+
+    // ======================== Log ========================
+    toggleLogBtn.onclick = () => {
+        logCollapsed = !logCollapsed;
+        logPanel.style.height = logCollapsed ? '1.5rem' : '5rem';
+        logDiv.style.display = logCollapsed ? 'none' : 'block';
+        toggleLogBtn.innerHTML = logCollapsed ? '&#x25B6;' : '&#x25BC;';
+    };
+
+    function log(msg, type = 'info') {
+        const time = new Date().toLocaleTimeString();
+        const colors = { info: 'text-gray-400', warn: 'text-yellow-400', error: 'text-red-400' };
+        const d = document.createElement('div');
+        d.className = colors[type] || colors.info;
+        d.textContent = `[${time}] ${msg}`;
+        logDiv.appendChild(d);
+        // 保留最近200条
+        while (logDiv.childElementCount > 200) logDiv.removeChild(logDiv.firstChild);
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+    document.getElementById('clear-log').onclick = () => logDiv.innerHTML = '';
+
+    // ======================== Topics ========================
+    const defaultTopics = ['/detector/debug', '/predictor/debug'];
+    const knownTopics = new Set(defaultTopics);
+
+    async function loadTopics() {
+        try {
+            const res = await fetch('/api/topics');
+            const topics = await res.json();
+            if (Array.isArray(topics)) topics.forEach(t => knownTopics.add(t));
+        } catch (e) { /* ignore */ }
+
+        topicSelect.innerHTML = '<option value="">-- Select topic --</option>';
+        knownTopics.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t; opt.textContent = t;
+            topicSelect.appendChild(opt);
         });
+    }
+    setInterval(loadTopics, 5000);
 
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
+    topicSelect.onchange = () => {
+        const topic = topicSelect.value;
+        if (!topic) {
+            video.classList.add('hidden'); placeholder.classList.remove('hidden');
+            statusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
+            return;
+        }
+        const path = topic.startsWith('/') ? topic.substring(1) : topic;
+        video.src = '/api/video/' + path;
+        video.classList.remove('hidden'); placeholder.classList.add('hidden');
+        statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500';
+        log(`Switched to topic: ${topic}`);
+        video.onload = () => { statusDot.className = 'w-2 h-2 rounded-full bg-green-500'; };
+        video.onerror = () => { statusDot.className = 'w-2 h-2 rounded-full bg-red-500'; };
+    };
 
-            const container = leftPanel.parentElement;
-            const containerWidth = container.offsetWidth;
-            const leftWidth = leftPanel.offsetWidth + (e.clientX - lastX);
+    // ======================== 增量 DOM 更新 ========================
+    const rowCache = {};  // key -> { valTd: Element }
+    let sortedKeys = [];
 
-            // Limit to 20%-80%
-            const minWidth = containerWidth * 0.2;
-            const maxWidth = containerWidth * 0.8;
+    function formatValue(v) {
+        if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(3);
+        if (typeof v === 'boolean') return v ? 'true' : 'false';
+        if (v === null || v === undefined) return '--';
+        return String(v);
+    }
 
-            if (leftWidth >= minWidth && leftWidth <= maxWidth) {
-                const leftPercent = (leftWidth / containerWidth) * 100;
-                leftPanel.style.width = leftPercent + '%';
-                lastX = e.clientX;
+    function updateData(data) {
+        const keys = Object.keys(data).sort();
+        // 新增行
+        for (const k of keys) {
+            if (!rowCache[k]) {
+                const tr = document.createElement('tr');
+                tr.className = 'data-row border-b border-border/30';
+                const tdKey = document.createElement('td');
+                tdKey.className = 'py-1 px-2 text-muted-foreground';
+                tdKey.textContent = k;
+                const tdVal = document.createElement('td');
+                tdVal.className = 'py-1 px-2 text-right font-bold';
+                tr.appendChild(tdKey);
+                tr.appendChild(tdVal);
+                dataTable.appendChild(tr);
+                rowCache[k] = { valTd: tdVal };
             }
-        });
+            const fmt = formatValue(data[k]);
+            const td = rowCache[k].valTd;
+            if (td.textContent !== fmt) td.textContent = fmt;
+        }
 
-        document.addEventListener('mouseup', () => {
-            if (isResizing) {
-                isResizing = false;
-                resizer.classList.remove('resizing');
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-            }
-        });
+        // 更新图表变量列表
+        if (keys.length !== sortedKeys.length || keys.some((k, i) => k !== sortedKeys[i])) {
+            sortedKeys = keys;
+            updateChartVarList(keys, data);
+        }
+    }
 
-        // Main dashboard code
-        const topicSelect = document.getElementById('topic-select');
-        const video = document.getElementById('video');
-        const placeholder = document.getElementById('video-placeholder');
-        const statusDot = document.getElementById('status');
-        const dataTable = document.getElementById('data-table');
-        const logDiv = document.getElementById('log');
-        const fpsEl = document.getElementById('fps');
-        const logPanel = document.getElementById('log-panel');
-        const toggleLogBtn = document.getElementById('toggle-log');
+    // ======================== 图表系统 ========================
+    const CHART_WINDOW = 1000;  // 滚动窗口点数
+    const CHART_COLORS = [
+        '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#a855f7',
+        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'
+    ];
 
-        let lastUpdate = Date.now();
-        let frameCount = 0;
-        let logCollapsed = false;
+    let selectedVars = new Set();     // 选中的图表变量
+    let chartData = {};               // key -> Float64Array 环形缓冲
+    let chartHead = 0;                // 当前写入位置
+    let chartCount = 0;               // 已写入总数
+    let timeData = new Float64Array(CHART_WINDOW);  // 时间戳环形缓冲
+    let uplotInstance = null;
+    let chartDirty = false;
 
-        // Toggle log panel
-        toggleLogBtn.onclick = () => {
-            logCollapsed = !logCollapsed;
-            if (logCollapsed) {
-                logPanel.style.height = '1.5rem';
-                logDiv.style.display = 'none';
-                toggleLogBtn.textContent = '▶';
-            } else {
-                logPanel.style.height = '8rem';
-                logDiv.style.display = 'block';
-                toggleLogBtn.textContent = '▼';
-            }
+    function updateChartVarList(keys, data) {
+        // 只显示数值类型的变量
+        const numKeys = keys.filter(k => typeof data[k] === 'number');
+        chartVarsDiv.innerHTML = '';
+        for (const k of numKeys) {
+            const el = document.createElement('span');
+            el.className = 'chart-var-item' + (selectedVars.has(k) ? ' selected' : '');
+            el.textContent = k;
+            el.onclick = () => {
+                if (selectedVars.has(k)) selectedVars.delete(k);
+                else if (selectedVars.size < 10) selectedVars.add(k);
+                el.classList.toggle('selected');
+                rebuildChart();
+            };
+            chartVarsDiv.appendChild(el);
+        }
+    }
+
+    function appendToChart(data) {
+        const now = performance.now() / 1000;
+        timeData[chartHead] = now;
+
+        for (const k of selectedVars) {
+            if (!chartData[k]) chartData[k] = new Float64Array(CHART_WINDOW);
+            chartData[k][chartHead] = (typeof data[k] === 'number') ? data[k] : NaN;
+        }
+
+        chartHead = (chartHead + 1) % CHART_WINDOW;
+        if (chartCount < CHART_WINDOW) chartCount++;
+        chartDirty = true;
+    }
+
+    function getChartArrays() {
+        // 从环形缓冲提取有序数组
+        const len = chartCount;
+        const start = chartCount < CHART_WINDOW ? 0 : chartHead;
+        const ts = new Array(len);
+        const series = [];
+        const vars = Array.from(selectedVars);
+
+        for (let i = 0; i < len; i++) {
+            const idx = (start + i) % CHART_WINDOW;
+            ts[i] = timeData[idx];
+        }
+
+        for (const k of vars) {
+            const buf = chartData[k];
+            if (!buf) { series.push(new Array(len).fill(NaN)); continue; }
+            const arr = new Array(len);
+            for (let i = 0; i < len; i++) arr[i] = buf[(start + i) % CHART_WINDOW];
+            series.push(arr);
+        }
+
+        return { ts, series, vars };
+    }
+
+    function rebuildChart() {
+        if (uplotInstance) { uplotInstance.destroy(); uplotInstance = null; }
+        if (selectedVars.size === 0) return;
+
+        const { ts, series, vars } = getChartArrays();
+
+        const w = chartMount.clientWidth || 600;
+        const h = chartMount.clientHeight || 200;
+
+        if (typeof uPlot === 'undefined') {
+            // uPlot 不可用 - 用 canvas 降级
+            renderCanvasFallback(ts, series, vars, w, h);
+            return;
+        }
+
+        const opts = {
+            width: w, height: h,
+            cursor: { show: true },
+            legend: { show: true, live: true },
+            axes: [
+                { stroke: '#666', grid: { stroke: 'rgba(255,255,255,0.05)' } },
+                { stroke: '#666', grid: { stroke: 'rgba(255,255,255,0.05)' } }
+            ],
+            series: [
+                { label: 'Time' },
+                ...vars.map((v, i) => ({
+                    label: v,
+                    stroke: CHART_COLORS[i % CHART_COLORS.length],
+                    width: 1.5,
+                }))
+            ]
         };
 
-        // Log function
-        function log(msg, type = 'info') {
-            const time = new Date().toLocaleTimeString();
-            const colors = { info: 'text-gray-400', warn: 'text-yellow-400', error: 'text-red-400' };
-            logDiv.innerHTML += `<div class="${colors[type] || colors.info}">[${time}] ${msg}</div>`;
-            logDiv.scrollTop = logDiv.scrollHeight;
+        const plotData = [ts, ...series];
+        chartMount.innerHTML = '';
+        uplotInstance = new uPlot(opts, plotData, chartMount);
+    }
+
+    // Canvas 降级图表
+    function renderCanvasFallback(ts, series, vars, w, h) {
+        chartMount.innerHTML = '';
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        chartMount.appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+
+        // 背景
+        ctx.fillStyle = '#0a0a0f';
+        ctx.fillRect(0, 0, w, h);
+
+        if (ts.length < 2) return;
+
+        const pad = { l: 60, r: 10, t: 10, b: 25 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        // 计算全局 Y 范围
+        let yMin = Infinity, yMax = -Infinity;
+        for (const s of series) {
+            for (const v of s) { if (!isNaN(v)) { yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); } }
+        }
+        if (!isFinite(yMin)) { yMin = 0; yMax = 1; }
+        if (yMin === yMax) { yMin -= 1; yMax += 1; }
+        const yPad = (yMax - yMin) * 0.05;
+        yMin -= yPad; yMax += yPad;
+
+        const tMin = ts[0], tMax = ts[ts.length - 1];
+        const tRange = tMax - tMin || 1;
+
+        // 网格
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.t + (ph * i / 4);
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
         }
 
-        document.getElementById('clear-log').onclick = () => logDiv.innerHTML = '';
+        // Y 轴标签
+        ctx.fillStyle = '#666'; ctx.font = '10px monospace'; ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const val = yMax - (yMax - yMin) * i / 4;
+            ctx.fillText(val.toFixed(2), pad.l - 4, pad.t + (ph * i / 4) + 3);
+        }
 
-        // Known default topics (these exist in C++ code)
-        const defaultTopics = [
-            '/detector/debug',
-            '/predictor/debug'
-        ];
-        const knownTopics = new Set(defaultTopics);
-
-        // Load topics
-        async function loadTopics() {
-            try {
-                const res = await fetch('/api/topics');
-                const topics = await res.json();
-                log(`Topics from server: ${JSON.stringify(topics)}`);
-
-                if (Array.isArray(topics)) {
-                    topics.forEach(t => knownTopics.add(t));
-                } else if (topics.error) {
-                    log(`Topic error: ${topics.error}`, 'error');
-                }
-            } catch (e) {
-                log(`Failed to load topics: ${e.message}`, 'error');
+        // 画线
+        for (let si = 0; si < series.length; si++) {
+            ctx.strokeStyle = CHART_COLORS[si % CHART_COLORS.length];
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < ts.length; i++) {
+                const x = pad.l + ((ts[i] - tMin) / tRange) * pw;
+                const y = pad.t + (1 - (series[si][i] - yMin) / (yMax - yMin)) * ph;
+                if (isNaN(series[si][i])) { started = false; continue; }
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
             }
-
-            // Update dropdown with all known topics
-            topicSelect.innerHTML = '<option value="">-- Select topic --</option>';
-            knownTopics.forEach(t => {
-                const opt = document.createElement('option');
-                opt.value = t;
-                opt.textContent = t;
-                topicSelect.appendChild(opt);
-            });
-            log(`Available topics: ${Array.from(knownTopics).join(', ')}`);
+            ctx.stroke();
         }
 
-        // Refresh topics periodically
-        setInterval(loadTopics, 5000);
+        // 图例
+        ctx.font = '10px monospace';
+        let lx = pad.l + 5;
+        for (let i = 0; i < vars.length; i++) {
+            ctx.fillStyle = CHART_COLORS[i % CHART_COLORS.length];
+            ctx.fillRect(lx, pad.t + 3, 12, 3);
+            ctx.fillText(vars[i], lx + 16, pad.t + 8);
+            lx += ctx.measureText(vars[i]).width + 30;
+        }
+    }
 
-        // Select topic
-        topicSelect.onchange = () => {
-            const topic = topicSelect.value;
-            if (!topic) {
-                video.classList.add('hidden');
-                placeholder.classList.remove('hidden');
-                statusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
+    // 图表刷新 (30fps)
+    setInterval(() => {
+        if (!chartDirty || selectedVars.size === 0) return;
+        chartDirty = false;
+
+        if (uplotInstance && typeof uPlot !== 'undefined') {
+            const { ts, series } = getChartArrays();
+            uplotInstance.setData([ts, ...series]);
+        } else {
+            // canvas 降级
+            const { ts, series, vars } = getChartArrays();
+            const w = chartMount.clientWidth || 600;
+            const h = chartMount.clientHeight || 200;
+            renderCanvasFallback(ts, series, vars, w, h);
+        }
+    }, 33);
+
+    // 窗口大小变化时重建图表
+    window.addEventListener('resize', () => { if (selectedVars.size > 0) rebuildChart(); });
+
+    // ======================== 通信层: WebSocket 优先，SSE 降级 ========================
+    let wsConnected = false;
+    let sseActive = false;
+
+    function handleData(data) {
+        updateData(data);
+        appendToChart(data);
+        frameCount++;
+        const now = Date.now();
+        if (now - lastUpdate > 1000) {
+            fpsEl.textContent = `${frameCount} Hz`;
+            frameCount = 0;
+            lastUpdate = now;
+        }
+    }
+
+    function connectWebSocket() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${proto}//${location.host}/ws/data`);
+        ws.binaryType = 'arraybuffer';
+
+        let useMsgpack = true;  // 默认，第一个字节决定
+        let firstMessage = true;
+
+        ws.onopen = () => {
+            wsConnected = true;
+            transportEl.textContent = 'WS';
+            transportEl.classList.remove('text-red-400');
+            transportEl.classList.add('text-green-400');
+            log('WebSocket connected');
+            // 断开 SSE
+            if (sseSource) { sseSource.close(); sseActive = false; }
+        };
+
+        ws.onmessage = (e) => {
+            if (firstMessage) {
+                firstMessage = false;
+                // 第一个字节: 0x01 = msgpack, 0x00 = JSON
+                const flag = new Uint8Array(e.data);
+                useMsgpack = (flag[0] === 0x01);
+                transportEl.textContent = useMsgpack ? 'WS+msgpack' : 'WS+JSON';
+                log(`Transport: ${useMsgpack ? 'WebSocket+msgpack' : 'WebSocket+JSON'}`);
                 return;
             }
 
-            const path = topic.startsWith('/') ? topic.substring(1) : topic;
-            video.src = '/api/video/' + path;
-            video.classList.remove('hidden');
-            placeholder.classList.add('hidden');
-            statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500';
-            log(`Switched to topic: ${topic}`);
-
-            video.onload = () => {
-                statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
-                frameCount++;
-            };
-            video.onerror = () => {
-                statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
-                log(`Image load failed: ${topic}`, 'error');
-            };
-        };
-
-        // Data update
-        function formatValue(v) {
-            if (typeof v === 'number') return Number.isInteger(v) ? v : v.toFixed(3);
-            return v;
-        }
-
-        function updateData(data) {
-            const keys = Object.keys(data).sort();
-            dataTable.innerHTML = keys.map(k => `
-                <tr class="data-row border-b border-border/30">
-                    <td class="py-1 px-2 text-muted-foreground">${k}</td>
-                    <td class="py-1 px-2 text-right font-bold">${formatValue(data[k])}</td>
-                </tr>
-            `).join('');
-        }
-
-        // SSE
-        const sse = new EventSource('/api/stream');
-        sse.onmessage = (e) => {
-            updateData(JSON.parse(e.data));
-
-            // FPS
-            frameCount++;
-            const now = Date.now();
-            if (now - lastUpdate > 1000) {
-                fpsEl.textContent = `${frameCount} Hz`;
-                frameCount = 0;
-                lastUpdate = now;
+            try {
+                let data;
+                if (useMsgpack) {
+                    data = MsgPack.decode(new Uint8Array(e.data));
+                } else {
+                    data = JSON.parse(new TextDecoder().decode(e.data));
+                }
+                handleData(data);
+            } catch (err) {
+                log(`Decode error: ${err.message}`, 'error');
             }
         };
-        sse.onerror = () => {
-            statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+
+        ws.onclose = () => {
+            wsConnected = false;
+            transportEl.classList.remove('text-green-400');
+            transportEl.classList.add('text-yellow-400');
+            log('WebSocket disconnected, falling back to SSE', 'warn');
+            startSSE();
+            // 3秒后重试 WebSocket
+            setTimeout(connectWebSocket, 3000);
+        };
+
+        ws.onerror = () => {
+            // onclose 会处理降级
+        };
+    }
+
+    // SSE 降级
+    let sseSource = null;
+
+    function startSSE() {
+        if (sseActive) return;
+        sseSource = new EventSource('/api/stream');
+        sseActive = true;
+        transportEl.textContent = 'SSE';
+        transportEl.classList.remove('text-green-400');
+        transportEl.classList.add('text-yellow-400');
+
+        sseSource.onmessage = (e) => {
+            if (wsConnected) { sseSource.close(); sseActive = false; return; }
+            try { handleData(JSON.parse(e.data)); } catch (err) { /* ignore */ }
+        };
+        sseSource.onerror = () => {
+            sseActive = false;
+            transportEl.classList.add('text-red-400');
             log('SSE connection lost', 'error');
         };
-        sse.onopen = () => log('SSE connected');
+        sseSource.onopen = () => log('SSE connected (fallback)');
+    }
 
-        // Check system status
-        async function checkStatus() {
-            try {
-                const res = await fetch('/api/status');
-                const status = await res.json();
-                log(`System status: Message=${status.message_module}, Dashboard=${status.dashboard_module}`);
-                if (status.topics && status.topics.length > 0) {
-                    log(`Available topics: ${status.topics.join(', ')}`);
-                }
-            } catch (e) {
-                log(`Status check failed: ${e.message}`, 'error');
+    // ======================== Init ========================
+    async function init() {
+        // 状态检查
+        try {
+            const res = await fetch('/api/status');
+            const st = await res.json();
+            log(`System: WS=${st.websocket}, msgpack=${st.msgpack}, Dashboard=${st.dashboard_module}`);
+            if (st.websocket) {
+                connectWebSocket();
+            } else {
+                log('Server has no WebSocket support, using SSE', 'warn');
+                startSSE();
             }
+        } catch (e) {
+            log('Status check failed, using SSE', 'warn');
+            startSSE();
         }
 
-        // Init
-        checkStatus();
         loadTopics();
         log('Dashboard started');
+    }
+
+    init();
     </script>
 </body>
 </html>

@@ -43,6 +43,9 @@ PYBIND11_EMBEDDED_MODULE(dashboard, m) {
     // 获取所有数据
     m.def("all", &get_all_as_dict, "Get all data as dict");
 
+    // 版本号 (每次 set 递增，用于变化检测)
+    m.def("version", &dashboard::version, "Get data version counter");
+
     // 设置值 (主要用于测试)
     m.def("set_int", [](const std::string& k, int v) { dashboard::set(k, v); });
     m.def("set_float", [](const std::string& k, float v) { dashboard::set(k, v); });
