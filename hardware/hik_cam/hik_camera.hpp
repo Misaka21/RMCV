@@ -5,7 +5,7 @@
 // - 1: use HikRobot MVS SDK backend
 // - 0: use OpenCV VideoCapture fallback backend
 #ifndef RMCV_WITH_HIK_CAMERA
-#define RMCV_WITH_HIK_CAMERA 0
+#define RMCV_WITH_HIK_CAMERA 1
 #endif
 
 // C system headers
