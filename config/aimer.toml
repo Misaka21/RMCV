@@ -283,6 +283,14 @@
     #@double 保持追踪的面积比例，当前追踪装甲板面积 >= 最大面积 * 此比例时保持追踪
     keep_tracking_area_ratio = 0.9
 
+    # 匹配切板迟滞参数（抑制等价候选间来回跳，减少中心抖动）
+    #@double 切板所需最小角度优势 (rad)
+    match_switch_min_angle_gain = 0.35
+    #@double 切板所需最小位置优势 (m)
+    match_switch_min_dist_gain = 0.04
+    #@double 旧追踪板可接受最大匹配距离 (m)
+    match_tracked_max_dist = 0.45
+
     # 同帧多板更新保护参数
     # 非主装甲板若与预测偏差过大则跳过，防止误匹配污染滤波
     #@double 次观测位置误差门限 (m)

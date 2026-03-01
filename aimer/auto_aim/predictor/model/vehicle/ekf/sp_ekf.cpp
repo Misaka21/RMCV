@@ -122,11 +122,35 @@ int SpMotion::match_armor(const ArmorData& armor) const {
     // 3. 在最近的几个中找角度误差最小的
     int best_id = candidates[0].id;
     double min_error = candidates[0].angle_error;
+    double best_dist = candidates[0].distance;
 
     for (int i = 1; i < num_to_check; ++i) {
         if (candidates[i].angle_error < min_error) {
             min_error = candidates[i].angle_error;
             best_id = candidates[i].id;
+            best_dist = candidates[i].distance;
+        }
+    }
+
+    // 4. 切板迟滞：当前追踪板若仍“足够合理”，则保持，避免在等价候选间来回跳
+    // 只有新候选在角度和距离上都明显更优，才允许切板。
+    double switch_angle_gain = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.match_switch_min_angle_gain");
+    double switch_dist_gain = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.match_switch_min_dist_gain");
+    double tracked_max_dist = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.match_tracked_max_dist");
+    const int prev_id = tracked_armor_id_;
+    if (best_id != prev_id) {
+        for (const auto& c : candidates) {
+            if (c.id != prev_id) continue;
+
+            bool tracked_reasonable = (c.distance <= tracked_max_dist);
+            bool angle_much_better = (c.angle_error - min_error) > switch_angle_gain;
+            bool dist_much_better = (c.distance - best_dist) > switch_dist_gain;
+
+            // 旧板仍合理，且新板没有“明显更优” -> 保持旧板
+            if (tracked_reasonable && !(angle_much_better && dist_much_better)) {
+                return prev_id;
+            }
+            break;
         }
     }
 
@@ -257,7 +281,10 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     if (armors.empty()) return;
 
     // ⭐ 追踪目标选择
-    // 规则：如果已追踪的面积 >= keep_ratio * max_area，继续追踪；否则切换到最大的
+    // 规则：
+    // 1) 若已追踪 detector id 仍在，且面积满足 keep_ratio，继续追踪
+    // 2) 若已追踪 detector id 丢失，优先选 |z_to_v| 最小（更正对，中心更稳）
+    // 3) 其余情况选面积最大的
     const auto& primary = [&]() -> const ArmorData& {
         if (armors.size() == 1) {
             return armors[0];
@@ -282,10 +309,13 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
             }
         }
 
-        if (tracked_idx >= 0 && tracked_area >= keep_ratio * max_area) {
-            return armors[tracked_idx];
+        if (tracked_idx >= 0) {
+            if (tracked_area >= keep_ratio * max_area) {
+                return armors[tracked_idx];
+            }
+            return armors[max_area_idx];
         }
-        return armors[max_area_idx];
+        return armors[0];
     }();
 
     // 更新顺序: 主装甲板优先，其余装甲板同帧继续更新（与 sp_vision 同帧多观测行为对齐）
