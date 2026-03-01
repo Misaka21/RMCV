@@ -15,20 +15,6 @@
 
 namespace autoaim::predictor {
 
-namespace {
-
-double get_double_param(const std::string& name, double default_val) {
-    auto ptr = runtime_param::find_param(name);
-    if (ptr != nullptr) {
-        if (auto* val = std::get_if<double>(&*ptr)) {
-            return *val;
-        }
-    }
-    return default_val;
-}
-
-}  // namespace
-
 // ============================================================================
 // SpMotion 实现
 // ============================================================================
@@ -378,7 +364,7 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
 
     // R 使用 sp_vision 同款公式
-    MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v, 2);
+    MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v);
     auto status = ekf_.update_forward_gated(
         measure_func, z, R, reset_state,
         chi2_threshold, max_reject, q_scale_increase, q_scale_decay
@@ -412,20 +398,14 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
 SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
     MatrixXX Q = MatrixXX::Zero();
 
-    // 与 sp_vision_25 对齐: Piecewise White Noise Model
-    // v_pos: 平动加速度方差, v_yaw: 角加速度方差
-    double v_pos = get_double_param(
-        "AutoAim.Predictor.SpEKF.q_acc_pos",
-        get_double_param("AutoAim.Predictor.SpEKF.q_vel", 100.0)
-    );
-    double v_yaw = get_double_param(
-        "AutoAim.Predictor.SpEKF.q_acc_yaw",
-        get_double_param("AutoAim.Predictor.SpEKF.q_omega", 400.0)
-    );
+    // Piecewise White Noise Model (sp_vision_25 同款)
+    // 参数含义: 加速度方差，Q 矩阵通过 dt⁴/4, dt³/2, dt² 结构自动耦合位置-速度
+    double v_pos = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_acc_pos");
+    double v_yaw = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_acc_yaw");
 
-    double q_r = get_double_param("AutoAim.Predictor.SpEKF.q_r", 0.0);
-    double q_l = get_double_param("AutoAim.Predictor.SpEKF.q_l", 0.0);
-    double q_h = get_double_param("AutoAim.Predictor.SpEKF.q_h", 0.0);
+    double q_r = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_r");
+    double q_l = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_l");
+    double q_h = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_h");
 
     double dt2 = dt * dt;
     double dt3 = dt2 * dt;
@@ -464,17 +444,18 @@ SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
     return Q;
 }
 
-SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v, int observed_armor_count) const {
-    (void)observed_armor_count;
+SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v) const {
     MatrixZZ R = MatrixZZ::Zero();
 
-    // 与 sp_vision_25 对齐:
-    // R = diag(4e-3, 4e-3, log(|delta|+1)+1, 0.09 + log(dis+1)/200)
-    // 其中 delta = |armor_yaw - center_yaw|，这里用预测的 |z_to_v| 对应
-    double r_yaw_pitch = get_double_param("AutoAim.Predictor.SpEKF.r_yaw_pitch", 4e-3);
-    double r_dis_base = get_double_param("AutoAim.Predictor.SpEKF.r_dis_base", 1.0);
-    double r_armor_yaw_base = get_double_param("AutoAim.Predictor.SpEKF.r_armor_yaw_base", 9e-2);
-    double r_armor_yaw_dis_scale = get_double_param("AutoAim.Predictor.SpEKF.r_armor_yaw_dis_scale", 1.0 / 200.0);
+    // sp_vision_25 同款 R 构造:
+    //   R_yaw = R_pitch = r_yaw_pitch            (固定)
+    //   R_dis  = r_dis_base × (log(|delta|+1)+1)  (delta 越大=越侧对，距离噪声越大)
+    //   R_orient = r_base + r_scale × log(dis+1)   (距离越远，朝向角噪声越大)
+    // 注意: R_dis 依赖的是朝向角 delta 而非距离!
+    double r_yaw_pitch = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_yaw_pitch");
+    double r_dis_base = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_base");
+    double r_armor_yaw_base = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_base");
+    double r_armor_yaw_dis_scale = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_dis_scale");
 
     double delta = std::abs(z_to_v);
     double dis = std::abs(distance);

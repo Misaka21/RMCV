@@ -254,7 +254,7 @@ private:
     Eigen::Vector3d h_armor_xyz(const VectorX& x, int id) const;
 
     MatrixXX build_Q(double dt) const;
-    MatrixZZ build_R(double distance, double z_to_v, int observed_armor_count = 1) const;
+    MatrixZZ build_R(double distance, double z_to_v) const;
 
     // ==================== EKF ====================
     Ekf ekf_;
