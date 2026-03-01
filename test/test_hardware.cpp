@@ -6,10 +6,7 @@
 #include <thread>
 
 #include <opencv2/imgproc.hpp>
-
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
 #include <opencv2/highgui.hpp>
-#endif
 
 #include "hardware/hardware_node.hpp"
 #include "plugin/debug/logger.hpp"
@@ -69,17 +66,13 @@ int main() {
                 cv::putText(display, info, cv::Point(10, 30),
                     cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);
 
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
                 cv::imshow("Hardware Test", display);
-#endif
             }
 
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
             int key = cv::waitKey(1);
             if (key == 27 || key == 'q') {
                 break;
             }
-#endif
 
         } catch (const umt::MessageError_Timeout&) {
             debug::print(debug::PrintMode::WARNING, "TestHardware", "Timeout waiting for frame");
@@ -90,9 +83,7 @@ int main() {
     auto running = umt::BasicObjManager<bool>::find_or_create("hardware_running", true);
     running->get() = false;
 
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
     cv::destroyAllWindows();
-#endif
     debug::print(debug::PrintMode::INFO, "TestHardware", "Test completed");
 
     return 0;

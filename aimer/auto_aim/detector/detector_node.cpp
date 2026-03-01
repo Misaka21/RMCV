@@ -13,6 +13,7 @@
 
 #include "detector_factory.hpp"
 #include "detector_helpers.hpp"
+#include "detector_trt/tensorrt_detector.hpp"
 #include "aimer/common/robot_state.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
@@ -175,6 +176,11 @@ void run_async_loop(detector::DetectorInterface* det) {
         }
 
         debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread stopped");
+
+        // 通知 pop 线程退出阻塞
+        if (auto* trt = dynamic_cast<detector::TensorrtDetector*>(det)) {
+            trt->stop();
+        }
     });
 
     debug::print(debug::PrintMode::INFO, "DetectorNode", "Running in async mode");
@@ -183,12 +189,8 @@ void run_async_loop(detector::DetectorInterface* det) {
     while (running->get()) {
         watchdog::heartbeat("detector");
 
-        if (det->queue_size() == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
-
-        auto async_result = det->pop();
+        auto async_result = det->pop();  // 内部 condition_variable 阻塞等待
+        if (async_result.image.empty()) continue;  // stop() 唤醒时返回空
 
         // 构建并发布结果
         auto result = detector::build_detection_result(async_result);

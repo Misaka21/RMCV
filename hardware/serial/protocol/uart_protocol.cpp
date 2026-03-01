@@ -20,7 +20,7 @@
 
 bool UartProtocol::set_param(int speed, int flow_ctrl, int databits, int stopbits, int parity) {
     // 设置串口数据帧格式
-    constexpr std::array<std::pair<int, int>, 14> baud_rates = {
+    constexpr std::array<std::pair<int, int>, 8> baud_rates = {
         { //{B1152000, 1152000}, {B1000000, 1000000}, {B921600, 921600},
           //{B576000, 576000},   {B500000, 500000},   {B460800, 460800},
           { B230400, 230400 },
@@ -56,6 +56,12 @@ bool UartProtocol::set_param(int speed, int flow_ctrl, int databits, int stopbit
 
     enum class FlowControl { None, Hardware, Software };
     const auto flow = static_cast<FlowControl>(flow_ctrl);
+
+    // 输入输出模式优化
+    options.c_oflag &= ~OPOST; // 原始输出
+    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); // 非规范模式
+    // 传输特殊字符，否则特殊字符0x0d,0x11,0x13会被屏蔽或映射。
+    options.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
 
     // 修改控制模式，保证程序不会占用串口
     // 修改控制模式，使得能够从串口中读取输入数据
@@ -135,12 +141,6 @@ bool UartProtocol::set_param(int speed, int flow_ctrl, int databits, int stopbit
             return false;
     }
 
-    // 输入输出模式优化
-    options.c_oflag &= ~OPOST; // 原始输出
-    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); // 非规范模式
-    // 传输特殊字符，否则特殊字符0x0d,0x11,0x13会被屏蔽或映射。
-    options.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-
     // 设置等待时间和最小接收字符
     // VMIN=0: 不等待字符，立即返回（即使没有数据）
     // VTIME=1: 最多等待 0.1 秒
@@ -174,10 +174,14 @@ bool UartProtocol::open() {
     // 恢复串口为阻塞状态
     if (fcntl(_fd, F_SETFL, 0) < 0) {
         _error_message = "fcntl failed";
+        ::close(_fd);
+        _fd = -1;
         return false;
     }
     // 设置串口数据帧格式
     if (!set_param(_speed, _flow_ctrl, _databits, _stopbits, _parity)) {
+        ::close(_fd);
+        _fd = -1;
         return false;
     }
     _is_open = true;

@@ -90,7 +90,7 @@ public:
     template<typename T, std::size_t DataLen = sizeof(T)>
     std::optional<bool> load_data(T const& data, std::size_t index) noexcept {
         // 越界检测
-        if (index > 0 && (index + DataLen) < (Capacity - 1)) {
+        if (index > 0 && (index + DataLen) <= (Capacity - 1)) {
             if constexpr (std::is_trivially_copyable_v<T>) {
                 std::memcpy(_buffer.data() + index, &data, DataLen);
                 return true;
@@ -111,7 +111,7 @@ public:
     template<typename T, std::size_t DataLen = sizeof(T)>
     std::optional<bool> unload_data(T& data, std::size_t index) const noexcept {
         // 越界检测
-        if (index > 0 && (index + DataLen) < (Capacity - 1)) {
+        if (index > 0 && (index + DataLen) <= (Capacity - 1)) {
             if constexpr (std::is_trivially_copyable_v<T>) {
                 std::memcpy(&data, _buffer.data() + index, DataLen);
                 return true;

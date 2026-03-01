@@ -66,6 +66,23 @@ inline int first_valid_slot(const autobuff::BuffDetectionResult& det) {
 
 }  // namespace
 
+// EKF 的 Predict/Measure 仿函数 (需要 template operator(), 不能放在 local class)
+struct ConstantEkfPredictFunc {
+    double dt;
+    template <typename T>
+    void operator()(const T x_in[2], T x_out[2]) const {
+        x_out[0] = x_in[0] + T(dt) * x_in[1];
+        x_out[1] = x_in[1];
+    }
+};
+
+struct ConstantEkfMeasureFunc {
+    template <typename T>
+    void operator()(const T x[2], T y[1]) const {
+        y[0] = x[0];
+    }
+};
+
 int BuffPredictor::sgn(double x) {
     return (x > 0) - (x < 0);
 }
@@ -120,27 +137,11 @@ void BuffPredictor::update_constant_ekf(double phi_meas, double t, double omega_
         return;
     }
 
-    struct PredictFunc {
-        double dt;
-        template <typename T>
-        void operator()(const T x_in[2], T x_out[2]) const {
-            x_out[0] = x_in[0] + T(dt) * x_in[1];
-            x_out[1] = x_in[1];
-        }
-    };
-
-    struct MeasureFunc {
-        template <typename T>
-        void operator()(const T x[2], T y[1]) const {
-            y[0] = x[0];
-        }
-    };
-
     // Predict
     MatrixXX Q = MatrixXX::Zero();
     Q(0, 0) = 2e-4;  // phi process noise
     Q(1, 1) = 5e-3;  // omega process noise (small)
-    ekf_.predict_forward_scaled(PredictFunc{dt}, Q);
+    ekf_.predict_forward_scaled(ConstantEkfPredictFunc{dt}, Q);
 
     // Measure (unwrap)
     VectorX x_pred = ekf_.get_x();
@@ -150,7 +151,7 @@ void BuffPredictor::update_constant_ekf(double phi_meas, double t, double omega_
     y << phi_adj;
     MatrixYY R = MatrixYY::Identity() * 4e-3;  // measurement noise
 
-    ekf_.update_forward(MeasureFunc{}, y, R);
+    ekf_.update_forward(ConstantEkfMeasureFunc{}, y, R);
 }
 
 void BuffPredictor::maybe_reset_big_fit(bool big_active_now, double timestamp, double phi_meas) {

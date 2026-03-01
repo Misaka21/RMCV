@@ -1,7 +1,7 @@
 # aimer/common 公共模块
-#
-# Note: Ceres is required (AdaptiveEkf uses ceres::Jet). We expect the top-level
-# CMake to provide the Ceres target (either via system install or FetchContent).
+
+# 查找Ceres (自动微分EKF需要)
+find_package(Ceres REQUIRED)
 
 add_library(aimer_common STATIC
     transformer/transformer.cpp
@@ -15,12 +15,13 @@ add_library(aimer_common STATIC
 
 target_include_directories(aimer_common PUBLIC
     ${PROJECT_SOURCE_DIR}
+    ${CERES_INCLUDE_DIRS}
 )
 
 target_link_libraries(aimer_common PUBLIC
     ${OpenCV_LIBS}
     Eigen3::Eigen
-    Ceres::ceres
+    ${CERES_LIBRARIES}
     fmt::fmt
     plugin
 )
