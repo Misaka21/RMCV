@@ -68,8 +68,6 @@
     # 新 target_id 需连续出现达到阈值才创建模型，抑制 T2/T3/T7 抖动分裂
     #@double 新目标确认最短持续时间 (s)
     new_target_confirm_time = 0.10
-    #@int 新目标确认最少帧数
-    new_target_confirm_frames = 3
     #@double 连续出现判定的最大间隔 (s)，超过则重新计数
     new_target_max_gap = 0.08
     #@double 候选目标超时清理时间 (s)

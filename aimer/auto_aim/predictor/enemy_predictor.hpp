@@ -91,8 +91,7 @@ private:
     // 当前帧自身状态
     aimer::RobotState current_state_;
 
-    // 新目标消抖状态：需连续出现一段时间/帧数才创建模型
-    std::array<int, MAX_TARGETS> pending_seen_count_ = {};
+    // 新目标消抖状态：需连续出现一段时间才创建模型
     std::array<double, MAX_TARGETS> pending_first_seen_time_ = {};
     std::array<double, MAX_TARGETS> pending_last_seen_time_ = {};
 };

@@ -91,6 +91,9 @@ struct ArmorObservation {
     ArmorType type = ArmorType::SMALL;
     EnemyColor color = EnemyColor::GRAY;  // 敌方颜色
 
+    // 检测器置信度
+    float confidence = 0;   // 来自检测器的分类置信度
+
     // 时间和角度
     double timestamp = 0;   // 时间戳 (s)
     double z_to_v = 0;      // 装甲板法向与视线夹角 (三分法优化后)
@@ -130,6 +133,7 @@ struct ArmorObservation {
         obs.timestamp = timestamp;
         obs.pts = det.landmarks;
         obs.pus = pus_in;
+        obs.confidence = det.confidence;
         obs.center_2d = det.center;
         obs.valid = true;
 

@@ -11,6 +11,8 @@
 #include <numeric>
 #include <opencv2/imgproc.hpp>
 
+#include <fmt/color.h>
+
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
@@ -38,14 +40,25 @@ constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
 // PnP 解算的俯仰角超过此阈值时，不使用三分法优化
 constexpr double ARMOR_PITCH_MAX_FOR_FIT = 30.0 * M_PI / 180.0;
 
-// 位置相近性合并阈值 (米)
-// 同一辆车的两块装甲板距离通常 < 1m，两辆车之间通常 > 2m
-constexpr double SAME_VEHICLE_DISTANCE_THRESHOLD = 1.5;
 
 const ArmorObservationTable& ArmorObserver::observe(
     const DetectionResult& detection,
     double timestamp
 ) {
+    // 保存上一帧的活跃目标信息 (在清空表之前)
+    prev_target_ids_.clear();
+    prev_target_pos_.clear();
+    for (int id : table_.get_target_ids()) {
+        prev_target_ids_.insert(id);
+        // 保存最正对的观测位置 (分类最可靠的)
+        const auto& obs_list = table_.get(id);
+        if (!obs_list.empty()) {
+            const auto& best = *std::min_element(obs_list.begin(), obs_list.end(),
+                [](const auto& a, const auto& b) { return std::abs(a.z_to_v) < std::abs(b.z_to_v); });
+            prev_target_pos_[id] = best.pos;
+        }
+    }
+
     table_.clear();
     table_.set_frame(timestamp, ++frame_id_);
 
@@ -60,7 +73,10 @@ const ArmorObservationTable& ArmorObserver::observe(
         }
     }
 
-    // 第二步：添加到表
+    // 第二步：同车误识别 ID 纠正
+    merge_same_vehicle_ids(observations);
+
+    // 第三步：添加到表
     // 双装甲板联合拟合已下沉到 VehicleModel，仅对车辆模型生效，
     // 避免对 outpost/base 产生不必要的 90° 约束。
     for (const auto& obs : observations) {
@@ -68,6 +84,123 @@ const ArmorObservationTable& ArmorObserver::observe(
     }
 
     return table_;
+}
+
+void ArmorObserver::merge_same_vehicle_ids(std::vector<ArmorObservation>& observations) {
+    if (observations.empty()) return;
+
+    // ========== 阶段1: 两板几何合并 ==========
+    // 当同一车的两块板被识别为不同 ID 时，用 90° 约束纠正
+    for (size_t i = 0; i < observations.size(); ++i) {
+        for (size_t j = i + 1; j < observations.size(); ++j) {
+            auto& obs_i = observations[i];
+            auto& obs_j = observations[j];
+
+            if (obs_i.target_id == obs_j.target_id) continue;
+
+            // 距离检查: 同车两块装甲板通常 0.25m ~ 1.2m
+            double dist = (obs_i.pos - obs_j.pos).norm();
+            if (dist < 0.25 || dist > 1.2) continue;
+
+            // 朝向差检查: 应接近 90°
+            double yaw_diff = std::abs(aimer::math::angle_diff(
+                obs_i.z[obs::ARMOR_YAW], obs_j.z[obs::ARMOR_YAW]));
+            if (yaw_diff < 70.0 * M_PI / 180.0 || yaw_diff > 110.0 * M_PI / 180.0) continue;
+
+            // 旋转中心一致性检查
+            constexpr double r_est = 0.26;
+            Eigen::Vector3d center_i = obs_i.pos + r_est * Eigen::Vector3d(
+                std::cos(obs_i.z[obs::ARMOR_YAW]), std::sin(obs_i.z[obs::ARMOR_YAW]), 0);
+            Eigen::Vector3d center_j = obs_j.pos + r_est * Eigen::Vector3d(
+                std::cos(obs_j.z[obs::ARMOR_YAW]), std::sin(obs_j.z[obs::ARMOR_YAW]), 0);
+            double center_dist = (center_i - center_j).head<2>().norm();
+            if (center_dist > 0.25) continue;
+
+            // 通过所有几何检查 → 同一辆车，选择更可靠的 ID
+            int merged_id = pick_reliable_id(obs_i, obs_j);
+
+            fmt::print(fmt::fg(fmt::color::yellow),
+                "[ArmorObserver] 同车ID纠正: T{} + T{} → T{} "
+                "(dist={:.2f}m, yaw_diff={:.1f}°, center_dist={:.2f}m)\n",
+                obs_i.target_id, obs_j.target_id, merged_id,
+                dist, yaw_diff * 180.0 / M_PI, center_dist);
+
+            obs_i.target_id = merged_id;
+            obs_j.target_id = merged_id;
+        }
+    }
+
+    // ========== 阶段2: 单板历史位置匹配 ==========
+    // 当只有一块板可见且被误识别时，用上一帧位置匹配纠正
+    if (prev_target_pos_.empty()) return;
+
+    // 收集当前帧的 target_ids
+    std::set<int> current_ids;
+    for (const auto& obs : observations) {
+        current_ids.insert(obs.target_id);
+    }
+
+    // 找出上一帧跟踪但当前帧缺失的目标
+    std::set<int> missing_ids;
+    for (int id : prev_target_ids_) {
+        if (current_ids.count(id) == 0) {
+            missing_ids.insert(id);
+        }
+    }
+
+    if (missing_ids.empty()) return;
+
+    // 对每个"新出现"的观测 (target_id 上一帧不存在)，检查是否在缺失目标附近
+    for (auto& obs : observations) {
+        // 上一帧已跟踪的 ID 不需要纠正
+        if (prev_target_ids_.count(obs.target_id) > 0) continue;
+
+        double best_dist = 0.5;  // 阈值 0.5m (200fps 下帧间移动 < 0.025m)
+        int best_id = -1;
+
+        for (int missing_id : missing_ids) {
+            auto it = prev_target_pos_.find(missing_id);
+            if (it == prev_target_pos_.end()) continue;
+
+            double d = (obs.pos - it->second).norm();
+            if (d < best_dist) {
+                best_dist = d;
+                best_id = missing_id;
+            }
+        }
+
+        if (best_id > 0) {
+            fmt::print(fmt::fg(fmt::color::yellow),
+                "[ArmorObserver] 单板ID纠正: T{} → T{} "
+                "(pos_dist={:.3f}m)\n",
+                obs.target_id, best_id, best_dist);
+
+            obs.target_id = best_id;
+            // 该目标已恢复，不再视为缺失
+            current_ids.insert(best_id);
+            missing_ids.erase(best_id);
+        }
+    }
+}
+
+/**
+ * @brief 选择两个观测中更可靠的 target_id
+ *
+ * 策略: 已跟踪优先 → 置信度 → 正对程度
+ */
+int ArmorObserver::pick_reliable_id(
+    const ArmorObservation& a, const ArmorObservation& b
+) const {
+    bool a_tracked = prev_target_ids_.count(a.target_id) > 0;
+    bool b_tracked = prev_target_ids_.count(b.target_id) > 0;
+
+    if (a_tracked != b_tracked) {
+        return a_tracked ? a.target_id : b.target_id;
+    }
+    if (std::abs(a.confidence - b.confidence) > 0.05f) {
+        return (a.confidence > b.confidence) ? a.target_id : b.target_id;
+    }
+    return (std::abs(a.z_to_v) < std::abs(b.z_to_v)) ? a.target_id : b.target_id;
 }
 
 ArmorObservation ArmorObserver::solve_pnp(

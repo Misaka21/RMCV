@@ -19,6 +19,8 @@
 #define __AIMER_AUTO_AIM_PREDICTOR_ENEMY_STATE_ARMOR_OBSERVER_HPP__
 
 #include <array>
+#include <set>
+#include <unordered_map>
 #include <opencv2/core.hpp>
 #include <opencv2/calib3d.hpp>
 #include <Eigen/Core>
@@ -66,6 +68,20 @@ private:
         double timestamp,
         const Eigen::Quaterniond& q_imu
     );
+
+    /**
+     * @brief 同车误识别 ID 纠正
+     *
+     * 阶段1 (两板): 几何约束 (距离+朝向差90°+旋转中心一致) 检测同车
+     * 阶段2 (单板): 新ID出现在缺失目标的上一帧位置附近 → 纠正
+     */
+    void merge_same_vehicle_ids(std::vector<ArmorObservation>& observations);
+
+    /**
+     * @brief 选择两个观测中更可靠的 target_id
+     * 策略: 已跟踪优先 → 置信度 → 正对程度
+     */
+    int pick_reliable_id(const ArmorObservation& a, const ArmorObservation& b) const;
 
     // ==================== 三分法优化 z_to_v ====================
 
@@ -166,6 +182,12 @@ private:
 
     // 观测表
     ArmorObservationTable table_;
+
+    // 上一帧活跃的目标ID (用于合并时优先选择已跟踪的ID)
+    std::set<int> prev_target_ids_;
+
+    // 上一帧各目标的位置 (用于单板误识别纠正)
+    std::unordered_map<int, Eigen::Vector3d> prev_target_pos_;
 
     // 帧计数
     int frame_id_ = 0;
