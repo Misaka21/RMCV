@@ -338,6 +338,12 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     int64_t max_reject = runtime_param::get_param<int64_t>("AutoAim.Predictor.SpEKF.Gating.max_reject");
     double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.Gating.q_scale_increase");
     double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.Gating.q_scale_decay");
+    // 同帧次观测保护: 防止错配观测拉崩滤波器
+    double secondary_pos_gate = get_double_param("AutoAim.Predictor.SpEKF.multi_update_pos_gate", 0.45);
+    double secondary_orient_gate = get_double_param(
+        "AutoAim.Predictor.SpEKF.multi_update_orient_gate", 70.0 * M_PI / 180.0);
+    double secondary_r_scale = std::max(
+        1.0, get_double_param("AutoAim.Predictor.SpEKF.secondary_r_scale", 1.3));
 
     // 3. 同帧多观测更新（主板优先，随后其余板）
     for (const ArmorData* armor_ptr : ordered_armors) {
@@ -361,8 +367,21 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
         SpMeasure measure_func(matched_id, armor_num_);
 
-        VectorZ inner_z;
         VectorX x = ekf_.get_x();
+        if (!is_primary) {
+            Eigen::Vector3d pred_pos = h_armor_xyz(x, matched_id);
+            double pos_err = (pred_pos - obs.pos).norm();
+            double pred_orient_yaw = x[sp_model::THETA] + matched_id * (2.0 * M_PI / armor_num_);
+            double orient_err = std::abs(aimer::math::angle_diff(orient_yaw, pred_orient_yaw));
+            if (pos_err > secondary_pos_gate || orient_err > secondary_orient_gate) {
+                debug::print(debug::PrintMode::WARNING, "SpMotion",
+                    "Skip secondary update: armor.id={}, pos_err={:.3f}m, orient_err={:.1f}deg",
+                    armor.id, pos_err, orient_err * 180.0 / M_PI);
+                continue;
+            }
+        }
+
+        VectorZ inner_z;
         double x_arr[sp_model::N_X], z_arr[sp_model::N_Z];
         for (int i = 0; i < sp_model::N_X; ++i) x_arr[i] = x[i];
         measure_func(x_arr, z_arr);
@@ -388,6 +407,9 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         }
 
         MatrixZZ R = build_R(obs.z[obs::DIST], std::abs(armor.z_to_v()));
+        if (!is_primary) {
+            R *= secondary_r_scale;
+        }
         auto status = ekf_.update_forward_gated(
             measure_func, z, R, reset_state,
             chi2_threshold, max_reject, q_scale_increase, q_scale_decay

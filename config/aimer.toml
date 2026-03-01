@@ -283,6 +283,15 @@
     #@double 保持追踪的面积比例，当前追踪装甲板面积 >= 最大面积 * 此比例时保持追踪
     keep_tracking_area_ratio = 0.9
 
+    # 同帧多板更新保护参数
+    # 非主装甲板若与预测偏差过大则跳过，防止误匹配污染滤波
+    #@double 次观测位置误差门限 (m)
+    multi_update_pos_gate = 0.45
+    #@double 次观测朝向误差门限 (rad)
+    multi_update_orient_gate = 1.22
+    #@double 次观测R缩放 (>1 表示降低次观测权重)
+    secondary_r_scale = 1.3
+
     # 陀螺等级阈值 (度/秒)
     #@double top_level 1 激活阈值 (°/s)
     top1_activate_w = 90.0
@@ -297,8 +306,8 @@
     # 马氏距离门限检查参数 (4维观测, p=0.01)
     #@double χ²门限, 超过则拒绝观测
     chi2_threshold = 13.28
-    #@int 连续拒绝次数上限, 超过则重置EKF
-    max_reject = 5
+    #@int 连续拒绝次数上限, 超过则重置EKF（多板同帧更新下适当放宽）
+    max_reject = 8
     #@double 拒绝后过程噪声放大倍数
     q_scale_increase = 1.5
     #@double 接受后过程噪声衰减倍数 (最小为1.0)
