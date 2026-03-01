@@ -26,6 +26,7 @@
 #include "plugin/plotter/plotter.hpp"
 #include "plugin/rmcv_bag/recorder_node.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
+#include "plugin/webview/dashboard.hpp"
 #include "umt/umt.hpp"
 
 #ifndef WEB_DIR
@@ -75,6 +76,11 @@ int main(int argc, char* argv[]) {
     // 设置全局比赛模式标志 (其他节点可以读取)
     auto match_mode_flag = umt::BasicObjManager<bool>::find_or_create("match_mode", match_mode);
     match_mode_flag->get() = match_mode;
+
+    // Web 模式下启用 dashboard 遥测 (非 web 模式下 dashboard::set() 零开销)
+    if (web_mode) {
+        dashboard::enable();
+    }
 
     // 创建全局运行标志 (所有线程共享)
     auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);

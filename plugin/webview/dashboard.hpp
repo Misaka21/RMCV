@@ -31,9 +31,14 @@ public:
         return inst;
     }
 
-    // 设置值
+    // 启用遥测 (仅在 --web 模式下调用)
+    void enable() { enabled_.store(true, std::memory_order_relaxed); }
+    bool enabled() const { return enabled_.load(std::memory_order_relaxed); }
+
+    // 设置值 (非 web 模式下几乎零开销)
     template<typename T>
     void set(const std::string& key, const T& value) {
+        if (!enabled_.load(std::memory_order_relaxed)) return;
         std::unique_lock lock(mutex_);
         data_[key] = value;
         version_.fetch_add(1, std::memory_order_relaxed);
@@ -80,12 +85,17 @@ public:
 
 private:
     Registry() = default;
+    std::atomic<bool> enabled_{false};
     mutable std::shared_mutex mutex_;
     std::unordered_map<std::string, Value> data_;
     std::atomic<uint64_t> version_{0};
 };
 
 // 便捷函数
+inline void enable() {
+    Registry::instance().enable();
+}
+
 template<typename T>
 inline void set(const std::string& key, const T& value) {
     Registry::instance().set(key, value);

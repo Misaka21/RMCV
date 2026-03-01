@@ -848,10 +848,13 @@ AsyncDetectionResult TensorrtDetector::pop()
 {
     TrtInferenceTask task;
 
-    // 出队
+    // 出队 (阻塞等待, 支持 stop() 唤醒)
     {
         std::unique_lock lock(task_mutex_);
-        task_cv_.wait(lock, [this] { return !task_queue_.empty(); });
+        task_cv_.wait(lock, [this] { return !task_queue_.empty() || stopped_.load(); });
+        if (stopped_.load() && task_queue_.empty()) {
+            return {};  // 返回空结果
+        }
         task = std::move(task_queue_.front());
         task_queue_.pop();
     }
@@ -886,6 +889,11 @@ AsyncDetectionResult TensorrtDetector::pop()
 size_t TensorrtDetector::queue_size() const {
     std::lock_guard lock(task_mutex_);
     return task_queue_.size();
+}
+
+void TensorrtDetector::stop() {
+    stopped_.store(true);
+    task_cv_.notify_all();
 }
 
 }  // namespace autoaim::detector

@@ -137,6 +137,11 @@ public:
     AsyncDetectionResult pop() override;
     size_t queue_size() const override;
 
+    /**
+     * @brief 通知 pop() 停止阻塞 (用于退出)
+     */
+    void stop();
+
 private:
     /**
      * @brief 从 ONNX 构建 TensorRT engine
@@ -256,6 +261,7 @@ private:
     mutable std::mutex task_mutex_;
     std::condition_variable task_cv_;
     std::queue<TrtInferenceTask> task_queue_;
+    std::atomic<bool> stopped_{false};
 
     // 配置
     TensorrtConfig config_;
