@@ -53,6 +53,10 @@ double get_new_armor_area_ratio() {
     return get_double_param("AutoAim.Predictor.new_armor_area_ratio", DEFAULT_NEW_ARMOR_AREA_RATIO);
 }
 
+double get_existing_armor_distance() {
+    return get_double_param("AutoAim.Predictor.existing_armor_distance", 0.5);
+}
+
 double get_jump_distance_limit() {
     return get_double_param("AutoAim.Predictor.jump_distance_limit", DEFAULT_JUMP_DISTANCE_LIMIT);
 }
@@ -315,6 +319,7 @@ std::vector<ArmorObservation> VehicleModel::filter(
     // 读取运行时参数
     const double existing_area_ratio = get_existing_armor_area_ratio();
     const double new_area_ratio = get_new_armor_area_ratio();
+    const double existing_dist = get_existing_armor_distance();
     const double jump_limit = get_jump_distance_limit();
     const double new_max_dist = get_new_armor_max_distance();
 
@@ -351,7 +356,7 @@ std::vector<ArmorObservation> VehicleModel::filter(
         }
 
         // 判断是否是已存在的装甲板 (用位置匹配，因为 ID 还未分配)
-        bool is_existing = !last.empty() && closest < 0.5;
+        bool is_existing = !last.empty() && closest < existing_dist;
 
         // 规则2: 面积过小
         if (is_existing) {
@@ -417,6 +422,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
         int best_idx = -1;
 
         double theta = motion_->get_theta();
+        double omega = spin_.omega;
 
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
@@ -424,7 +430,13 @@ VehicleState VehicleModel::predict(double timestamp) const {
             as.id = i;
 
             as.position = motion_->predict_armor_pos(i, dt);
-            as.velocity = vs.velocity;  // 近似用中心速度
+            Eigen::Vector3d offset = as.position - vs.center;
+            Eigen::Vector3d tangent_vel(
+                -omega * offset.y(),
+                +omega * offset.x(),
+                0
+            );
+            as.velocity = vs.velocity + tangent_vel;
             as.yaw = theta + i * (2.0 * M_PI / armor_num);
             as.visible = (i == 0);  // 只有当前追踪的可见
             as.last_seen = last_update_time_;

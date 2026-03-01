@@ -165,9 +165,40 @@ void SpinMotion::update(const ArmorData& armor, double timestamp) {
 void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     if (armors.empty()) return;
 
+    // 优先保持追踪当前 detector_id，避免双板之间反复横跳
+    const auto& primary = [&]() -> const ArmorData& {
+        if (armors.size() == 1) {
+            return armors[0];
+        }
+
+        double keep_ratio = runtime_param::get_param<double>("AutoAim.Predictor.SpinEKF.keep_tracking_area_ratio");
+
+        double max_area = 0;
+        int max_area_idx = 0;
+        double tracked_area = 0;
+        int tracked_idx = -1;
+
+        for (size_t i = 0; i < armors.size(); ++i) {
+            double area = aimer::math::get_area(armors[i].observation.pts);
+            if (area > max_area) {
+                max_area = area;
+                max_area_idx = static_cast<int>(i);
+            }
+            if (armors[i].id == tracked_detector_id_) {
+                tracked_idx = static_cast<int>(i);
+                tracked_area = area;
+            }
+        }
+
+        if (tracked_idx >= 0 && tracked_area >= keep_ratio * max_area) {
+            return armors[tracked_idx];
+        }
+        return armors[max_area_idx];
+    }();
+
     // 单装甲板：用原来的方法
     if (armors.size() == 1) {
-        update(armors[0], timestamp);
+        update(primary, timestamp);
         return;
     }
 
@@ -176,8 +207,6 @@ void SpinMotion::update(const std::vector<ArmorData>& armors, double timestamp) 
     // - 不用射线交点法计算半径（对 PnP 误差敏感，会抖）
     // - 半径让 EKF 自己通过观测慢慢收敛
     // - 双装甲板时只是降低观测噪声（朝向角更可信）
-
-    const auto& primary = armors[0];  // 用第一个装甲板（z_to_v 更小，更正对）
 
     // ==================== 初始化 ====================
     if (!initialized_) {

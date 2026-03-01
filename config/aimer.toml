@@ -117,27 +117,27 @@
     # 过程噪声 Q (越大越信任观测，越小越信任预测)
     # 参考 rm.cv.fans lmtd-top-model 参数
     #@double 旋转中心位置过程噪声 (xc, yc, zc)
-    q_pos = 2.8
+    q_pos = 1.2
     #@double 旋转中心速度过程噪声 (vx, vy, vz)，大值允许快速加减速
-    q_vel = 2800.0
+    q_vel = 800.0
     #@double 车体朝向角θ过程噪声
-    q_theta = 2.8
+    q_theta = 0.6
     #@double 角速度ω过程噪声，较大以适应陀螺加减速
-    q_omega = 280.0
+    q_omega = 120.0
     #@double 陀螺半径r过程噪声
-    q_r = 0.005
+    q_r = 0.003
     #@double 高度差dz过程噪声 (dz 现在在状态向量中滤波)
-    q_dz = 100.0
+    q_dz = 6.0
 
     # 观测噪声 R (越大越不信任观测，滤波越平滑)
     #@double yaw/pitch角度观测噪声 (调大减少位置抖动)
-    r_angle = 15.0
-    #@double 距离观测噪声系数, R_dis = r_dis_k × distance²
-    r_dis_k = 80.0
+    r_angle = 4.0
+    #@double 距离观测噪声系数, R_dis = r_dis_k × distance⁴
+    r_dis_k = 35.0
     #@double 装甲板朝向角观测噪声 - 单块时 (调大减少朝向抖动)
-    r_armor_yaw_single = 150.0
+    r_armor_yaw_single = 45.0
     #@double 装甲板朝向角观测噪声 - 双块时
-    r_armor_yaw_double = 80.0
+    r_armor_yaw_double = 22.0
 
     # 半径参数
     #@double 初始半径 (m)
@@ -152,6 +152,10 @@
     force_zero_vz = true
     #@double 两对装甲板高度差最大值 (m)
     dz_abs_max = 0.10
+
+    # 装甲板选择 (防止双板横跳)
+    #@double 保持追踪的面积比例，当前追踪装甲板面积 >= 最大面积 * 此比例时保持追踪
+    keep_tracking_area_ratio = 0.9
 
 [AutoAim.Predictor.SpinEKF.Gating]
     # 马氏距离门限检查参数 (4维观测, p=0.01)
@@ -234,29 +238,29 @@
 
     # 过程噪声 Q (参考 SpinEKF)
     #@double 旋转中心位置过程噪声
-    q_pos = 0.5
+    q_pos = 0.15
     #@double 旋转中心速度过程噪声
-    q_vel = 500.0
+    q_vel = 150.0
     #@double 朝向角θ过程噪声
-    q_theta = 0.001
+    q_theta = 0.02
     #@double 角速度ω过程噪声，较大值以更快响应陀螺加减速
-    q_omega = 1400.0
+    q_omega = 320.0
     #@double 基础半径r过程噪声
-    q_r = 0.005
+    q_r = 0.003
     #@double 半径差l过程噪声 (不乘dt)
-    q_l = 0.005
+    q_l = 0.003
     #@double 高度差h过程噪声 (不乘dt)
-    q_h = 0.005
+    q_h = 0.003
 
     # 观测噪声 R
     #@double yaw/pitch角度观测噪声
-    r_angle = 5.0
+    r_angle = 1.5
     #@double 距离观测噪声系数, R_dis = r_dis_k × distance⁴
-    r_dis_k = 10.0
+    r_dis_k = 6.0
     #@double 装甲板朝向角观测噪声 - 单块
-    r_armor_yaw_single = 5.0
+    r_armor_yaw_single = 2.5
     #@double 装甲板朝向角观测噪声 - 双块
-    r_armor_yaw_double = 2.5
+    r_armor_yaw_double = 1.2
 
     # 几何参数
     #@double 初始半径 (m)
