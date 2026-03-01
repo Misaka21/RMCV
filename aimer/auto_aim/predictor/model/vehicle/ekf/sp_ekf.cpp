@@ -15,6 +15,20 @@
 
 namespace autoaim::predictor {
 
+namespace {
+
+double get_double_param(const std::string& name, double default_val) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_val;
+}
+
+}  // namespace
+
 // ============================================================================
 // SpMotion 实现
 // ============================================================================
@@ -214,11 +228,8 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
-    // ⭐ 关键修正: 自适应因子要与 sp_vision 的定义保持一致
-    // sp_vision 使用的是 INWARD 装甲板朝向:
-    //   delta = armor_yaw_inward - position_yaw
-    // 当前状态里 inner_z[ARMOR_YAW] 是 OUTWARD，需要先转回 INWARD 再比较，
-    // 否则会出现整体偏移 π，导致自适应因子长期饱和。
+    // sp_vision 的 R 构造使用 delta = |armor_yaw_inward - center_yaw|
+    // 当前 inner_z[ARMOR_YAW] 是 OUTWARD，需要先转回 INWARD 再计算 delta。
     double predicted_armor_yaw_inward = inner_z[sp_model::ARMOR_YAW] - M_PI;
     double predicted_z_to_v = std::abs(aimer::math::angle_diff(
         predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
@@ -361,12 +372,12 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
-    // ⭐ 与单板更新保持一致：OUTWARD -> INWARD 后再计算自适应角差
+    // 与单板更新保持一致：OUTWARD -> INWARD 后再计算 delta
     double predicted_armor_yaw_inward = inner_z[sp_model::ARMOR_YAW] - M_PI;
     double predicted_z_to_v = std::abs(aimer::math::angle_diff(
         predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
 
-    // 双装甲板时观测噪声更小
+    // R 使用 sp_vision 同款公式
     MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v, 2);
     auto status = ekf_.update_forward_gated(
         measure_func, z, R, reset_state,
@@ -401,27 +412,51 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
 SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
     MatrixXX Q = MatrixXX::Zero();
 
-    double q_pos = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_pos");
-    double q_vel = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_vel");
-    double q_theta = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_theta");
-    double q_omega = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_omega");
-    double q_r = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_r");
-    double q_l = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_l");
-    double q_h = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_h");
+    // 与 sp_vision_25 对齐: Piecewise White Noise Model
+    // v_pos: 平动加速度方差, v_yaw: 角加速度方差
+    double v_pos = get_double_param(
+        "AutoAim.Predictor.SpEKF.q_acc_pos",
+        get_double_param("AutoAim.Predictor.SpEKF.q_vel", 100.0)
+    );
+    double v_yaw = get_double_param(
+        "AutoAim.Predictor.SpEKF.q_acc_yaw",
+        get_double_param("AutoAim.Predictor.SpEKF.q_omega", 400.0)
+    );
 
-    // 位置-速度块
-    Q(sp_model::XC, sp_model::XC) = q_pos * dt;
-    Q(sp_model::VX, sp_model::VX) = q_vel * dt;
-    Q(sp_model::YC, sp_model::YC) = q_pos * dt;
-    Q(sp_model::VY, sp_model::VY) = q_vel * dt;
-    Q(sp_model::ZC, sp_model::ZC) = q_pos * dt;
-    Q(sp_model::VZ, sp_model::VZ) = q_vel * dt;
+    double q_r = get_double_param("AutoAim.Predictor.SpEKF.q_r", 0.0);
+    double q_l = get_double_param("AutoAim.Predictor.SpEKF.q_l", 0.0);
+    double q_h = get_double_param("AutoAim.Predictor.SpEKF.q_h", 0.0);
 
-    // 朝向角-角速度块
-    Q(sp_model::THETA, sp_model::THETA) = q_theta * dt;
-    Q(sp_model::OMEGA, sp_model::OMEGA) = q_omega * dt;
+    double dt2 = dt * dt;
+    double dt3 = dt2 * dt;
+    double dt4 = dt2 * dt2;
+    double a = dt4 * 0.25;
+    double b = dt3 * 0.5;
+    double c = dt2;
 
-    // 几何参数 (不乘 dt)
+    // x/vx, y/vy, z/vz 3个分块
+    Q(sp_model::XC, sp_model::XC) = a * v_pos;
+    Q(sp_model::XC, sp_model::VX) = b * v_pos;
+    Q(sp_model::VX, sp_model::XC) = b * v_pos;
+    Q(sp_model::VX, sp_model::VX) = c * v_pos;
+
+    Q(sp_model::YC, sp_model::YC) = a * v_pos;
+    Q(sp_model::YC, sp_model::VY) = b * v_pos;
+    Q(sp_model::VY, sp_model::YC) = b * v_pos;
+    Q(sp_model::VY, sp_model::VY) = c * v_pos;
+
+    Q(sp_model::ZC, sp_model::ZC) = a * v_pos;
+    Q(sp_model::ZC, sp_model::VZ) = b * v_pos;
+    Q(sp_model::VZ, sp_model::ZC) = b * v_pos;
+    Q(sp_model::VZ, sp_model::VZ) = c * v_pos;
+
+    // θ/ω 分块
+    Q(sp_model::THETA, sp_model::THETA) = a * v_yaw;
+    Q(sp_model::THETA, sp_model::OMEGA) = b * v_yaw;
+    Q(sp_model::OMEGA, sp_model::THETA) = b * v_yaw;
+    Q(sp_model::OMEGA, sp_model::OMEGA) = c * v_yaw;
+
+    // 几何参数默认与 sp_vision 一致保持常量；保留极小噪声可选
     Q(sp_model::R, sp_model::R) = q_r;
     Q(sp_model::L, sp_model::L) = q_l;
     Q(sp_model::H, sp_model::H) = q_h;
@@ -430,42 +465,26 @@ SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
 }
 
 SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v, int observed_armor_count) const {
+    (void)observed_armor_count;
     MatrixZZ R = MatrixZZ::Zero();
 
-    double r_angle = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_angle");
-    double r_dis_k = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_k");
+    // 与 sp_vision_25 对齐:
+    // R = diag(4e-3, 4e-3, log(|delta|+1)+1, 0.09 + log(dis+1)/200)
+    // 其中 delta = |armor_yaw - center_yaw|，这里用预测的 |z_to_v| 对应
+    double r_yaw_pitch = get_double_param("AutoAim.Predictor.SpEKF.r_yaw_pitch", 4e-3);
+    double r_dis_base = get_double_param("AutoAim.Predictor.SpEKF.r_dis_base", 1.0);
+    double r_armor_yaw_base = get_double_param("AutoAim.Predictor.SpEKF.r_armor_yaw_base", 9e-2);
+    double r_armor_yaw_dis_scale = get_double_param("AutoAim.Predictor.SpEKF.r_armor_yaw_dis_scale", 1.0 / 200.0);
 
-    // 基础朝向角噪声
-    double r_armor_yaw_base = (observed_armor_count >= 2)
-        ? runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_double")
-        : runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_single");
+    double delta = std::abs(z_to_v);
+    double dis = std::abs(distance);
 
-    // ⭐ 自适应噪声 (来自 sp_vision_25)
-    // 重要: z_to_v 应该是 EKF 预测的角度，不是观测值！
-    //
-    // 原理: 侧对时 PnP 朝向角精度下降，需要增大 R
-    // 关键: 用预测值计算，这样:
-    //   - 正常观测: 预测和观测都接近，R 适中，正常更新
-    //   - 离群观测: 预测值正常，R 正常，innovation 大，被 Gating 拒绝
-    //
-    // 如果用观测值计算 R (错误做法):
-    //   - 离群观测 z_to_v 异常大 → R 变大 → 马氏距离变小 → 反而通过 Gating！
+    double r_dis = r_dis_base * (std::log(delta + 1.0) + 1.0);
+    double r_armor_yaw = r_armor_yaw_base + r_armor_yaw_dis_scale * std::log(dis + 1.0);
 
-    // 防止异常值: z_to_v 理论范围 [0, π/2]，clamp 到 [0, 1.5]
-    double z_to_v_clamped = std::clamp(std::abs(z_to_v), 0.0, 1.5);
-
-    // 使用 log 函数平滑过渡
-    double adaptive_factor = std::log(z_to_v_clamped + 1.0) + 1.0;
-    // z_to_v = 0.0 → factor = 1.0 (正对)
-    // z_to_v = 0.5 → factor ≈ 1.4
-    // z_to_v = 1.0 → factor ≈ 1.7 (侧对)
-    // z_to_v = 1.5 → factor ≈ 1.9 (max)
-
-    double r_armor_yaw = r_armor_yaw_base * adaptive_factor;
-
-    R(sp_model::YAW, sp_model::YAW) = r_angle;
-    R(sp_model::PITCH, sp_model::PITCH) = r_angle;
-    R(sp_model::DIS, sp_model::DIS) = r_dis_k * std::pow(distance, 4.0);
+    R(sp_model::YAW, sp_model::YAW) = r_yaw_pitch;
+    R(sp_model::PITCH, sp_model::PITCH) = r_yaw_pitch;
+    R(sp_model::DIS, sp_model::DIS) = r_dis;
     R(sp_model::ARMOR_YAW, sp_model::ARMOR_YAW) = r_armor_yaw;
 
     return R;
