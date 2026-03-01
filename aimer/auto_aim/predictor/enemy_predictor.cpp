@@ -5,12 +5,17 @@
 
 #include "enemy_predictor.hpp"
 
+#include <algorithm>
+
 #include "model/enemy_model.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
 
 EnemyPredictor::EnemyPredictor() {
     model_factory_ = std::make_unique<EnemyModelFactory>();
+    pending_first_seen_time_.fill(-1.0);
+    pending_last_seen_time_.fill(-1.0);
 }
 
 EnemyPredictor::~EnemyPredictor() = default;
@@ -37,23 +42,74 @@ void EnemyPredictor::update_observations(const DetectionResult& detection, doubl
 void EnemyPredictor::update_models() {
     const auto& table = observer_.table();
 
+    // 新目标消抖参数：防止 detector number 抖动导致“一辆车变多辆”
+    double confirm_time = runtime_param::get_param<double>(
+        "AutoAim.Predictor.IDDebounce.new_target_confirm_time"
+    );
+    int confirm_frames = static_cast<int>(runtime_param::get_param<int64_t>(
+        "AutoAim.Predictor.IDDebounce.new_target_confirm_frames"
+    ));
+    double max_gap = runtime_param::get_param<double>(
+        "AutoAim.Predictor.IDDebounce.new_target_max_gap"
+    );
+    double pending_timeout = runtime_param::get_param<double>(
+        "AutoAim.Predictor.IDDebounce.pending_timeout"
+    );
+    confirm_frames = std::max(1, confirm_frames);
+
+    std::array<bool, MAX_TARGETS> seen_this_frame = {};
+
     // 遍历所有检测到的目标
     for (int target_id : table.get_target_ids()) {
         if (target_id <= 0 || target_id >= MAX_TARGETS) continue;
+        seen_this_frame[target_id] = true;
 
         const auto& observations = table.get(target_id);
         if (observations.empty()) continue;
 
-        // 从观测中获取目标类型
-        EnemyType enemy_type = static_cast<EnemyType>(observations[0].target_id);
-
-        // 如果模型不存在，创建
         if (!enemy_models_[target_id]) {
+            // 该 target_id 尚未建模，先做连续出现确认
+            bool continuous = pending_seen_count_[target_id] > 0
+                && pending_last_seen_time_[target_id] >= 0
+                && (current_time_ - pending_last_seen_time_[target_id]) <= max_gap;
+
+            if (!continuous) {
+                pending_seen_count_[target_id] = 0;
+                pending_first_seen_time_[target_id] = current_time_;
+            }
+
+            pending_seen_count_[target_id] += 1;
+            pending_last_seen_time_[target_id] = current_time_;
+
+            double seen_duration = current_time_ - pending_first_seen_time_[target_id];
+            if (pending_seen_count_[target_id] < confirm_frames || seen_duration < confirm_time) {
+                continue;  // 未达到确认条件，不创建新模型
+            }
+
+            // 从观测中获取目标类型并创建模型
+            EnemyType enemy_type = static_cast<EnemyType>(observations[0].target_id);
             enemy_models_[target_id] = model_factory_->create(target_id, enemy_type);
+
+            // 清空 pending 状态
+            pending_seen_count_[target_id] = 0;
+            pending_first_seen_time_[target_id] = -1.0;
+            pending_last_seen_time_[target_id] = -1.0;
         }
 
         // 更新模型
         enemy_models_[target_id]->update(observations, current_time_);
+    }
+
+    // 清理长时间未续上的 pending 候选
+    for (int i = 1; i < MAX_TARGETS; ++i) {
+        if (seen_this_frame[i]) continue;
+        if (pending_seen_count_[i] <= 0) continue;
+        if (pending_last_seen_time_[i] < 0) continue;
+        if ((current_time_ - pending_last_seen_time_[i]) > pending_timeout) {
+            pending_seen_count_[i] = 0;
+            pending_first_seen_time_[i] = -1.0;
+            pending_last_seen_time_[i] = -1.0;
+        }
     }
 
     // 更新未检测到的目标 (传入空观测，让模型判断超时)
