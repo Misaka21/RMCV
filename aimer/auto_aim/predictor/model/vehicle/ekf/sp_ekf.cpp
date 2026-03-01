@@ -344,6 +344,11 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         "AutoAim.Predictor.SpEKF.multi_update_orient_gate", 70.0 * M_PI / 180.0);
     double secondary_r_scale = std::max(
         1.0, get_double_param("AutoAim.Predictor.SpEKF.secondary_r_scale", 1.3));
+    double secondary_nis_scale = std::max(
+        1.0, get_double_param("AutoAim.Predictor.SpEKF.secondary_nis_scale", 1.0));
+    double multi_update_min_omega = std::max(
+        0.0, get_double_param("AutoAim.Predictor.SpEKF.multi_update_min_omega", 1.2));
+    bool allow_secondary_update = std::abs(ekf_.get_x()[sp_model::OMEGA]) >= multi_update_min_omega;
 
     // 3. 同帧多观测更新（主板优先，随后其余板）
     for (const ArmorData* armor_ptr : ordered_armors) {
@@ -369,6 +374,10 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
 
         VectorX x = ekf_.get_x();
         if (!is_primary) {
+            if (!allow_secondary_update) {
+                continue;
+            }
+
             Eigen::Vector3d pred_pos = h_armor_xyz(x, matched_id);
             double pos_err = (pred_pos - obs.pos).norm();
             double pred_orient_yaw = x[sp_model::THETA] + matched_id * (2.0 * M_PI / armor_num_);
@@ -410,17 +419,32 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         if (!is_primary) {
             R *= secondary_r_scale;
         }
-        auto status = ekf_.update_forward_gated(
-            measure_func, z, R, reset_state,
-            chi2_threshold, max_reject, q_scale_increase, q_scale_decay
-        );
+        if (!is_primary) {
+            // 次观测不参与 reject_count/reset，避免启停时被多观测放大导致追踪恶化
+            double nis = ekf_.compute_mahalanobis_sq(measure_func, z, R);
+            double threshold = chi2_threshold;
+            if (ekf_.get_q_scale() > 1.0) threshold *= ekf_.get_q_scale();
+            threshold *= secondary_nis_scale;
+            if (nis > threshold) {
+                debug::print(debug::PrintMode::WARNING, "SpMotion",
+                    "Skip secondary update by NIS: armor.id={}, nis={:.2f}, th={:.2f}",
+                    armor.id, nis, threshold);
+                continue;
+            }
+            ekf_.update_forward(measure_func, z, R);
+        } else {
+            auto status = ekf_.update_forward_gated(
+                measure_func, z, R, reset_state,
+                chi2_threshold, max_reject, q_scale_increase, q_scale_decay
+            );
 
-        if (status == aimer::filter::UpdateStatus::RESET) {
-            tracked_armor_id_ = 0;
-            last_detector_id_ = armor.id;
-            debug::print(debug::PrintMode::WARNING, "SpMotion",
-                "EKF reset due to {} consecutive rejections (matched_id={})",
-                max_reject, matched_id);
+            if (status == aimer::filter::UpdateStatus::RESET) {
+                tracked_armor_id_ = 0;
+                last_detector_id_ = armor.id;
+                debug::print(debug::PrintMode::WARNING, "SpMotion",
+                    "EKF reset due to {} consecutive rejections (matched_id={})",
+                    max_reject, matched_id);
+            }
         }
     }
 
