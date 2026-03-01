@@ -339,15 +339,14 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.Gating.q_scale_increase");
     double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.Gating.q_scale_decay");
     // 同帧次观测保护: 防止错配观测拉崩滤波器
-    double secondary_pos_gate = get_double_param("AutoAim.Predictor.SpEKF.multi_update_pos_gate", 0.45);
-    double secondary_orient_gate = get_double_param(
-        "AutoAim.Predictor.SpEKF.multi_update_orient_gate", 70.0 * M_PI / 180.0);
+    double secondary_pos_gate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_pos_gate");
+    double secondary_orient_gate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_orient_gate");
     double secondary_r_scale = std::max(
-        1.0, get_double_param("AutoAim.Predictor.SpEKF.secondary_r_scale", 1.3));
+        1.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.secondary_r_scale"));
     double secondary_nis_scale = std::max(
-        1.0, get_double_param("AutoAim.Predictor.SpEKF.secondary_nis_scale", 1.0));
+        1.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.secondary_nis_scale"));
     double multi_update_min_omega = std::max(
-        0.0, get_double_param("AutoAim.Predictor.SpEKF.multi_update_min_omega", 1.2));
+        0.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_min_omega"));
     bool allow_secondary_update = std::abs(ekf_.get_x()[sp_model::OMEGA]) >= multi_update_min_omega;
 
     // 3. 同帧多观测更新（主板优先，随后其余板）
