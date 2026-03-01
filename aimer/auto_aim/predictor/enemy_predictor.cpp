@@ -12,6 +12,7 @@ namespace autoaim::predictor {
 
 EnemyPredictor::EnemyPredictor() {
     model_factory_ = std::make_unique<EnemyModelFactory>();
+    model_last_seen_time_.fill(-1.0);
     pending_first_seen_time_.fill(-1.0);
     pending_last_seen_time_.fill(-1.0);
 }
@@ -35,10 +36,15 @@ BattlefieldSnapshot EnemyPredictor::predict(const DetectionResult& detection, do
 
 void EnemyPredictor::update_observations(const DetectionResult& detection, double timestamp) {
     // 告诉 observer 哪些 target_id 有活跃模型
-    // 用于 ID 纠正时的"已跟踪"判断，避免用 table 自身结果导致反馈循环
+    // 用于 ID 纠正时的"已跟踪"判断，避免用 table 自身结果导致反馈循环。
+    // 注意这里会过滤掉“超时但尚未在本帧 update_models() 清理”的旧模型。
     std::set<int> active_ids;
+    double stale_limit = runtime_param::get_param<double>("AutoAim.Predictor.lost_timeout");
     for (int i = 1; i < MAX_TARGETS; ++i) {
-        if (enemy_models_[i] && enemy_models_[i]->alive()) {
+        if (enemy_models_[i] && enemy_models_[i]->alive()
+            && model_last_seen_time_[i] >= 0
+            && (current_time_ - model_last_seen_time_[i]) <= stale_limit)
+        {
             active_ids.insert(i);
         }
     }
@@ -98,6 +104,7 @@ void EnemyPredictor::update_models() {
 
         // 更新模型
         enemy_models_[target_id]->update(observations, current_time_);
+        model_last_seen_time_[target_id] = current_time_;
     }
 
     // 清理长时间未续上的 pending 候选
@@ -119,6 +126,7 @@ void EnemyPredictor::update_models() {
             // 如果模型失效，销毁
             if (!enemy_models_[i]->alive()) {
                 enemy_models_[i].reset();
+                model_last_seen_time_[i] = -1.0;
             }
         }
     }

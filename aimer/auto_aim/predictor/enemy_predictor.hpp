@@ -91,6 +91,9 @@ private:
     // 当前帧自身状态
     aimer::RobotState current_state_;
 
+    // 模型最近一次被真实观测更新的时间 (用于 observer 纠正时过滤过期模型)
+    std::array<double, MAX_TARGETS> model_last_seen_time_ = {};
+
     // 新目标消抖状态：需连续出现一段时间才创建模型
     std::array<double, MAX_TARGETS> pending_first_seen_time_ = {};
     std::array<double, MAX_TARGETS> pending_last_seen_time_ = {};
