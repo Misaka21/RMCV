@@ -97,7 +97,7 @@ public:
     virtual Eigen::Vector3d get_armor_pos() const = 0;
 
     /**
-     * @brief 获取车体朝向角 (OUTWARD, 从中心指向 id=0 装甲板)
+     * @brief 获取当前追踪装甲板朝向角 (OUTWARD)
      * @return 角度 (rad)
      */
     virtual double get_theta() const = 0;

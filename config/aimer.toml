@@ -238,13 +238,13 @@
 
     # 过程噪声 Q (70df1a 基线)
     #@double 旋转中心位置过程噪声
-    q_pos = 0.15
+    q_pos = 0.22
     #@double 旋转中心速度过程噪声
-    q_vel = 150.0
+    q_vel = 320.0
     #@double 朝向角θ过程噪声
-    q_theta = 0.02
+    q_theta = 0.05
     #@double 角速度ω过程噪声，较大值以更快响应陀螺加减速
-    q_omega = 320.0
+    q_omega = 900.0
     #@double 基础半径r过程噪声
     q_r = 0.003
     #@double 半径差l过程噪声 (不乘dt)
@@ -254,13 +254,13 @@
 
     # 观测噪声 R (70df1a 基线)
     #@double yaw/pitch角度观测噪声
-    r_angle = 1.5
+    r_angle = 2.8
     #@double 距离观测噪声系数, R_dis = r_dis_k × distance⁴
-    r_dis_k = 6.0
+    r_dis_k = 8.0
     #@double 装甲板朝向角观测噪声 - 单块
-    r_armor_yaw_single = 2.5
+    r_armor_yaw_single = 4.2
     #@double 装甲板朝向角观测噪声 - 双块
-    r_armor_yaw_double = 1.2
+    r_armor_yaw_double = 2.1
 
     # 几何参数
     #@double 初始半径 (m)
@@ -286,11 +286,11 @@
 
     # 匹配切板迟滞参数（在 70df1a 基线上新增）
     #@double 切板所需最小角度优势 (rad)
-    match_switch_min_angle_gain = 0.35
+    match_switch_min_angle_gain = 0.24
     #@double 切板所需最小位置优势 (m)
-    match_switch_min_dist_gain = 0.04
+    match_switch_min_dist_gain = 0.03
     #@double 旧追踪板可接受最大匹配距离 (m)
-    match_tracked_max_dist = 0.45
+    match_tracked_max_dist = 0.35
 
     # 陀螺等级阈值 (度/秒)
     #@double top_level 1 激活阈值 (°/s)

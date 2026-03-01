@@ -141,7 +141,10 @@ int SpMotion::match_armor(const ArmorData& armor) const {
             bool tracked_reasonable = (c.distance <= tracked_max_dist);
             bool angle_much_better = (c.angle_error - min_error) > switch_angle_gain;
             bool dist_much_better = (c.distance - best_dist) > switch_dist_gain;
-            if (tracked_reasonable && !(angle_much_better && dist_much_better)) {
+            // 只要新板在角度或位置上有一项明显更优就允许切换，
+            // 避免加速阶段因为迟滞过强导致“该切不切”。
+            bool new_has_clear_advantage = angle_much_better || dist_much_better;
+            if (tracked_reasonable && !new_has_clear_advantage) {
                 return prev_id;
             }
             break;
@@ -554,8 +557,7 @@ double SpMotion::get_theta() const {
     // 对齐 Spin/Lmtd 的外部语义: 返回“当前追踪装甲板”的 OUTWARD 朝向。
     // 内部状态 x[THETA] 存的是绝对 state_id=0 的朝向。
     VectorX x = ekf_.get_x();
-    double theta = x[sp_model::THETA] + tracked_armor_id_ * (2.0 * M_PI / armor_num_);
-    return aimer::math::reduced_angle(theta);
+    return x[sp_model::THETA] + tracked_armor_id_ * (2.0 * M_PI / armor_num_);
 }
 
 std::vector<Eigen::Vector3d> SpMotion::compute_all_armors_from_observation(
