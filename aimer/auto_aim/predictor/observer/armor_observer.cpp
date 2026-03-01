@@ -140,20 +140,20 @@ void ArmorObserver::merge_same_vehicle_ids(std::vector<ArmorObservation>& observ
         current_ids.insert(obs.target_id);
     }
 
-    // 找出上一帧跟踪但当前帧缺失的目标
+    // 找出有活跃模型但当前帧缺失的目标 (只恢复有模型的)
     std::set<int> missing_ids;
-    for (int id : prev_target_ids_) {
-        if (current_ids.count(id) == 0) {
+    for (int id : active_model_ids_) {
+        if (current_ids.count(id) == 0 && prev_target_pos_.count(id) > 0) {
             missing_ids.insert(id);
         }
     }
 
     if (missing_ids.empty()) return;
 
-    // 对每个"新出现"的观测 (target_id 上一帧不存在)，检查是否在缺失目标附近
+    // 对每个"新出现"的观测 (没有活跃模型)，检查是否在缺失目标附近
     for (auto& obs : observations) {
-        // 上一帧已跟踪的 ID 不需要纠正
-        if (prev_target_ids_.count(obs.target_id) > 0) continue;
+        // 有活跃模型的 ID 不需要纠正
+        if (active_model_ids_.count(obs.target_id) > 0) continue;
 
         double best_dist = 0.5;  // 阈值 0.5m (200fps 下帧间移动 < 0.025m)
         int best_id = -1;
@@ -186,21 +186,31 @@ void ArmorObserver::merge_same_vehicle_ids(std::vector<ArmorObservation>& observ
 /**
  * @brief 选择两个观测中更可靠的 target_id
  *
- * 策略: 已跟踪优先 → 置信度 → 正对程度
+ * 策略: 有模型优先 → 置信度 → 正对程度 → 小 ID (确定性 tiebreaker)
  */
 int ArmorObserver::pick_reliable_id(
     const ArmorObservation& a, const ArmorObservation& b
 ) const {
-    bool a_tracked = prev_target_ids_.count(a.target_id) > 0;
-    bool b_tracked = prev_target_ids_.count(b.target_id) > 0;
+    // 1. 有活跃模型的 ID 优先 (真正在跟踪的)
+    bool a_has_model = active_model_ids_.count(a.target_id) > 0;
+    bool b_has_model = active_model_ids_.count(b.target_id) > 0;
 
-    if (a_tracked != b_tracked) {
-        return a_tracked ? a.target_id : b.target_id;
+    if (a_has_model != b_has_model) {
+        return a_has_model ? a.target_id : b.target_id;
     }
+
+    // 2. 置信度差异显著时，选高置信度
     if (std::abs(a.confidence - b.confidence) > 0.05f) {
         return (a.confidence > b.confidence) ? a.target_id : b.target_id;
     }
-    return (std::abs(a.z_to_v) < std::abs(b.z_to_v)) ? a.target_id : b.target_id;
+
+    // 3. 正对程度 (z_to_v 更小 = 更可信的分类)
+    if (std::abs(std::abs(a.z_to_v) - std::abs(b.z_to_v)) > 0.1) {
+        return (std::abs(a.z_to_v) < std::abs(b.z_to_v)) ? a.target_id : b.target_id;
+    }
+
+    // 4. 确定性 tiebreaker: 小 ID 优先，防止摇摆
+    return std::min(a.target_id, b.target_id);
 }
 
 ArmorObservation ArmorObserver::solve_pnp(

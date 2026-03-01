@@ -34,6 +34,15 @@ BattlefieldSnapshot EnemyPredictor::predict(const DetectionResult& detection, do
 }
 
 void EnemyPredictor::update_observations(const DetectionResult& detection, double timestamp) {
+    // 告诉 observer 哪些 target_id 有活跃模型
+    // 用于 ID 纠正时的"已跟踪"判断，避免用 table 自身结果导致反馈循环
+    std::set<int> active_ids;
+    for (int i = 1; i < MAX_TARGETS; ++i) {
+        if (enemy_models_[i] && enemy_models_[i]->alive()) {
+            active_ids.insert(i);
+        }
+    }
+    observer_.set_active_model_ids(active_ids);
     observer_.observe(detection, timestamp);
 }
 

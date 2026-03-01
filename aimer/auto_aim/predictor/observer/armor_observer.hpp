@@ -55,6 +55,14 @@ public:
         double timestamp
     );
 
+    /**
+     * @brief 设置有活跃模型的目标 ID 集合 (由 EnemyPredictor 提供)
+     *
+     * 用于 ID 纠正时判断哪些目标是"已跟踪"的，
+     * 避免用 table 自身的输出做判断导致反馈循环。
+     */
+    void set_active_model_ids(const std::set<int>& ids) { active_model_ids_ = ids; }
+
     // 访问器
     const ArmorObservationTable& table() const { return table_; }
     double timestamp() const { return table_.timestamp(); }
@@ -185,6 +193,9 @@ private:
 
     // 上一帧活跃的目标ID (用于合并时优先选择已跟踪的ID)
     std::set<int> prev_target_ids_;
+
+    // EnemyPredictor 提供的活跃模型 ID (用于 ID 纠正的"真跟踪"判断)
+    std::set<int> active_model_ids_;
 
     // 上一帧各目标的位置 (用于单板误识别纠正)
     std::unordered_map<int, Eigen::Vector3d> prev_target_pos_;
