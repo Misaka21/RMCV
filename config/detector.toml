@@ -4,7 +4,7 @@
     #@string 检测器类型: "traditional" 或 "yolo"
     type = "yolo"
     #@bool 是否开启调试模式 (显示 OpenCV 窗口)
-    debug = false
+    debug = true
 
 # ==================== 传统检测器配置 ====================
 

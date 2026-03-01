@@ -11,9 +11,7 @@
 #include <fmt/format.h>
 #include <opencv2/imgproc.hpp>
 
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
 #include <opencv2/highgui.hpp>
-#endif
 
 namespace autobuff::detector {
 
@@ -718,10 +716,8 @@ void TraditionalDetector::draw_debug_image(const cv::Mat& src, const BuffDetecti
                 lit_color, 2);
 
     if (config_.show_window) {
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
         cv::imshow("Buff Detector", debug_image_);
         cv::waitKey(1);
-#endif
     }
 }
 

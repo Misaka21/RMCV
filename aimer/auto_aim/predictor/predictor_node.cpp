@@ -12,9 +12,7 @@
 #include <fmt/format.h>
 #include <opencv2/imgproc.hpp>
 
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
 #include <opencv2/highgui.hpp>
-#endif
 
 #include "aimer/common/types.hpp"
 #include "aimer/common/math/math.hpp"
@@ -184,10 +182,8 @@ void start_predictor_node() {
                     pub_debug.push(vis);
                 }
                 if (show_window) {
-#ifdef RMCV_WITH_OPENCV_HIGHGUI
                     cv::imshow("Predictor", vis);
                     cv::waitKey(1);
-#endif
                 }
             }
 
