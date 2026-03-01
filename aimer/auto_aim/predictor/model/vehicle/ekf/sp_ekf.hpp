@@ -254,7 +254,7 @@ private:
     Eigen::Vector3d h_armor_xyz(const VectorX& x, int id) const;
 
     MatrixXX build_Q(double dt) const;
-    MatrixZZ build_R(double distance, double z_to_v) const;
+    MatrixZZ build_R(double distance, double z_to_v, int observed_armor_count = 1) const;
 
     // ==================== EKF ====================
     Ekf ekf_;
@@ -267,9 +267,6 @@ private:
     // ==================== 追踪状态 ====================
     int tracked_armor_id_ = 0;   // 当前追踪的 state_id (0-3)
     int last_detector_id_ = -1;  // 上一帧的 armor.id（ArmorIdentifier 分配的跟踪 ID）
-    // 次观测启停保护: 记录上一帧角速度，避免加速阶段多观测拉飞
-    double last_omega_for_multi_ = 0.0;
-    bool has_last_omega_for_multi_ = false;
 };
 
 // ============================================================================

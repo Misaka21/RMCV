@@ -236,30 +236,31 @@
     # l = r_odd - r_even (id=1,3 用 r+l)
     # h = z_odd - z_even (id=1,3 用 zc+h)
 
-    # 过程噪声 Q (sp_vision_25 同款 Piecewise White Noise)
-    # Q 的位置/角度块用 dt^4/dt^3/dt^2 结构，参数是加速度方差
-    #@double 平动加速度方差 v_pos
-    q_acc_pos = 6000.0
-    #@double 角加速度方差 v_yaw
-    q_acc_yaw = 24000.0
-    #@double 基础半径r过程噪声 (sp_vision 同款可设 0)
-    q_r = 0.0
-    #@double 半径差l过程噪声 (sp_vision 同款可设 0)
-    q_l = 0.0
-    #@double 高度差h过程噪声 (sp_vision 同款可设 0)
-    q_h = 0.0
+    # 过程噪声 Q (70df1a 基线)
+    #@double 旋转中心位置过程噪声
+    q_pos = 0.15
+    #@double 旋转中心速度过程噪声
+    q_vel = 150.0
+    #@double 朝向角θ过程噪声
+    q_theta = 0.02
+    #@double 角速度ω过程噪声，较大值以更快响应陀螺加减速
+    q_omega = 320.0
+    #@double 基础半径r过程噪声
+    q_r = 0.003
+    #@double 半径差l过程噪声 (不乘dt)
+    q_l = 0.003
+    #@double 高度差h过程噪声 (不乘dt)
+    q_h = 0.003
 
-    # 观测噪声 R (sp_vision_25 同款)
-    # R = diag(r_yaw_pitch, r_yaw_pitch, r_dis_base*(log(|delta|+1)+1), r_armor_yaw_base + r_armor_yaw_dis_scale*log(dis+1))
-    # 其中 delta = |armor_yaw - center_yaw|，实现中用预测 |z_to_v| 等价
-    #@double yaw/pitch 固定观测噪声
-    r_yaw_pitch = 0.03
-    #@double 距离噪声基准系数
-    r_dis_base = 2.0
-    #@double 朝向角噪声基准
-    r_armor_yaw_base = 0.25
-    #@double 朝向角噪声距离项系数
-    r_armor_yaw_dis_scale = 0.015
+    # 观测噪声 R (70df1a 基线)
+    #@double yaw/pitch角度观测噪声
+    r_angle = 1.5
+    #@double 距离观测噪声系数, R_dis = r_dis_k × distance⁴
+    r_dis_k = 6.0
+    #@double 装甲板朝向角观测噪声 - 单块
+    r_armor_yaw_single = 2.5
+    #@double 装甲板朝向角观测噪声 - 双块
+    r_armor_yaw_double = 1.2
 
     # 几何参数
     #@double 初始半径 (m)
@@ -283,28 +284,13 @@
     #@double 保持追踪的面积比例，当前追踪装甲板面积 >= 最大面积 * 此比例时保持追踪
     keep_tracking_area_ratio = 0.9
 
-    # 匹配切板迟滞参数（抑制等价候选间来回跳，减少中心抖动）
+    # 匹配切板迟滞参数（在 70df1a 基线上新增）
     #@double 切板所需最小角度优势 (rad)
     match_switch_min_angle_gain = 0.35
     #@double 切板所需最小位置优势 (m)
     match_switch_min_dist_gain = 0.04
     #@double 旧追踪板可接受最大匹配距离 (m)
     match_tracked_max_dist = 0.45
-
-    # 同帧多板更新保护参数
-    # 非主装甲板若与预测偏差过大则跳过，防止误匹配污染滤波
-    #@double 次观测位置误差门限 (m)
-    multi_update_pos_gate = 0.45
-    #@double 次观测朝向误差门限 (rad)
-    multi_update_orient_gate = 1.22
-    #@double 次观测R缩放 (>1 表示降低次观测权重)
-    secondary_r_scale = 2.2
-    #@double 次观测NIS门限放大系数 (>=1)
-    secondary_nis_scale = 1.3
-    #@double 启用次观测更新的最小角速度阈值 (rad/s)
-    multi_update_min_omega = 2.2
-    #@double 启停/加速保护：角速度变化率高于该值时禁用次观测更新 (rad/s^2)
-    multi_update_max_omega_acc = 8.0
 
     # 陀螺等级阈值 (度/秒)
     #@double top_level 1 激活阈值 (°/s)
@@ -320,7 +306,7 @@
     # 马氏距离门限检查参数 (4维观测, p=0.01)
     #@double χ²门限, 超过则拒绝观测
     chi2_threshold = 13.28
-    #@int 连续拒绝次数上限, 超过则重置EKF（多板同帧更新下适当放宽）
+    #@int 连续拒绝次数上限, 超过则重置EKF
     max_reject = 5
     #@double 拒绝后过程噪声放大倍数
     q_scale_increase = 1.5

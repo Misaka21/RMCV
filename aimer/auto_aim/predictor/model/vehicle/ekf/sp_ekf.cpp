@@ -61,8 +61,6 @@ void SpMotion::init(const ArmorData& armor, double timestamp) {
     tracked_armor_id_ = 0;  // 假设初始追踪的是 state_id=0
     last_detector_id_ = armor.id;  // 记录初始的 detector ID
     last_update_time_ = timestamp;
-    last_omega_for_multi_ = x0[sp_model::OMEGA];
-    has_last_omega_for_multi_ = true;
     initialized_ = true;
 
     debug::print(debug::PrintMode::DEBUG, "SpMotion",
@@ -132,21 +130,17 @@ int SpMotion::match_armor(const ArmorData& armor) const {
         }
     }
 
-    // 4. 切板迟滞：当前追踪板若仍“足够合理”，则保持，避免在等价候选间来回跳
-    // 只有新候选在角度和距离上都明显更优，才允许切板。
+    // 4. 切板迟滞: 当前追踪板仍合理且新板优势不明显时，保持旧板
     double switch_angle_gain = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.match_switch_min_angle_gain");
     double switch_dist_gain = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.match_switch_min_dist_gain");
     double tracked_max_dist = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.match_tracked_max_dist");
-    const int prev_id = tracked_armor_id_;
+    int prev_id = tracked_armor_id_;
     if (best_id != prev_id) {
         for (const auto& c : candidates) {
             if (c.id != prev_id) continue;
-
             bool tracked_reasonable = (c.distance <= tracked_max_dist);
             bool angle_much_better = (c.angle_error - min_error) > switch_angle_gain;
             bool dist_much_better = (c.distance - best_dist) > switch_dist_gain;
-
-            // 旧板仍合理，且新板没有“明显更优” -> 保持旧板
             if (tracked_reasonable && !(angle_much_better && dist_much_better)) {
                 return prev_id;
             }
@@ -233,17 +227,26 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
         double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.init_r");
         double xc = obs.pos.x() - init_r * std::cos(orient_yaw);
         double yc = obs.pos.y() - init_r * std::sin(orient_yaw);
-        // reset_state 的 THETA 始终对应 state_id=0 的朝向
-        double theta_state0 = orient_yaw - matched_id * (2.0 * M_PI / armor_num_);
         reset_state[sp_model::XC] = xc;
         reset_state[sp_model::YC] = yc;
         reset_state[sp_model::ZC] = obs.pos.z();
+        // reset_state 的 THETA 始终对应 state_id=0 的朝向
+        double theta_state0 = orient_yaw - matched_id * (2.0 * M_PI / armor_num_);
         reset_state[sp_model::THETA] = aimer::math::reduced_angle(theta_state0);
         reset_state[sp_model::R] = init_r;
     }
 
-    // 与 sp_vision 对齐: delta 使用观测几何（|z_to_v|），而非预测值
-    MatrixZZ R = build_R(obs.z[obs::DIST], std::abs(armor.z_to_v()));
+    // ⭐ 关键修正: 自适应因子要与 sp_vision 的定义保持一致
+    // sp_vision 使用的是 INWARD 装甲板朝向:
+    //   delta = armor_yaw_inward - position_yaw
+    // 当前状态里 inner_z[ARMOR_YAW] 是 OUTWARD，需要先转回 INWARD 再比较，
+    // 否则会出现整体偏移 π，导致自适应因子长期饱和。
+    double predicted_armor_yaw_inward = inner_z[sp_model::ARMOR_YAW] - M_PI;
+    double predicted_z_to_v = std::abs(aimer::math::angle_diff(
+        predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
+
+    // 观测更新
+    MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v);
     auto status = ekf_.update_forward_gated(
         measure_func, z, R, reset_state,
         chi2_threshold, max_reject, q_scale_increase, q_scale_decay
@@ -272,8 +275,6 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
     }
     ekf_.set_x(x);
 
-    last_omega_for_multi_ = x[sp_model::OMEGA];
-    has_last_omega_for_multi_ = true;
     last_update_time_ = timestamp;
 }
 
@@ -282,9 +283,9 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
 
     // ⭐ 追踪目标选择
     // 规则：
-    // 1) 若已追踪 detector id 仍在，且面积满足 keep_ratio，继续追踪
-    // 2) 若已追踪 detector id 丢失，优先选 |z_to_v| 最小（更正对，中心更稳）
-    // 3) 其余情况选面积最大的
+    // 1) 已追踪 detector id 存在且面积满足 keep_ratio，保持
+    // 2) 已追踪 detector id 不存在时，优先选 |z_to_v| 最小（更正对，中心更稳）
+    // 3) 其余情况按面积最大
     const auto& primary = [&]() -> const ArmorData& {
         if (armors.size() == 1) {
             return armors[0];
@@ -318,179 +319,97 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         return armors[0];
     }();
 
-    // 更新顺序: 主装甲板优先，其余装甲板同帧继续更新（与 sp_vision 同帧多观测行为对齐）
-    std::vector<const ArmorData*> ordered_armors;
-    ordered_armors.reserve(armors.size());
-    ordered_armors.push_back(&primary);
-    for (const auto& armor : armors) {
-        if (&armor != &primary) ordered_armors.push_back(&armor);
+    // 单装甲板直接更新
+    if (armors.size() == 1) {
+        update(primary, timestamp);
+        return;
     }
 
+    // ⭐ 前置过滤: z_to_v 异常值检测
     constexpr double Z_TO_V_MAX = 1.6;
-    auto obs_valid = [&](const ArmorData& armor) {
-        return std::abs(armor.z_to_v()) <= Z_TO_V_MAX;
-    };
+    if (std::abs(primary.z_to_v()) > Z_TO_V_MAX) {
+        debug::print(debug::PrintMode::WARNING, "SpMotion",
+            "Reject dual observation: z_to_v={:.3f} out of range", primary.z_to_v());
+        return;
+    }
 
     if (!initialized_) {
-        for (const ArmorData* armor : ordered_armors) {
-            if (obs_valid(*armor)) {
-                init(*armor, timestamp);
-                return;
-            }
-        }
-
-        debug::print(debug::PrintMode::WARNING, "SpMotion",
-            "Reject all observations in init: z_to_v out of range");
+        init(primary, timestamp);
         return;
     }
 
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
-    const ArmorData* frame_primary = &primary;
-    if (!obs_valid(*frame_primary)) {
-        for (const ArmorData* armor : ordered_armors) {
-            if (obs_valid(*armor)) {
-                frame_primary = armor;
-                break;
-            }
-        }
-        if (frame_primary != &primary) {
-            debug::print(debug::PrintMode::WARNING, "SpMotion",
-                "Primary z_to_v invalid ({:.3f}), fallback to armor.id={}",
-                primary.z_to_v(), frame_primary->id);
-        }
-    }
-
     // 1. 预测
     SpPredict predict_func(dt);
     MatrixXX Q = build_Q(dt);
     ekf_.predict_forward_scaled(predict_func, Q);
 
-    // 2. 读取门限参数
+    // 2. 匹配装甲板 ID
+    int matched_id = match_armor(primary);
+    tracked_armor_id_ = matched_id;
+    last_detector_id_ = primary.id;  // 记录主装甲板的 detector ID
+
+    // 3. 用主装甲板做观测更新
+    const auto& obs = primary.observation;
+    double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
+
+    SpMeasure measure_func(matched_id, armor_num_);
+
+    VectorZ inner_z;
+    VectorX x = ekf_.get_x();
+    double x_arr[sp_model::N_X], z_arr[sp_model::N_Z];
+    for (int i = 0; i < sp_model::N_X; ++i) x_arr[i] = x[i];
+    measure_func(x_arr, z_arr);
+    for (int i = 0; i < sp_model::N_Z; ++i) inner_z[i] = z_arr[i];
+
+    VectorZ z;
+    z[sp_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[sp_model::YAW]);
+    z[sp_model::PITCH] = obs.z[obs::PITCH];
+    z[sp_model::DIS] = obs.z[obs::DIST];
+    z[sp_model::ARMOR_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[sp_model::ARMOR_YAW]);
+
+    // 读取门限参数
     double chi2_threshold = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.Gating.chi2_threshold");
     int64_t max_reject = runtime_param::get_param<int64_t>("AutoAim.Predictor.SpEKF.Gating.max_reject");
     double q_scale_increase = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.Gating.q_scale_increase");
     double q_scale_decay = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.Gating.q_scale_decay");
-    // 同帧次观测保护: 防止错配观测拉崩滤波器
-    double secondary_pos_gate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_pos_gate");
-    double secondary_orient_gate = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_orient_gate");
-    double secondary_r_scale = std::max(
-        1.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.secondary_r_scale"));
-    double secondary_nis_scale = std::max(
-        1.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.secondary_nis_scale"));
-    double multi_update_min_omega = std::max(
-        0.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_min_omega"));
-    double multi_update_max_omega_acc = std::max(
-        0.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_max_omega_acc"));
-    double omega_now = ekf_.get_x()[sp_model::OMEGA];
-    double omega_acc = 0.0;
-    if (has_last_omega_for_multi_ && dt > 1e-4) {
-        omega_acc = std::abs((omega_now - last_omega_for_multi_) / dt);
-    }
-    bool allow_secondary_update = (std::abs(omega_now) >= multi_update_min_omega)
-        && (omega_acc <= multi_update_max_omega_acc);
 
-    // 3. 同帧多观测更新（主板优先，随后其余板）
-    for (const ArmorData* armor_ptr : ordered_armors) {
-        const ArmorData& armor = *armor_ptr;
-
-        if (!obs_valid(armor)) {
-            debug::print(debug::PrintMode::WARNING, "SpMotion",
-                "Skip observation in multi-update: z_to_v={:.3f} out of range", armor.z_to_v());
-            continue;
-        }
-
-        const auto& obs = armor.observation;
-        int matched_id = match_armor(armor);
-        bool is_primary = (armor_ptr == frame_primary);
-
-        if (is_primary) {
-            tracked_armor_id_ = matched_id;
-            last_detector_id_ = armor.id;
-        }
-
-        double orient_yaw = obs.z[obs::ARMOR_YAW] + M_PI;  // OUTWARD
-        SpMeasure measure_func(matched_id, armor_num_);
-
-        VectorX x = ekf_.get_x();
-        if (!is_primary) {
-            if (!allow_secondary_update) {
-                continue;
-            }
-
-            Eigen::Vector3d pred_pos = h_armor_xyz(x, matched_id);
-            double pos_err = (pred_pos - obs.pos).norm();
-            double pred_orient_yaw = x[sp_model::THETA] + matched_id * (2.0 * M_PI / armor_num_);
-            double orient_err = std::abs(aimer::math::angle_diff(orient_yaw, pred_orient_yaw));
-            if (pos_err > secondary_pos_gate || orient_err > secondary_orient_gate) {
-                debug::print(debug::PrintMode::WARNING, "SpMotion",
-                    "Skip secondary update: armor.id={}, pos_err={:.3f}m, orient_err={:.1f}deg",
-                    armor.id, pos_err, orient_err * 180.0 / M_PI);
-                continue;
-            }
-        }
-
-        VectorZ inner_z;
-        double x_arr[sp_model::N_X], z_arr[sp_model::N_Z];
-        for (int i = 0; i < sp_model::N_X; ++i) x_arr[i] = x[i];
-        measure_func(x_arr, z_arr);
-        for (int i = 0; i < sp_model::N_Z; ++i) inner_z[i] = z_arr[i];
-
-        VectorZ z;
-        z[sp_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[sp_model::YAW]);
-        z[sp_model::PITCH] = obs.z[obs::PITCH];
-        z[sp_model::DIS] = obs.z[obs::DIST];
-        z[sp_model::ARMOR_YAW] = aimer::math::get_closest_angle(orient_yaw, inner_z[sp_model::ARMOR_YAW]);
-
-        VectorX reset_state = VectorX::Zero();
-        {
-            double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.init_r");
-            double xc = obs.pos.x() - init_r * std::cos(orient_yaw);
-            double yc = obs.pos.y() - init_r * std::sin(orient_yaw);
-            double theta_state0 = orient_yaw - matched_id * (2.0 * M_PI / armor_num_);
-            reset_state[sp_model::XC] = xc;
-            reset_state[sp_model::YC] = yc;
-            reset_state[sp_model::ZC] = obs.pos.z();
-            reset_state[sp_model::THETA] = aimer::math::reduced_angle(theta_state0);
-            reset_state[sp_model::R] = init_r;
-        }
-
-        MatrixZZ R = build_R(obs.z[obs::DIST], std::abs(armor.z_to_v()));
-        if (!is_primary) {
-            R *= secondary_r_scale;
-        }
-        if (!is_primary) {
-            // 次观测不参与 reject_count/reset，避免启停时被多观测放大导致追踪恶化
-            double nis = ekf_.compute_mahalanobis_sq(measure_func, z, R);
-            double threshold = chi2_threshold;
-            if (ekf_.get_q_scale() > 1.0) threshold *= ekf_.get_q_scale();
-            threshold *= secondary_nis_scale;
-            if (nis > threshold) {
-                debug::print(debug::PrintMode::WARNING, "SpMotion",
-                    "Skip secondary update by NIS: armor.id={}, nis={:.2f}, th={:.2f}",
-                    armor.id, nis, threshold);
-                continue;
-            }
-            ekf_.update_forward(measure_func, z, R);
-        } else {
-            auto status = ekf_.update_forward_gated(
-                measure_func, z, R, reset_state,
-                chi2_threshold, max_reject, q_scale_increase, q_scale_decay
-            );
-
-            if (status == aimer::filter::UpdateStatus::RESET) {
-                tracked_armor_id_ = 0;
-                last_detector_id_ = armor.id;
-                debug::print(debug::PrintMode::WARNING, "SpMotion",
-                    "EKF reset due to {} consecutive rejections (matched_id={})",
-                    max_reject, matched_id);
-            }
-        }
+    // 构建重置状态
+    VectorX reset_state = VectorX::Zero();
+    {
+        double init_r = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.init_r");
+        double xc = obs.pos.x() - init_r * std::cos(orient_yaw);
+        double yc = obs.pos.y() - init_r * std::sin(orient_yaw);
+        reset_state[sp_model::XC] = xc;
+        reset_state[sp_model::YC] = yc;
+        reset_state[sp_model::ZC] = obs.pos.z();
+        double theta_state0 = orient_yaw - matched_id * (2.0 * M_PI / armor_num_);
+        reset_state[sp_model::THETA] = aimer::math::reduced_angle(theta_state0);
+        reset_state[sp_model::R] = init_r;
     }
 
-    // 4. 后处理
-    VectorX x = ekf_.get_x();
+    // ⭐ 与单板更新保持一致：OUTWARD -> INWARD 后再计算自适应角差
+    double predicted_armor_yaw_inward = inner_z[sp_model::ARMOR_YAW] - M_PI;
+    double predicted_z_to_v = std::abs(aimer::math::angle_diff(
+        predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
+
+    // 双装甲板时观测噪声更小
+    MatrixZZ R = build_R(obs.z[obs::DIST], predicted_z_to_v, 2);
+    auto status = ekf_.update_forward_gated(
+        measure_func, z, R, reset_state,
+        chi2_threshold, max_reject, q_scale_increase, q_scale_decay
+    );
+
+    if (status == aimer::filter::UpdateStatus::RESET) {
+        tracked_armor_id_ = 0;
+        debug::print(debug::PrintMode::WARNING, "SpMotion",
+            "EKF reset due to {} consecutive rejections (dual armor)", max_reject);
+    }
+
+    // 后处理
+    x = ekf_.get_x();
     double r_min = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_min");
     double r_max = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_max");
     double l_abs_max = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.l_abs_max");
@@ -505,53 +424,33 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     }
     ekf_.set_x(x);
 
-    last_omega_for_multi_ = x[sp_model::OMEGA];
-    has_last_omega_for_multi_ = true;
     last_update_time_ = timestamp;
 }
 
 SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
     MatrixXX Q = MatrixXX::Zero();
 
-    // Piecewise White Noise Model (sp_vision_25 同款)
-    // 参数含义: 加速度方差，Q 矩阵通过 dt⁴/4, dt³/2, dt² 结构自动耦合位置-速度
-    double v_pos = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_acc_pos");
-    double v_yaw = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_acc_yaw");
-
+    double q_pos = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_pos");
+    double q_vel = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_vel");
+    double q_theta = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_theta");
+    double q_omega = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_omega");
     double q_r = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_r");
     double q_l = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_l");
     double q_h = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_h");
 
-    double dt2 = dt * dt;
-    double dt3 = dt2 * dt;
-    double dt4 = dt2 * dt2;
-    double a = dt4 * 0.25;
-    double b = dt3 * 0.5;
-    double c = dt2;
+    // 位置-速度块
+    Q(sp_model::XC, sp_model::XC) = q_pos * dt;
+    Q(sp_model::VX, sp_model::VX) = q_vel * dt;
+    Q(sp_model::YC, sp_model::YC) = q_pos * dt;
+    Q(sp_model::VY, sp_model::VY) = q_vel * dt;
+    Q(sp_model::ZC, sp_model::ZC) = q_pos * dt;
+    Q(sp_model::VZ, sp_model::VZ) = q_vel * dt;
 
-    // x/vx, y/vy, z/vz 3个分块
-    Q(sp_model::XC, sp_model::XC) = a * v_pos;
-    Q(sp_model::XC, sp_model::VX) = b * v_pos;
-    Q(sp_model::VX, sp_model::XC) = b * v_pos;
-    Q(sp_model::VX, sp_model::VX) = c * v_pos;
+    // 朝向角-角速度块
+    Q(sp_model::THETA, sp_model::THETA) = q_theta * dt;
+    Q(sp_model::OMEGA, sp_model::OMEGA) = q_omega * dt;
 
-    Q(sp_model::YC, sp_model::YC) = a * v_pos;
-    Q(sp_model::YC, sp_model::VY) = b * v_pos;
-    Q(sp_model::VY, sp_model::YC) = b * v_pos;
-    Q(sp_model::VY, sp_model::VY) = c * v_pos;
-
-    Q(sp_model::ZC, sp_model::ZC) = a * v_pos;
-    Q(sp_model::ZC, sp_model::VZ) = b * v_pos;
-    Q(sp_model::VZ, sp_model::ZC) = b * v_pos;
-    Q(sp_model::VZ, sp_model::VZ) = c * v_pos;
-
-    // θ/ω 分块
-    Q(sp_model::THETA, sp_model::THETA) = a * v_yaw;
-    Q(sp_model::THETA, sp_model::OMEGA) = b * v_yaw;
-    Q(sp_model::OMEGA, sp_model::THETA) = b * v_yaw;
-    Q(sp_model::OMEGA, sp_model::OMEGA) = c * v_yaw;
-
-    // 几何参数默认与 sp_vision 一致保持常量；保留极小噪声可选
+    // 几何参数 (不乘 dt)
     Q(sp_model::R, sp_model::R) = q_r;
     Q(sp_model::L, sp_model::L) = q_l;
     Q(sp_model::H, sp_model::H) = q_h;
@@ -559,28 +458,43 @@ SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
     return Q;
 }
 
-SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v) const {
+SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v, int observed_armor_count) const {
     MatrixZZ R = MatrixZZ::Zero();
 
-    // sp_vision_25 同款 R 构造:
-    //   R_yaw = R_pitch = r_yaw_pitch            (固定)
-    //   R_dis  = r_dis_base × (log(|delta|+1)+1)  (delta 越大=越侧对，距离噪声越大)
-    //   R_orient = r_base + r_scale × log(dis+1)   (距离越远，朝向角噪声越大)
-    // 注意: R_dis 依赖的是朝向角 delta 而非距离!
-    double r_yaw_pitch = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_yaw_pitch");
-    double r_dis_base = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_base");
-    double r_armor_yaw_base = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_base");
-    double r_armor_yaw_dis_scale = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_dis_scale");
+    double r_angle = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_angle");
+    double r_dis_k = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_k");
 
-    double delta = std::abs(z_to_v);
-    double dis = std::abs(distance);
+    // 基础朝向角噪声
+    double r_armor_yaw_base = (observed_armor_count >= 2)
+        ? runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_double")
+        : runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_single");
 
-    double r_dis = r_dis_base * (std::log(delta + 1.0) + 1.0);
-    double r_armor_yaw = r_armor_yaw_base + r_armor_yaw_dis_scale * std::log(dis + 1.0);
+    // ⭐ 自适应噪声 (来自 sp_vision_25)
+    // 重要: z_to_v 应该是 EKF 预测的角度，不是观测值！
+    //
+    // 原理: 侧对时 PnP 朝向角精度下降，需要增大 R
+    // 关键: 用预测值计算，这样:
+    //   - 正常观测: 预测和观测都接近，R 适中，正常更新
+    //   - 离群观测: 预测值正常，R 正常，innovation 大，被 Gating 拒绝
+    //
+    // 如果用观测值计算 R (错误做法):
+    //   - 离群观测 z_to_v 异常大 → R 变大 → 马氏距离变小 → 反而通过 Gating！
 
-    R(sp_model::YAW, sp_model::YAW) = r_yaw_pitch;
-    R(sp_model::PITCH, sp_model::PITCH) = r_yaw_pitch;
-    R(sp_model::DIS, sp_model::DIS) = r_dis;
+    // 防止异常值: z_to_v 理论范围 [0, π/2]，clamp 到 [0, 1.5]
+    double z_to_v_clamped = std::clamp(std::abs(z_to_v), 0.0, 1.5);
+
+    // 使用 log 函数平滑过渡
+    double adaptive_factor = std::log(z_to_v_clamped + 1.0) + 1.0;
+    // z_to_v = 0.0 → factor = 1.0 (正对)
+    // z_to_v = 0.5 → factor ≈ 1.4
+    // z_to_v = 1.0 → factor ≈ 1.7 (侧对)
+    // z_to_v = 1.5 → factor ≈ 1.9 (max)
+
+    double r_armor_yaw = r_armor_yaw_base * adaptive_factor;
+
+    R(sp_model::YAW, sp_model::YAW) = r_angle;
+    R(sp_model::PITCH, sp_model::PITCH) = r_angle;
+    R(sp_model::DIS, sp_model::DIS) = r_dis_k * std::pow(distance, 4.0);
     R(sp_model::ARMOR_YAW, sp_model::ARMOR_YAW) = r_armor_yaw;
 
     return R;
@@ -683,8 +597,6 @@ void SpMotion::reset() {
     initialized_ = false;
     tracked_armor_id_ = 0;
     last_detector_id_ = -1;  // 重置 detector ID
-    has_last_omega_for_multi_ = false;
-    last_omega_for_multi_ = 0.0;
 }
 
 }  // namespace autoaim::predictor
