@@ -239,9 +239,9 @@
     # 过程噪声 Q (sp_vision_25 同款 Piecewise White Noise)
     # Q 的位置/角度块用 dt^4/dt^3/dt^2 结构，参数是加速度方差
     #@double 平动加速度方差 v_pos
-    q_acc_pos = 100.0
+    q_acc_pos = 20000.0
     #@double 角加速度方差 v_yaw
-    q_acc_yaw = 400.0
+    q_acc_yaw = 64000.0
     #@double 基础半径r过程噪声 (sp_vision 同款可设 0)
     q_r = 0.0
     #@double 半径差l过程噪声 (sp_vision 同款可设 0)
@@ -290,11 +290,13 @@
     #@double 次观测朝向误差门限 (rad)
     multi_update_orient_gate = 1.22
     #@double 次观测R缩放 (>1 表示降低次观测权重)
-    secondary_r_scale = 1.3
+    secondary_r_scale = 1.8
     #@double 次观测NIS门限放大系数 (>=1)
     secondary_nis_scale = 1.0
     #@double 启用次观测更新的最小角速度阈值 (rad/s)
-    multi_update_min_omega = 1.2
+    multi_update_min_omega = 2.2
+    #@double 启停/加速保护：角速度变化率高于该值时禁用次观测更新 (rad/s^2)
+    multi_update_max_omega_acc = 12.0
 
     # 陀螺等级阈值 (度/秒)
     #@double top_level 1 激活阈值 (°/s)
@@ -311,7 +313,7 @@
     #@double χ²门限, 超过则拒绝观测
     chi2_threshold = 13.28
     #@int 连续拒绝次数上限, 超过则重置EKF（多板同帧更新下适当放宽）
-    max_reject = 8
+    max_reject = 5
     #@double 拒绝后过程噪声放大倍数
     q_scale_increase = 1.5
     #@double 接受后过程噪声衰减倍数 (最小为1.0)

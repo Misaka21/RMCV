@@ -61,6 +61,8 @@ void SpMotion::init(const ArmorData& armor, double timestamp) {
     tracked_armor_id_ = 0;  // 假设初始追踪的是 state_id=0
     last_detector_id_ = armor.id;  // 记录初始的 detector ID
     last_update_time_ = timestamp;
+    last_omega_for_multi_ = x0[sp_model::OMEGA];
+    has_last_omega_for_multi_ = true;
     initialized_ = true;
 
     debug::print(debug::PrintMode::DEBUG, "SpMotion",
@@ -246,6 +248,8 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
     }
     ekf_.set_x(x);
 
+    last_omega_for_multi_ = x[sp_model::OMEGA];
+    has_last_omega_for_multi_ = true;
     last_update_time_ = timestamp;
 }
 
@@ -347,7 +351,15 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         1.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.secondary_nis_scale"));
     double multi_update_min_omega = std::max(
         0.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_min_omega"));
-    bool allow_secondary_update = std::abs(ekf_.get_x()[sp_model::OMEGA]) >= multi_update_min_omega;
+    double multi_update_max_omega_acc = std::max(
+        0.0, runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.multi_update_max_omega_acc"));
+    double omega_now = ekf_.get_x()[sp_model::OMEGA];
+    double omega_acc = 0.0;
+    if (has_last_omega_for_multi_ && dt > 1e-4) {
+        omega_acc = std::abs((omega_now - last_omega_for_multi_) / dt);
+    }
+    bool allow_secondary_update = (std::abs(omega_now) >= multi_update_min_omega)
+        && (omega_acc <= multi_update_max_omega_acc);
 
     // 3. 同帧多观测更新（主板优先，随后其余板）
     for (const ArmorData* armor_ptr : ordered_armors) {
@@ -463,6 +475,8 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     }
     ekf_.set_x(x);
 
+    last_omega_for_multi_ = x[sp_model::OMEGA];
+    has_last_omega_for_multi_ = true;
     last_update_time_ = timestamp;
 }
 
@@ -639,6 +653,8 @@ void SpMotion::reset() {
     initialized_ = false;
     tracked_armor_id_ = 0;
     last_detector_id_ = -1;  // 重置 detector ID
+    has_last_omega_for_multi_ = false;
+    last_omega_for_multi_ = 0.0;
 }
 
 }  // namespace autoaim::predictor
