@@ -12,6 +12,7 @@
 #include <opencv2/core/mat.hpp>
 
 #include "detector_factory.hpp"
+#include "detector_trt/tensorrt_buff_detector.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
@@ -227,20 +228,21 @@ void BuffDetectorNode::process_frame_async() {
         }
 
         debug::print(debug::PrintMode::INFO, "BuffDetectorNode", "Push thread stopped");
+
+        // 通知 pop 线程退出阻塞
+        if (auto* trt = dynamic_cast<TensorrtBuffDetector*>(detector_.get())) {
+            trt->stop();
+        }
     });
 
     debug::print(debug::PrintMode::INFO, "BuffDetectorNode", "Running in async mode");
 
-    // Pop 主循环
+    // Pop 主循环: 直接阻塞在 pop() 上，零轮询开销
     while (running_.load()) {
         watchdog::heartbeat("buff_detector");
 
-        if (detector_->queue_size() == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
-
         auto async_result = detector_->pop();
+        if (async_result.image.empty()) continue;  // stop() 唤醒时返回空
 
         // 补充结果信息
         async_result.detection.robot_state = build_robot_state(
