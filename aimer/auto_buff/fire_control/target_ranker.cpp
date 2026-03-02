@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "aimer/common/trajectory/solver_factory.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 
 namespace autobuff::fire_control {
 
@@ -58,8 +59,12 @@ std::vector<SlotAimCandidate> TargetRanker::build(
             cand.tracking_error = std::hypot(dy, dp);
         }
 
-        // 得分 (跟踪误差越小越好)
-        cand.score = cand.ballistic_valid ? -cand.tracking_error : -1e9;
+        // 得分 = -跟踪误差 + 置信度权重
+        double w_conf =
+            runtime_param::get_param<double>("AutoBuff.FireControl.w_confidence");
+        cand.score = cand.ballistic_valid
+            ? (-cand.tracking_error + w_conf * cand.confidence)
+            : -1e9;
 
         // ccw_rank: 在 snap.ccw_lit_rank 数组中查找该 slot 的逆时针排序位置
         cand.ccw_rank = -1;

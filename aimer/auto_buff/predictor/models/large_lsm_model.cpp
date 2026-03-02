@@ -94,14 +94,19 @@ void LargeLsmModel::feed(double phi_meas, double timestamp, int dir_sign) {
 }
 
 void LargeLsmModel::solve_fit() {
-    constexpr int MIN_SAMPLES = 35;
-    constexpr double MIN_SPAN_SEC = 0.6;
-    constexpr double RESIDUAL_ACCEPT = 0.18;
+    // 在使用点直接读取运行时参数 (禁止缓存)
+    int min_samples = static_cast<int>(
+        runtime_param::get_param<int64_t>("AutoBuff.Predictor.LargeLSM.min_samples"));
+    if (min_samples <= 0) min_samples = 35;
 
-    if (static_cast<int>(samples_.size()) < MIN_SAMPLES) return;
+    double min_span_sec =
+        runtime_param::get_param<double>("AutoBuff.Predictor.LargeLSM.min_span_sec");
+    if (min_span_sec <= 0.0) min_span_sec = 0.6;
+
+    if (static_cast<int>(samples_.size()) < min_samples) return;
 
     double t_span = samples_.back().first - samples_.front().first;
-    if (t_span < MIN_SPAN_SEC) return;
+    if (t_span < min_span_sec) return;
 
     int dir_use = (dir_sign_ != 0) ? dir_sign_ : 1;
 
@@ -117,7 +122,10 @@ void LargeLsmModel::solve_fit() {
     for (const auto& [t, y] : samples_) {
         auto* cost = new ceres::AutoDiffCostFunction<LargePhiResidual, 1, 4>(
             new LargePhiResidual(t, y, dir_use));
-        problem.AddResidualBlock(cost, new ceres::HuberLoss(0.1), p);
+        double huber_delta =
+            runtime_param::get_param<double>("AutoBuff.Predictor.LargeLSM.huber_delta");
+        if (huber_delta <= 0.0) huber_delta = 0.1;
+        problem.AddResidualBlock(cost, new ceres::HuberLoss(huber_delta), p);
     }
 
     problem.SetParameterLowerBound(p, 0, 0.780);
@@ -152,7 +160,11 @@ void LargeLsmModel::solve_fit() {
     }
     rms = std::sqrt(rms / static_cast<double>(samples_.size()));
 
-    if (rms > RESIDUAL_ACCEPT) {
+    double residual_accept =
+        runtime_param::get_param<double>("AutoBuff.Predictor.LargeLSM.residual_accept");
+    if (residual_accept <= 0.0) residual_accept = 0.18;
+
+    if (rms > residual_accept) {
         fit_valid_ = false;
         return;
     }

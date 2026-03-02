@@ -4,6 +4,7 @@
 #include "postprocess.hpp"
 
 #include <cmath>
+#include <algorithm>
 
 namespace autobuff::detector {
 
@@ -37,25 +38,58 @@ autobuff::BuffDetectionResult Postprocessor::build_result(
         return result;
     }
 
-    // 1. 估计 R 标中心 (平均所有检测的外推值)
-    //    每个检测提供一个 R 中心估计：R = kpt[5] * 1.4 - kpt[4] * 0.4
-    cv::Point2f r_sum(0.f, 0.f);
-    int r_count = 0;
+    // 1. 估计 R 标中心 (置信度加权平均 + 离群值剔除)
+    struct REstimate { cv::Point2f pt; float conf; };
+    std::vector<REstimate> r_estimates;
+    r_estimates.reserve(raw_objects.size());
+
     for (const auto& obj : raw_objects) {
-        if (obj.kpt_count < 6) {
-            continue;
-        }
+        if (obj.kpt_count < 6) continue;
         const cv::Point2f& kpt4 = obj.kpts[4];  // 扇叶中心
         const cv::Point2f& kpt5 = obj.kpts[5];  // 内侧尖端 (指向 R 标)
         cv::Point2f r_est = kpt5 * R_EXTRAP_A - kpt4 * R_EXTRAP_B;
-        r_sum += r_est;
-        r_count++;
+        r_estimates.push_back({r_est, obj.score});
     }
 
-    if (r_count > 0) {
-        result.r_center.center = r_sum * (1.f / static_cast<float>(r_count));
-        result.r_center.valid  = true;
-        result.r_center.confidence = 1.0f;  // 由检测置信度间接保证
+    if (!r_estimates.empty()) {
+        // 离群值剔除: 先算中位数，再剔除距中位数过远的估计
+        if (r_estimates.size() >= 3) {
+            // X/Y 中位数
+            std::vector<float> xs, ys;
+            xs.reserve(r_estimates.size());
+            ys.reserve(r_estimates.size());
+            for (const auto& e : r_estimates) {
+                xs.push_back(e.pt.x);
+                ys.push_back(e.pt.y);
+            }
+            std::nth_element(xs.begin(), xs.begin() + xs.size() / 2, xs.end());
+            std::nth_element(ys.begin(), ys.begin() + ys.size() / 2, ys.end());
+            cv::Point2f median(xs[xs.size() / 2], ys[ys.size() / 2]);
+
+            // 剔除距中位数超过 80px 的估计
+            constexpr float OUTLIER_THRESH_SQ = 80.f * 80.f;
+            r_estimates.erase(
+                std::remove_if(r_estimates.begin(), r_estimates.end(),
+                    [&](const REstimate& e) {
+                        auto d = e.pt - median;
+                        return d.x * d.x + d.y * d.y > OUTLIER_THRESH_SQ;
+                    }),
+                r_estimates.end());
+        }
+
+        // 置信度加权平均
+        cv::Point2f r_sum(0.f, 0.f);
+        float w_sum = 0.f;
+        for (const auto& e : r_estimates) {
+            r_sum += e.pt * e.conf;
+            w_sum += e.conf;
+        }
+
+        if (w_sum > 0.f) {
+            result.r_center.center = r_sum * (1.f / w_sum);
+            result.r_center.valid  = true;
+            result.r_center.confidence = w_sum / static_cast<float>(r_estimates.size());
+        }
     }
 
     // 2. 为每个检测分配槽位

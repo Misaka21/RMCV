@@ -526,6 +526,8 @@
     fire_threshold = 0.02
     #@double 最小置信度
     min_confidence = 0.30
+    #@double 置信度对评分的权重 (0=纯跟踪误差)
+    w_confidence = 0.05
     #@string 协同角色: "disabled" / "ccw_first" / "ccw_second"
     coop_role = "disabled"
     #@bool 仅在大符激活时启用协同
