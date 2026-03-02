@@ -64,7 +64,8 @@ struct TrtBuffSlot {
     void* img_device    = nullptr;   // GPU 原图缓冲 (uint8, BGR)
     void* input_device  = nullptr;   // GPU 输入张量 (float32 或 float16)
     void* output_device = nullptr;   // GPU 输出张量
-    std::vector<float> output_buffer;
+    void* pinned_buffer = nullptr;   // 锁页内存暂存区 (H2D 加速)
+    void* pinned_output = nullptr;   // 锁页输出缓冲 (D2H 真异步)
     bool in_use = false;
 };
 
@@ -154,6 +155,7 @@ private:
     std::string output_name_;
     nvinfer1::Dims input_dims_;
     nvinfer1::Dims output_dims_;
+    std::vector<int64_t> output_shape_;  // 缓存 output_dims_ 转换结果
     size_t input_size_  = 0;
     size_t output_size_ = 0;
     int input_binding_idx_  = 0;

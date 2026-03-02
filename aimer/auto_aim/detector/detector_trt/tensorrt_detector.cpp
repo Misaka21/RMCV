@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <filesystem>
 
@@ -438,27 +439,6 @@ std::vector<DetectedArmor> TensorrtDetector::detect(const cv::Mat& image) {
     cudaStreamSynchronize(stream_);
 
     // 后处理
-    // DEBUG: 检查原始输出数据
-    static int debug_frame = 0;
-    if (++debug_frame <= 3) {  // 只打印前3帧
-        // 找置信度最高的检测
-        int best_idx = 0;
-        float best_conf = output_buffer_[8];
-        for (int i = 1; i < num_detections_; ++i) {
-            float conf = output_buffer_[i * 22 + 8];
-            if (conf > best_conf) {
-                best_conf = conf;
-                best_idx = i;
-            }
-        }
-        const float* best = output_buffer_.data() + best_idx * 22;
-        debug::print("info", "TensorRT",
-            "Best detection [{}]: landmarks=[{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f}], conf_raw={:.2f}, sigmoid={:.4f}",
-            best_idx,
-            best[0], best[1], best[2], best[3], best[4], best[5], best[6], best[7],
-            best[8], sigmoid(best[8]));
-    }
-
     auto detections = postprocess(output_buffer_.data(), num_detections_, scale, dx, dy);
 
     // 保存调试信息
@@ -716,9 +696,12 @@ void TensorrtDetector::init_async_slots() {
         cudaMalloc(&slot.input_device, input_size_ * input_elem_size);  // FP16 或 FP32
         cudaMalloc(&slot.output_device, output_size_ * sizeof(float));
 
-        // 分配CPU输出缓冲区
-        slot.output_buffer.resize(output_size_);
+        // 锁页内存暂存区：让 H2D 变成真正的异步 DMA
+        cudaMallocHost(&slot.pinned_buffer, img_buffer_size_);
+        // 锁页输出缓冲：让 D2H 变成真正的异步 DMA
+        cudaMallocHost(&slot.pinned_output, output_size_ * sizeof(float));
 
+        // 分配CPU输出缓冲区
         slot.in_use = false;
     }
     debug::print("info", "TensorRT", "Initialized {} async slots (input: {})",
@@ -737,6 +720,8 @@ void TensorrtDetector::destroy_async_slots() {
         if (slot.img_device) cudaFree(slot.img_device);
         if (slot.input_device) cudaFree(slot.input_device);
         if (slot.output_device) cudaFree(slot.output_device);
+        if (slot.pinned_buffer) cudaFreeHost(slot.pinned_buffer);
+        if (slot.pinned_output) cudaFreeHost(slot.pinned_output);
         if (slot.context) {
             delete slot.context;  // 销毁独立的 context
             slot.context = nullptr;
@@ -789,8 +774,9 @@ void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
     cv::Mat continuous_image = image.isContinuous() ? image : image.clone();
     size_t img_size = continuous_image.total() * continuous_image.elemSize();
 
-    // 异步拷贝原图到 GPU
-    cudaMemcpyAsync(slot.img_device, continuous_image.data, img_size,
+    // 拷贝到锁页内存暂存区，然后异步 DMA 到 GPU
+    std::memcpy(slot.pinned_buffer, continuous_image.data, img_size);
+    cudaMemcpyAsync(slot.img_device, slot.pinned_buffer, img_size,
                     cudaMemcpyHostToDevice, slot.stream);
 
     // GPU 预处理: letterbox + BGR→RGB + normalize + HWC→CHW
@@ -826,8 +812,8 @@ void TensorrtDetector::push(const cv::Mat& image, int frame_id, int64_t timestam
     // 异步推理 (使用槽位独立的 context，实现真正并行!)
     slot.context->enqueueV2(bindings, slot.stream, nullptr);
 
-    // 异步拷贝输出到 CPU
-    cudaMemcpyAsync(slot.output_buffer.data(), slot.output_device,
+    // 异步拷贝输出到 CPU (锁页内存，真正异步)
+    cudaMemcpyAsync(slot.pinned_output, slot.output_device,
                     output_size_ * sizeof(float), cudaMemcpyDeviceToHost, slot.stream);
 
     // 记录事件 (用于检测完成)
@@ -873,9 +859,10 @@ AsyncDetectionResult TensorrtDetector::pop()
     float latency_ms = std::chrono::duration_cast<std::chrono::microseconds>(
         now - task.submit_time).count() / 1000.0f;
 
-    // 后处理
-    auto armors = postprocess(slot.output_buffer.data(), num_detections_,
-                              task.scale, task.dx, task.dy);
+    // 后处理 (从锁页内存读取)
+    auto armors = postprocess(
+        static_cast<const float*>(slot.pinned_output),
+        num_detections_, task.scale, task.dx, task.dy);
 
     // 释放槽位
     release_slot(task.slot_idx);

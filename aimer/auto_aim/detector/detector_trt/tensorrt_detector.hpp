@@ -66,7 +66,8 @@ struct InferenceSlot {
     void* img_device = nullptr;      // GPU 原图缓冲 (uint8, BGR)
     void* input_device = nullptr;    // GPU 输入张量 (float32, RGB, CHW)
     void* output_device = nullptr;   // GPU 输出张量
-    std::vector<float> output_buffer;
+    void* pinned_buffer = nullptr;   // 锁页内存暂存区 (H2D 加速)
+    void* pinned_output = nullptr;   // 锁页输出缓冲 (D2H 真异步)
     bool in_use = false;
 };
 
