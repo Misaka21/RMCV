@@ -6,51 +6,9 @@
 #include <cmath>
 #include <vector>
 
-#include <opencv2/calib3d.hpp>
-
-#include "aimer/common/transformer/transformer.hpp"
 #include "plugin/debug/logger.hpp"
 
 namespace autobuff::predictor {
-
-namespace {
-
-// YOLO 关键点 3D 物理坐标 (能量机关坐标系, 单位: m)
-// kpt[0-3]: 扇叶四角, kpt[4]: 扇叶中心, kpt[5]: R标区域
-// 这是 slot_id=0 (θ=0, 即 +Y 方向) 的坐标
-// 对于其他 slot，需要绕 Z 轴旋转 slot_id * 72°
-const std::array<cv::Point3f, 6> BLADE_OBJECT_POINTS_BASE = {{
-    {0.f, 0.f,    0.827f},   // kpt[0] 顶部
-    {0.f, 0.127f, 0.700f},   // kpt[1] 右侧
-    {0.f, 0.f,    0.573f},   // kpt[2] 底部
-    {0.f, -0.127f, 0.700f},  // kpt[3] 左侧
-    {0.f, 0.f,    0.700f},   // kpt[4] 扇叶中心 (= RUNE_RADIUS)
-    {0.f, 0.f,    0.220f},   // kpt[5] R 标区域
-}};
-
-// 将 base keypoint 绕原点旋转 theta (在 XY 平面的 2D 旋转)
-// 注意: 能量机关坐标系中扇叶在 YZ 平面分布，旋转绕 X 轴
-// 但 PnP 用的 object 坐标系是平面旋转：slot 的 center 在
-// (RUNE_RADIUS*cos(θ), RUNE_RADIUS*sin(θ), 0) 平面上
-// 所以 keypoints 的 Y,Z 分量需要做极坐标旋转
-inline cv::Point3f rotate_blade_point(const cv::Point3f& pt, double theta) {
-    // pt.x = 0 (法向偏移, 保持不变)
-    // pt.y, pt.z 构成扇叶平面内的坐标
-    // 旋转后映射到能量机关 XY 平面:
-    //   new_x = pt.z * cos(θ) - pt.y * sin(θ)   (注意 z→径向)
-    //   new_y = pt.z * sin(θ) + pt.y * cos(θ)   (注意 z→径向)
-    //   new_z = pt.x                             (法向)
-    // 这里 pt.z 是沿径向 (距中心距离), pt.y 是切向
-    float cos_t = static_cast<float>(std::cos(theta));
-    float sin_t = static_cast<float>(std::sin(theta));
-    return {
-        pt.z * cos_t - pt.y * sin_t,  // X: 径向投影
-        pt.z * sin_t + pt.y * cos_t,  // Y: 径向投影
-        pt.x                           // Z: 法向 (=0)
-    };
-}
-
-}  // namespace
 
 double BuffPredictor::reduced_angle(double x) {
     return std::atan2(std::sin(x), std::cos(x));
@@ -240,98 +198,33 @@ BuffSnapshot BuffPredictor::predict(const BuffDetectionResult& det) {
     last_timestamp_ = det.timestamp;
 
     // ============================================================
-    // 7. Group PnP: 估计 rune 平面与中心
-    //    YOLO 路径: 每个扇叶贡献 6 个关键点 (1 blade + R = 7 pts ≥ 4)
-    //    传统路径: 每个扇叶仅贡献 center (需 ≥4 个可见槽位)
+    // 7. Group PnP: 估计 rune 平面与中心 (委托 RuneObserver)
     // ============================================================
-    std::vector<cv::Point2f> img_pts;
-    std::vector<cv::Point3f> obj_pts;
-    img_pts.reserve(6 * NUM_SLOTS + 1);
-    obj_pts.reserve(6 * NUM_SLOTS + 1);
+    auto obs = observer_.observe(det);
 
-    // R 中心作为原点 (可选)
-    if (det.r_center.valid) {
-        img_pts.push_back(det.r_center.center);
-        obj_pts.emplace_back(0.f, 0.f, 0.f);
+    if (!obs.valid) {
+        snap.valid = false;
+        return snap;
     }
 
+    snap.center_cam = obs.center_cam;
+    snap.center_world = obs.center_world;
+    snap.normal_cam = obs.normal_cam;
+
+    // 填充 2D + 3D 槽位信息
     for (int i = 0; i < NUM_SLOTS; ++i) {
         if (!det.targets[i].valid) continue;
 
-        // 先填充 2D 槽位信息
         snap.slots[i].valid = true;
         snap.slots[i].is_lit = debounced.slots[i].is_lit;
         snap.slots[i].confidence = det.targets[i].confidence;
         snap.slots[i].center_px = det.targets[i].center;
         snap.slots[i].angle = det.targets[i].angle;
 
-        double theta = i * 2.0 * M_PI / NUM_SLOTS;
-
-        if (det.targets[i].keypoint_count >= 6) {
-            // YOLO 路径: 每个扇叶贡献 6 个关键点
-            for (int k = 0; k < 6; ++k) {
-                img_pts.push_back(det.targets[i].keypoints[k]);
-                obj_pts.push_back(
-                    rotate_blade_point(BLADE_OBJECT_POINTS_BASE[k], theta));
-            }
-        } else {
-            // 传统路径: 仅用扇叶中心
-            img_pts.push_back(det.targets[i].center);
-            obj_pts.emplace_back(
-                static_cast<float>(autobuff::RUNE_RADIUS * std::cos(theta)),
-                static_cast<float>(autobuff::RUNE_RADIUS * std::sin(theta)),
-                0.f
-            );
+        if (obs.slots[i].valid) {
+            snap.slots[i].pos_cam = obs.slots[i].pos_cam;
+            snap.slots[i].vec_cam = obs.slots[i].vec_cam;
         }
-    }
-
-    if (img_pts.size() < 4) {
-        snap.valid = false;
-        return snap;
-    }
-
-    const cv::Mat& K = aimer::tf::get_camera_matrix();
-    const cv::Mat& D = aimer::tf::get_distort_coeffs();
-
-    cv::Mat rvec, tvec;
-    bool ok = cv::solvePnP(obj_pts, img_pts, K, D, rvec, tvec, false,
-                           cv::SOLVEPNP_ITERATIVE);
-    if (!ok) {
-        snap.valid = false;
-        return snap;
-    }
-
-    cv::Mat Rcv;
-    cv::Rodrigues(rvec, Rcv);
-    Eigen::Matrix3d R;
-    R << Rcv.at<double>(0, 0), Rcv.at<double>(0, 1), Rcv.at<double>(0, 2),
-         Rcv.at<double>(1, 0), Rcv.at<double>(1, 1), Rcv.at<double>(1, 2),
-         Rcv.at<double>(2, 0), Rcv.at<double>(2, 1), Rcv.at<double>(2, 2);
-
-    Eigen::Vector3d t(
-        tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
-
-    snap.center_cam = t;
-    snap.center_world = aimer::tf::cam_to_world(t, det.robot_state.q_imu);
-
-    // 轮盘法向量 (相机坐标系 +Z 方向朝向相机)
-    Eigen::Vector3d n_cam = R.col(2);
-    if (n_cam.z() < 0) n_cam = -n_cam;
-    snap.normal_cam = n_cam.normalized();
-
-    // 填充 3D 槽位信息
-    for (int i = 0; i < NUM_SLOTS; ++i) {
-        if (!snap.slots[i].valid) continue;
-        double theta = i * 2.0 * M_PI / NUM_SLOTS;
-        Eigen::Vector3d p_obj(
-            autobuff::RUNE_RADIUS * std::cos(theta),
-            autobuff::RUNE_RADIUS * std::sin(theta),
-            0.0
-        );
-        Eigen::Vector3d p_cam = R * p_obj + t;
-        snap.slots[i].pos_cam = p_cam;
-        snap.slots[i].pos_world = aimer::tf::cam_to_world(p_cam, det.robot_state.q_imu);
-        snap.slots[i].vec_cam = p_cam - t;
     }
 
     snap.valid = true;

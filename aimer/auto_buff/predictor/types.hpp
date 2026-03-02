@@ -16,7 +16,6 @@
 
 #include "aimer/auto_buff/common/types.hpp"
 #include "aimer/common/robot_state.hpp"
-#include "aimer/common/transformer/transformer.hpp"
 
 namespace autobuff::predictor {
 
@@ -80,7 +79,6 @@ struct RuneSlotState {
 
     // 3D point at image timestamp
     Eigen::Vector3d pos_cam = Eigen::Vector3d::Zero();
-    Eigen::Vector3d pos_world = Eigen::Vector3d::Zero();
 
     // Vector from center -> slot point in camera frame (for rotation prediction)
     Eigen::Vector3d vec_cam = Eigen::Vector3d::Zero();
@@ -138,11 +136,6 @@ struct BuffSnapshot {
         return center_cam + v2;
     }
 
-    Eigen::Vector3d predict_slot_world(int slot_id, double dt) const {
-        Eigen::Vector3d p_cam = predict_slot_cam(slot_id, dt);
-        if (p_cam.isZero(0)) return Eigen::Vector3d::Zero();
-        return aimer::tf::cam_to_world(p_cam, self_state.q_imu);
-    }
 };
 
 }  // namespace autobuff::predictor

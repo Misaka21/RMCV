@@ -11,6 +11,7 @@ add_library(buff_predictor STATIC
     models/const_model.cpp
     models/small_ekf_model.cpp
     models/large_lsm_model.cpp
+    observer/rune_observer.cpp
 )
 
 target_include_directories(buff_predictor PUBLIC

@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "aimer/common/trajectory/solver_factory.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autobuff::fire_control {
@@ -46,7 +47,8 @@ std::vector<SlotAimCandidate> TargetRanker::build(
         cand.confidence = snap.slots[slot].confidence;
 
         // 预测世界坐标
-        cand.pred_world = snap.predict_slot_world(slot, predict_dt);
+        cand.pred_world = aimer::tf::cam_to_world(
+            snap.predict_slot_cam(slot, predict_dt), snap.self_state.q_imu);
 
         // 弹道解算
         cand.aim = ::fire_control::trajectory::solve(cand.pred_world, bullet_speed);

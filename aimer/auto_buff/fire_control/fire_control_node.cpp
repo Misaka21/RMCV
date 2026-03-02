@@ -11,6 +11,7 @@
 #include "aimer/auto_buff/predictor/types.hpp"
 #include "aimer/common/latency/latency_estimator.hpp"
 #include "aimer/common/trajectory/solver_factory.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "fire_controller.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
@@ -55,7 +56,7 @@ int choose_latency_slot(const autobuff::predictor::BuffSnapshot& snap) {
     double distance = 5.0;
     int slot = choose_latency_slot(snap);
     if (snap.valid && slot >= 0 && snap.has_slot(slot)) {
-        distance = snap.slots[slot].pos_world.norm();
+        distance = snap.slots[slot].pos_cam.norm();
     }
 
     double bullet_speed = snap.self_state.bullet_speed;
@@ -73,7 +74,8 @@ void finalize_latency(
     constexpr int NUM_ITER = 2;
     for (int i = 0; i < NUM_ITER; ++i) {
         double dt = latency.prediction_latency();
-        Eigen::Vector3d p = snap.predict_slot_world(slot, dt);
+        Eigen::Vector3d p = aimer::tf::cam_to_world(
+            snap.predict_slot_cam(slot, dt), snap.self_state.q_imu);
         auto aim = ::fire_control::trajectory::solve(p, snap.self_state.bullet_speed);
         if (aim.valid) latency.set_fly_time(aim.fly_time);
     }

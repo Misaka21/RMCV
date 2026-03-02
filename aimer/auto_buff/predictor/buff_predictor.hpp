@@ -9,6 +9,7 @@
 #include "aimer/auto_buff/predictor/models/const_model.hpp"
 #include "aimer/auto_buff/predictor/models/large_lsm_model.hpp"
 #include "aimer/auto_buff/predictor/models/small_ekf_model.hpp"
+#include "aimer/auto_buff/predictor/observer/rune_observer.hpp"
 #include "aimer/auto_buff/predictor/slot_debouncer.hpp"
 #include "aimer/auto_buff/predictor/types.hpp"
 
@@ -25,6 +26,7 @@ private:
     SlotDebouncer debouncer_;
     DirectionEstimator dir_estimator_;
     ModeManager mode_mgr_;
+    RuneObserver observer_;
 
     models::ConstModel const_model_;
     models::SmallEkfModel small_model_;
