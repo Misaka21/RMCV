@@ -111,8 +111,11 @@ int main(int argc, char* argv[]) {
     std::thread param_thread([]() {
         runtime_param::parameter_run("aimer.toml");
     });
+    std::thread buff_param_thread([]() {
+        runtime_param::parameter_run("buff.toml");
+    });
 
-    // 等待参数加载完成
+    // 等待参数加载完成 (任一文件完成即可)
     runtime_param::wait_for_param("ok");
 
     // 初始化坐标变换系统
@@ -247,6 +250,9 @@ int main(int argc, char* argv[]) {
     fmt::print(fmt::fg(fmt::color::yellow), "[INFO] 等待线程结束...\n");
     if (param_thread.joinable()) {
         param_thread.join();
+    }
+    if (buff_param_thread.joinable()) {
+        buff_param_thread.join();
     }
     if (hardware_thread.joinable()) {
         hardware_thread.join();
