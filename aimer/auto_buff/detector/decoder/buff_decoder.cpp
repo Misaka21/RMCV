@@ -18,19 +18,10 @@ namespace sp25 {
     constexpr int BOX_CY   = 1;  // center_y
     constexpr int BOX_W    = 2;  // width
     constexpr int BOX_H    = 3;  // height
-    constexpr int SCORE    = 4;  // 置信度 (sigmoid 之前)
+    constexpr int SCORE    = 4;  // 置信度概率 [0, 1]
     constexpr int KPT_BASE = 5;  // 关键点起始 (kpt_x0, kpt_y0, kpt_x1, ...)
     constexpr int FEATURE_SIZE = 17;  // 4 + 1 + 6*2
     constexpr int NUM_KPTS = 6;
-}
-
-float Sp25Decoder::sigmoid(float x) {
-    if (x > 0.f) {
-        return 1.f / (1.f + std::exp(-x));
-    } else {
-        float ex = std::exp(x);
-        return ex / (1.f + ex);
-    }
 }
 
 std::vector<RawBuffObject> Sp25Decoder::decode(
@@ -57,36 +48,32 @@ std::vector<RawBuffObject> Sp25Decoder::decode(
         return {};
     }
 
-    // 预计算 logit 阈值，避免对所有候选调用 sigmoid
-    const float logit_threshold = std::log(
-        conf_threshold_ / (1.f - conf_threshold_));
-
     std::vector<RawBuffObject> candidates;
-    std::vector<cv::Rect>     boxes_for_nms;  // NMSBoxes 需要整数 Rect
-    std::vector<float>        scores_for_nms;
+    std::vector<cv::Rect>      boxes_for_nms;  // NMSBoxes 需要整数 Rect
+    std::vector<float>         scores_for_nms;
 
-    candidates.reserve(64);
-    boxes_for_nms.reserve(64);
-    scores_for_nms.reserve(64);
+    // 小幅预留，避免常见场景频繁扩容；不盲目按 8400 全量分配
+    const size_t reserve_hint = static_cast<size_t>(std::min<int64_t>(n_candidates, 1024));
+    candidates.reserve(reserve_hint);
+    boxes_for_nms.reserve(reserve_hint);
+    scores_for_nms.reserve(reserve_hint);
 
     // 根据布局确定元素访问方式
     // CHW: data[feature_idx * N + candidate_idx]
     // NHW: data[candidate_idx * C + feature_idx]
     for (int64_t i = 0; i < n_candidates; ++i) {
-        // 读取置信度 (raw logit)
-        float raw_score;
+        // sp25 导出 score 已经是概率值 [0,1]，不能再当 logit 处理
+        float score;
         if (is_chw) {
-            raw_score = data[sp25::SCORE * n_candidates + i];
+            score = data[sp25::SCORE * n_candidates + i];
         } else {
-            raw_score = data[i * n_features + sp25::SCORE];
+            score = data[i * n_features + sp25::SCORE];
         }
 
-        // 快速过滤
-        if (raw_score < logit_threshold) {
+        // 概率阈值过滤
+        if (score < conf_threshold_) {
             continue;
         }
-
-        float score = sigmoid(raw_score);
 
         // 读取 box (cx, cy, w, h) — 网络坐标系
         float cx, cy, bw, bh;

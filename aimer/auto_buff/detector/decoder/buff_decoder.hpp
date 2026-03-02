@@ -45,7 +45,7 @@ public:
  *   如果 dim[1] < dim[2]，则 C=dim[1], N=dim[2]  (CHW, 需要转置访问)
  *   否则 N=dim[1], C=dim[2]                       (NHW, 行优先访问)
  *
- * 单类别，无类别 logits，直接用置信度过滤。
+ * 单类别，无类别 logits。score 通道为概率分数 [0,1]。
  */
 class Sp25Decoder : public IBuffDecoder {
 public:
@@ -61,8 +61,6 @@ public:
 private:
     float conf_threshold_;
     float nms_threshold_;
-
-    static float sigmoid(float x);
 };
 
 }  // namespace autobuff::detector
