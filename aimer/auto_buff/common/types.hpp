@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <Eigen/Core>
@@ -49,6 +50,45 @@ enum class EnemyColor : uint8_t {
     BLUE = 2
 };
 
+// 能量机关模式 (predictor 使用)
+enum class BuffMode : uint8_t {
+    UNKNOWN = 0,        // 非能量机关模式
+    SMALL_ACTIVE = 1,   // 小符 (1块亮)
+    LARGE_INACTIVE = 2, // 大符非激活 (0块亮，恒速)
+    LARGE_ACTIVE = 3,   // 大符激活 (2块亮，变速)
+};
+
+inline std::string buff_mode_name(BuffMode m) {
+    switch (m) {
+        case BuffMode::UNKNOWN:        return "UNKNOWN";
+        case BuffMode::SMALL_ACTIVE:   return "SMALL_ACTIVE";
+        case BuffMode::LARGE_INACTIVE: return "LARGE_INACTIVE";
+        case BuffMode::LARGE_ACTIVE:   return "LARGE_ACTIVE";
+    }
+    return "?";
+}
+
+// 旋转方向
+enum class RotateDir : int8_t {
+    UNKNOWN = 0,
+    CW = -1,    // 顺时针
+    CCW = 1,    // 逆时针
+};
+
+// 双车协同角色
+enum class CoopRole : uint8_t {
+    DISABLED = 0,     // 不协同，打最优目标
+    CCW_FIRST = 1,    // 打逆时针方向第 1 个 lit slot
+    CCW_SECOND = 2,   // 打逆时针方向第 2 个 lit slot
+};
+
+// 推理后端类型
+enum class DetectorBackend : uint8_t {
+    TRADITIONAL = 0,
+    OPENVINO = 1,
+    TENSORRT = 2,
+};
+
 // 检测状态 (面向 pipeline 的粗粒度状态)
 enum class DetectionStatus : uint8_t {
     NONE = 0,        // 无检测
@@ -86,6 +126,13 @@ struct DetectedTarget {
     // - Active(亮) 可能只有 center
     std::vector<cv::Point2f> landmarks;
 
+    // 6 个关键点 (从 YOLO sp25 模型):
+    // kpt[0-3]: 扇叶四角 (左上逆时针)
+    // kpt[4]:   扇叶中心
+    // kpt[5]:   内侧尖端 (指向R标方向)
+    std::array<cv::Point2f, 6> keypoints{};
+    uint8_t keypoint_count = 0;
+
     int slot_id = -1;     // 0~4
 
     // 相对 R 标的角度 (rad)，采用数学坐标系 (x 右, y 上)，范围 (-pi, pi]
@@ -114,6 +161,7 @@ struct BuffDetectionResult {
 
     DetectionStatus status = DetectionStatus::NONE;
     EnemyColor enemy_color = EnemyColor::UNKNOWN;
+    DetectorBackend backend = DetectorBackend::TRADITIONAL;
 
     int frame_id = 0;
     double timestamp = 0.0;     // 秒 (steady_clock)

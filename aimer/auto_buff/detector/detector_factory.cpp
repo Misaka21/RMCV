@@ -11,6 +11,14 @@
 
 #include "traditional/traditional_detector.hpp"
 
+#ifdef ENABLE_BUFF_OPENVINO_DETECTOR
+#include "detector_ov/openvino_buff_detector.hpp"
+#endif
+
+#ifdef ENABLE_BUFF_TENSORRT_DETECTOR
+#include "detector_trt/tensorrt_buff_detector.hpp"
+#endif
+
 namespace autobuff::detector {
 
 std::unique_ptr<BuffDetectorInterface> create_detector_from_config(
@@ -29,8 +37,36 @@ std::unique_ptr<BuffDetectorInterface> create_detector_from_config(
     if (type_str == "traditional") {
         return create_traditional_detector(color, config_file);
     } else if (type_str == "yolo") {
-        // TODO: 实现 YOLO 检测器
-        throw std::runtime_error("YOLO detector not implemented yet");
+        // 读取 YOLO 后端类型
+        auto backend_str = static_param::get_param<std::string>(
+            config, "Detector.Yolo", "backend");
+        if (backend_str.empty()) {
+            backend_str = "openvino";
+        }
+
+        debug::print("info", "BuffDetector",
+            "YOLO detector: backend={}", backend_str);
+
+        if (backend_str == "openvino") {
+#ifdef ENABLE_BUFF_OPENVINO_DETECTOR
+            return OpenvinoBuffDetector::from_config(color, config_file);
+#else
+            throw std::runtime_error(
+                "OpenVINO buff detector requested but not compiled. "
+                "Rebuild with -DENABLE_BUFF_OPENVINO_DETECTOR=ON");
+#endif
+        } else if (backend_str == "tensorrt") {
+#ifdef ENABLE_BUFF_TENSORRT_DETECTOR
+            return TensorrtBuffDetector::from_config(color, config_file);
+#else
+            throw std::runtime_error(
+                "TensorRT buff detector requested but not compiled. "
+                "Rebuild with -DENABLE_BUFF_TENSORRT_DETECTOR=ON");
+#endif
+        } else {
+            throw std::runtime_error(
+                "Unknown YOLO backend for buff detector: " + backend_str);
+        }
     } else {
         throw std::runtime_error("Unknown detector type: " + type_str);
     }

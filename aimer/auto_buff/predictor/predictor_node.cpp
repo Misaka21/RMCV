@@ -62,8 +62,10 @@ void start_predictor_node() {
             dashboard::set("buff_predictor.fps", stats.last_fps);
             dashboard::set("buff_predictor.valid", snap.valid ? 1 : 0);
             dashboard::set("buff_predictor.lit_count", snap.lit_count);
-            dashboard::set("buff_predictor.omega", snap.omega);
-            dashboard::set("buff_predictor.model", static_cast<int>(snap.model));
+            dashboard::set("buff_predictor.omega", snap.motion.omega_signed);
+            dashboard::set("buff_predictor.model", static_cast<int>(snap.motion.model));
+            dashboard::set("buff_predictor.mode", static_cast<int>(snap.mode));
+            dashboard::set("buff_predictor.direction", static_cast<int>(snap.direction));
 
         } catch (const umt::MessageError_Timeout&) {
             // continue

@@ -22,31 +22,51 @@ namespace autobuff::predictor {
 
 enum class SpeedModel : uint8_t {
     UNKNOWN = 0,
-    CONSTANT = 1,   // omega is constant
-    BIG_SINE = 2    // omega(t)=a*sin(w*t)+b, b=2.090-a (2026 large active)
+    CONST_OMEGA = 1,      // 恒速 (小符 / 大符非激活)
+    LARGE_SINE_LSM = 2,   // 正弦拟合 (大符激活)
 };
 
-struct BigSineModel {
+struct LargeSineParam {
     bool valid = false;
-    int dir = 1;            // +1 or -1
-    double start_time = 0;  // absolute timestamp when t=0
+    int dir = 1;              // +1 CCW, -1 CW
+    double start_time = 0.0;  // t=0 绝对时间戳
 
-    double a = 0.90;        // [0.780, 1.045]
-    double w = 1.94;        // [1.884, 2.000]
-    double t_shift = 0.0;   // time offset (s), typically within +-0.5s
-    double c = 0.0;         // phase offset
+    double a = 0.90;          // [0.780, 1.045]
+    double w = 1.94;          // [1.884, 2.000]
+    double tau = 0.0;         // 时间偏移 [-0.5, 0.5]
+    double phi0 = 0.0;        // 初始相位偏移
+
+    double residual_rms = 1e9;
+    int sample_count = 0;
 
     double b() const { return 2.090 - a; }
 
-    double phi(double t) const {
-        // Integral of spd(t)=a*sin(w*(t+t_shift))+b => phi(t)=-(a/w)*cos(w*(t+t_shift))+b*t + const
+    // 累积角度: ∫spd(t)dt = -(a/w)*cos(w*(t+tau)) + b*t
+    double phi(double t_rel) const {
         return static_cast<double>(dir)
-             * (-(a / w) * std::cos(w * (t + t_shift)) + b() * t)
-             + c;
+             * (-(a / w) * std::cos(w * (t_rel + tau)) + b() * t_rel)
+             + phi0;
     }
 
-    double delta(double t, double dt) const {
-        return phi(t + dt) - phi(t);
+    double delta(double t_rel, double dt) const {
+        return phi(t_rel + dt) - phi(t_rel);
+    }
+};
+
+// 运动估计结果 (模型输出, 供火控插值)
+struct MotionEstimate {
+    SpeedModel model = SpeedModel::UNKNOWN;
+    double omega_signed = 0.0;   // CONST_OMEGA 模式: 带符号角速度
+    LargeSineParam large{};      // LARGE_SINE_LSM 模式
+    double confidence = 0.0;
+
+    // 统一的 delta_theta 计算 (火控 500Hz 插值用)
+    double delta_theta(double t_abs, double dt) const {
+        if (model == SpeedModel::LARGE_SINE_LSM && large.valid) {
+            double t_rel = t_abs - large.start_time;
+            return large.delta(t_rel, dt);
+        }
+        return omega_signed * dt;
     }
 };
 
@@ -75,10 +95,17 @@ struct BuffSnapshot {
 
     aimer::RobotState self_state;
 
+    // 模式与方向
+    autobuff::BuffMode mode = autobuff::BuffMode::UNKNOWN;
+    autobuff::RotateDir direction = autobuff::RotateDir::UNKNOWN;
+
+    // 运动估计 (统一接口)
+    MotionEstimate motion;
+
     // Rotation center / plane in camera/world (at image time)
     Eigen::Vector3d center_cam = Eigen::Vector3d::Zero();
     Eigen::Vector3d center_world = Eigen::Vector3d::Zero();
-    Eigen::Vector3d normal_cam = Eigen::Vector3d(0, 0, 1);  // normalized, facing camera (+z) if possible
+    Eigen::Vector3d normal_cam = Eigen::Vector3d(0, 0, 1);
 
     // Slots
     std::array<RuneSlotState, NUM_SLOTS> slots{};
@@ -86,10 +113,11 @@ struct BuffSnapshot {
     int lit_count = 0;
     int recommended_slot = -1;
 
-    // Speed model (global)
-    SpeedModel model = SpeedModel::UNKNOWN;
-    double omega = 0.0;     // for CONSTANT (signed)
-    BigSineModel big;       // for BIG_SINE
+    // 双车协同: 逆时针排序 (rank[0]=逆时针第1个lit, rank[1]=第2个lit, ...)
+    std::array<int, NUM_SLOTS> ccw_lit_rank{{-1, -1, -1, -1, -1}};
+    int ranked_count = 0;
+
+    // === 辅助方法 ===
 
     bool has_slot(int slot_id) const {
         return slot_id >= 0 && slot_id < NUM_SLOTS && slots[slot_id].valid;
@@ -99,18 +127,11 @@ struct BuffSnapshot {
         return has_slot(slot_id) && slots[slot_id].is_lit;
     }
 
+    // 旋转预测 (火控 500Hz 插值用)
     Eigen::Vector3d predict_slot_cam(int slot_id, double dt) const {
         if (!valid || !has_slot(slot_id)) return Eigen::Vector3d::Zero();
 
-        double delta = 0.0;
-        if (model == SpeedModel::BIG_SINE && big.valid) {
-            double t = timestamp - big.start_time;
-            delta = big.delta(t, dt);
-        } else if (model == SpeedModel::CONSTANT) {
-            delta = omega * dt;
-        } else {
-            delta = omega * dt;
-        }
+        double delta = motion.delta_theta(timestamp, dt);
 
         Eigen::AngleAxisd aa(delta, normal_cam.normalized());
         Eigen::Vector3d v2 = aa.toRotationMatrix() * slots[slot_id].vec_cam;

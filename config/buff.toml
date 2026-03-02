@@ -67,14 +67,28 @@
     #@bool 是否保存调试图像
     save_debug_image = false
 
-# ==================== YOLO 检测器配置 (预留) ====================
+# ==================== YOLO 检测器配置 ====================
 
-[YoloDetector]
+[Detector.Yolo]
+    #@string 推理后端: "openvino" 或 "tensorrt"
+    backend = "openvino"
     #@string 模型文件路径 (相对于 asset 目录)
-    model_path = "buff.onnx"
+    model_path = "buff_25_best.onnx"
     #@double 置信度阈值
-    confidence_threshold = 0.5
+    conf_threshold = 0.45
     #@double NMS 阈值
     nms_threshold = 0.45
     #@int 输入尺寸
     input_size = 640
+
+[Detector.Yolo.OpenVINO]
+    #@string 推理设备: "GPU", "CPU", "AUTO"
+    device = "GPU"
+
+[Detector.Yolo.TensorRT]
+    #@bool 是否启用 FP16 量化
+    fp16 = true
+    #@bool 是否启用 INT8 量化
+    int8 = false
+    #@int 工作空间大小 (MB)
+    workspace_mb = 256

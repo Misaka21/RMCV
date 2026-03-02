@@ -1,6 +1,8 @@
 # auto_buff/fire_control 模块
 
 add_library(buff_fire_control STATIC
+    target_ranker.cpp
+    coop_policy.cpp
     fire_controller.cpp
     fire_control_node.cpp
 )

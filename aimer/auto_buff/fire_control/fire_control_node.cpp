@@ -13,7 +13,9 @@
 #include "aimer/common/trajectory/solver_factory.hpp"
 #include "fire_controller.hpp"
 #include "plugin/debug/logger.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
+#include "plugin/webview/dashboard.hpp"
 #include "umt/BasicObjManager.hpp"
 
 namespace autobuff::fire_control {
@@ -142,6 +144,23 @@ void fire_control_run(const std::string& /*config_path*/) {
 
         if (should_write) {
             fire_cmd->get() = cmd;
+
+            // dashboard 输出 (供 webview 调试工具读取)
+            int selected_rank = -1;
+            if (cmd.target_id >= 0) {
+                for (int r = 0; r < snap.ranked_count; ++r) {
+                    if (snap.ccw_lit_rank[r] == cmd.target_id) {
+                        selected_rank = r;
+                        break;
+                    }
+                }
+            }
+            dashboard::set("buff_fire.selected_slot", cmd.target_id);
+            dashboard::set("buff_fire.selected_rank", selected_rank);
+            dashboard::set("buff_fire.tracking_error", static_cast<double>(cmd.tracking_error));
+            dashboard::set("buff_fire.fire_now", cmd.fire_now);
+            dashboard::set("buff_fire.coop_role",
+                           runtime_param::get_param<std::string>("AutoBuff.FireControl.coop_role"));
         }
 
         next_time += period;

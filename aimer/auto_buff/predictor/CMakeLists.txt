@@ -1,8 +1,16 @@
 # auto_buff/predictor 模块
 
+find_package(Ceres REQUIRED)
+
 add_library(buff_predictor STATIC
     buff_predictor.cpp
     predictor_node.cpp
+    slot_debouncer.cpp
+    direction_estimator.cpp
+    mode_manager.cpp
+    models/const_model.cpp
+    models/small_ekf_model.cpp
+    models/large_lsm_model.cpp
 )
 
 target_include_directories(buff_predictor PUBLIC
@@ -17,5 +25,5 @@ target_link_libraries(buff_predictor PUBLIC
     ${OpenCV_LIBS}
     Eigen3::Eigen
     fmt::fmt
+    ${CERES_LIBRARIES}
 )
-
