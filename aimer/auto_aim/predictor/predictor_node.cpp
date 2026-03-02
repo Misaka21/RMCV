@@ -17,6 +17,7 @@
 #include "aimer/common/types.hpp"
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
+#include "aimer/common/fire_control_types.hpp"
 #include "enemy_predictor.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
@@ -123,6 +124,140 @@ void start_predictor_node() {
             if ((has_sub || show_window) && !detection.img.empty()) {
                 cv::Mat vis = detection.img.clone();
                 predictor.draw(vis, detection.state.q_imu, timestamp);
+
+                // 火控调试叠加层
+                bool draw_fire_debug = runtime_param::get_param<bool>("AutoAim.Predictor.draw_fire_debug");
+                if (draw_fire_debug) {
+                    auto fire_debug_obj = umt::BasicObjManager<::fire_control::FireDebugInfo>::find_or_create("fire_debug");
+                    const auto& fd = fire_debug_obj->get();
+                    const auto& q_imu = detection.state.q_imu;
+
+                    // 角度→像素投影 lambda
+                    auto angle_to_pixel = [&](double yaw, double pitch, double dist) -> std::pair<cv::Point2f, bool> {
+                        auto p = aimer::math::ypd_to_xyz(aimer::math::YpdCoord{yaw, pitch, dist});
+                        bool ok;
+                        auto px = aimer::tf::world_to_pixel(p, q_imu, ok);
+                        return {px, ok};
+                    };
+
+                    // 白色十字: 图像中心
+                    {
+                        int cx = vis.cols / 2, cy = vis.rows / 2;
+                        int sz = 12;
+                        cv::line(vis, {cx - sz, cy}, {cx + sz, cy}, {255, 255, 255}, 1, cv::LINE_AA);
+                        cv::line(vis, {cx, cy - sz}, {cx, cy + sz}, {255, 255, 255}, 1, cv::LINE_AA);
+                    }
+
+                    // 绿色实心: 枪管当前指向 (用云台 yaw/pitch 投影)
+                    // 使用较大距离 (100m) 消除枪管-相机平移带来的近距离视差
+                    {
+                        auto [barrel_px, barrel_ok] = angle_to_pixel(
+                            fd.gimbal_yaw, fd.gimbal_pitch, 100.0);
+                        if (barrel_ok) {
+                            cv::circle(vis, barrel_px, 5, {0, 255, 0}, -1, cv::LINE_AA);
+                        }
+                    }
+
+                    // 诊断: 右上角显示 fire_debug 状态
+                    {
+                        bool fc_alive = fd.fc_heartbeat > 0;
+                        // fail_stage: 0=未执行 1=选目标失败 2=装甲板瞄准失败 3=弹道解算失败 9=成功
+                        std::string line1 = fmt::format("FC: {}  mode={}  stg={} id={} bs={:.1f}",
+                            fc_alive ? "OK" : "DEAD", fd.fc_mode,
+                            fd.fail_stage, fd.target_id, fd.bullet_speed);
+                        std::string line2 = fmt::format("snap: mask={:#06x} pri={} frm={}",
+                            fd.snapshot_valid_mask, fd.snapshot_primary_id,
+                            fd.snapshot_frame_id);
+                        cv::putText(vis, line1, {vis.cols - 320, 20},
+                            cv::FONT_HERSHEY_SIMPLEX, 0.45,
+                            fd.fail_stage == 9 ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255),
+                            1, cv::LINE_AA);
+                        cv::putText(vis, line2, {vis.cols - 320, 38},
+                            cv::FONT_HERSHEY_SIMPLEX, 0.45, {200, 200, 200},
+                            1, cv::LINE_AA);
+                    }
+
+                    if (fd.valid) {
+                        double dist = std::max(fd.distance, 1.0);
+
+                        // 橙色实心: 期望瞄准 (AimResult)
+                        cv::Point2f aim_px;
+                        bool aim_ok;
+                        std::tie(aim_px, aim_ok) = angle_to_pixel(fd.aim_yaw, fd.aim_pitch, dist);
+
+                        // 黄色实心: 发送角 (FireCommand)
+                        cv::Point2f cmd_px;
+                        bool cmd_ok;
+                        std::tie(cmd_px, cmd_ok) = angle_to_pixel(fd.cmd_yaw, fd.cmd_pitch, dist);
+
+                        // 红色圆环: 目标装甲板位置
+                        {
+                            bool tgt_ok;
+                            auto tgt_px = aimer::tf::world_to_pixel(fd.target_pos, q_imu, tgt_ok);
+                            if (tgt_ok) {
+                                cv::circle(vis, tgt_px, 14, {0, 0, 255}, 2, cv::LINE_AA);
+                            }
+                        }
+
+                        if (aim_ok) {
+                            cv::circle(vis, aim_px, 6, {0, 165, 255}, -1, cv::LINE_AA);  // 橙色 BGR
+                        }
+
+                        if (cmd_ok) {
+                            cv::circle(vis, cmd_px, 5, {0, 255, 255}, -1, cv::LINE_AA);  // 黄色 BGR
+                        }
+
+                        // 红色箭头: 橙色→黄色 (预测补偿方向)
+                        if (aim_ok && cmd_ok) {
+                            double dx = cmd_px.x - aim_px.x;
+                            double dy = cmd_px.y - aim_px.y;
+                            if (dx * dx + dy * dy > 4.0) {  // 至少2px
+                                cv::arrowedLine(vis, aim_px, cmd_px, {0, 0, 255}, 2, cv::LINE_AA, 0, 0.3);
+                            }
+                        }
+
+                        // 右下角状态面板
+                        {
+                            int panel_w = 210;
+                            int panel_h = 90;
+                            int panel_x = vis.cols - panel_w - 10;
+                            int panel_y = vis.rows - panel_h - 10;
+
+                            // 半透明背景
+                            cv::Mat roi = vis(cv::Rect(panel_x, panel_y, panel_w, panel_h));
+                            roi = roi * 0.4;
+
+                            int tx = panel_x + 8;
+                            int ty = panel_y + 16;
+                            int lh = 15;
+                            auto put = [&](const std::string& text, cv::Scalar color) {
+                                cv::putText(vis, text, {tx, ty}, cv::FONT_HERSHEY_SIMPLEX,
+                                    0.42, color, 1, cv::LINE_AA);
+                                ty += lh;
+                            };
+
+                            put(fmt::format("TGT: {}  ARM: {}", fd.target_id, fd.armor_idx),
+                                {200, 200, 200});
+                            put(fmt::format("DIST: {:.2f}m  FLY: {:.1f}ms", fd.distance, fd.fly_time * 1000),
+                                {200, 200, 200});
+                            put(fmt::format("ERR: {:.2f}deg", fd.tracking_error * 180.0 / M_PI),
+                                {100, 200, 255});
+                            put(fmt::format("AIM: ({:.2f}, {:.2f})deg",
+                                fd.aim_yaw * 180.0 / M_PI, fd.aim_pitch * 180.0 / M_PI),
+                                {0, 165, 255});
+                            put(fmt::format("CMD: ({:.2f}, {:.2f})deg",
+                                fd.cmd_yaw * 180.0 / M_PI, fd.cmd_pitch * 180.0 / M_PI),
+                                {0, 255, 255});
+
+                            // FIRE 标志
+                            if (fd.fire_now) {
+                                cv::putText(vis, "FIRE",
+                                    {panel_x + panel_w - 60, panel_y + 16},
+                                    cv::FONT_HERSHEY_SIMPLEX, 0.55, {0, 0, 255}, 2, cv::LINE_AA);
+                            }
+                        }
+                    }
+                }
 
                 // 左下角延迟信息面板
                 auto now = SteadyClock::now();

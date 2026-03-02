@@ -187,6 +187,46 @@ struct FireCommand {
     float confidence = 0;      // 目标置信度
 };
 
+// ==================== 火控调试信息 ====================
+
+/**
+ * @brief 火控调试可视化数据 (供 predictor_node 绘制)
+ *
+ * 所有角度均为世界坐标系绝对角度 (与 GimbalState 同系)
+ * 投影到像素: ypd_to_xyz({yaw, pitch, dist}) → world_to_pixel()
+ */
+struct FireDebugInfo {
+    bool valid = false;
+    bool control_enabled = false;
+    bool fire_now = false;
+    int target_id = -1;
+    int armor_idx = -1;
+
+    Eigen::Vector3d target_pos = Eigen::Vector3d::Zero();  // 装甲板瞄准位置 (世界坐标)
+
+    // 世界坐标系绝对角度
+    double aim_yaw = 0;               // 期望角 (AimResult, 含弹道补偿)
+    double aim_pitch = 0;
+    double cmd_yaw = 0;               // 发送角 (FireCommand)
+    double cmd_pitch = 0;
+    double gimbal_yaw = 0;            // 当前云台角
+    double gimbal_pitch = 0;
+
+    double distance = 0;
+    double tracking_error = 0;
+    double fly_time = 0;
+    double timestamp = 0;
+
+    // 诊断: 火控线程当前看到的模式 (无论是否 AUTOAIM 都写)
+    uint8_t fc_mode = 0;           // 火控线程读到的 aim_mode
+    double fc_heartbeat = 0;       // 火控线程每次循环都更新，>0 表示线程存活
+    uint16_t snapshot_valid_mask = 0;  // 火控读到的 snapshot.valid_mask
+    int snapshot_primary_id = -1;      // 火控读到的 snapshot.primary_target_id
+    int snapshot_frame_id = -1;        // 火控读到的 snapshot.frame_id
+    int fail_stage = 0;                // 0=未执行, 1=选目标失败, 2=装甲板瞄准失败, 3=弹道解算失败, 9=成功
+    double bullet_speed = 0;           // 弹速 (用于诊断弹道解算失败)
+};
+
 }  // namespace fire_control
 
 #endif  // __AIMER_FIRE_CONTROL_CORE_TYPES_HPP__

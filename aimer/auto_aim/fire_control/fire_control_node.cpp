@@ -78,7 +78,7 @@ void finalize_latency(
         );
 
         ::fire_control::AimResult aim = ::fire_control::trajectory::solve(
-            pos, snapshot.self_state.bullet_speed
+            pos, std::max(snapshot.self_state.bullet_speed, 10.0f)
         );
 
         if (aim.valid) {
@@ -95,7 +95,7 @@ void fire_control_run(const std::string& /* config_path */) {
     // 数据源
     auto battlefield = umt::BasicObjManager<predictor::BattlefieldSnapshot>::find_or_create("battlefield");
     auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
-    auto aim_mode_obj = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
+    auto fire_debug = umt::BasicObjManager<::fire_control::FireDebugInfo>::find_or_create("fire_debug");
     auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     // 自瞄控制器
@@ -121,8 +121,8 @@ void fire_control_run(const std::string& /* config_path */) {
         const auto& snapshot = battlefield->get();
         double current_time = get_current_time();
 
-        // aim_mode 从 hardware 实时共享对象读取，不依赖可能过期的 snapshot
-        aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->get());
+        // aim_mode 从 snapshot 的 self_state 读取 (与 predictor 同源)
+        aimer::AimMode mode = snapshot.self_state.aim_mode;
         aimer::AimMode prev_mode = last_mode;
 
         // 检测新帧，更新延迟估计
@@ -178,6 +178,53 @@ void fire_control_run(const std::string& /* config_path */) {
         // 输出控制指令
         if (should_write) {
             fire_cmd->get() = cmd;
+        }
+
+        // 写入调试信息 (供 predictor_node 绘制)
+        // 只要在 AUTOAIM 模式就写，不要求 control_enabled
+        {
+            ::fire_control::FireDebugInfo dbg;
+            // 诊断字段: 无论何种模式都写，用于确认线程存活和模式
+            dbg.fc_mode = static_cast<uint8_t>(mode);
+            dbg.fc_heartbeat = current_time;
+            dbg.snapshot_valid_mask = snapshot.valid_mask;
+            dbg.snapshot_primary_id = snapshot.primary_target_id;
+            dbg.snapshot_frame_id = snapshot.frame_id;
+            dbg.bullet_speed = snapshot.self_state.bullet_speed;
+
+            // 云台状态: 无论是否有目标都写，用于绘制枪管指向
+            {
+                const auto& gimbal = controller.gimbal_state();
+                dbg.gimbal_yaw = gimbal.yaw;
+                dbg.gimbal_pitch = gimbal.pitch;
+            }
+
+            if (mode == aimer::AimMode::AUTOAIM) {
+                const auto& aim = controller.last_aim();
+                const auto& armor_aim = controller.last_armor_aim();
+                const auto& gimbal = controller.gimbal_state();
+
+                dbg.valid = aim.valid;
+                dbg.control_enabled = cmd.control_enabled;
+                dbg.fire_now = cmd.fire_now;
+                dbg.target_id = cmd.target_id;
+                dbg.armor_idx = armor_aim.armor_idx;
+                dbg.target_pos = armor_aim.target_pos;
+
+                dbg.aim_yaw = aim.yaw;
+                dbg.aim_pitch = aim.pitch;
+                dbg.cmd_yaw = cmd.yaw;
+                dbg.cmd_pitch = cmd.pitch;
+                dbg.gimbal_yaw = gimbal.yaw;
+                dbg.gimbal_pitch = gimbal.pitch;
+
+                dbg.distance = aim.distance;
+                dbg.tracking_error = cmd.tracking_error;
+                dbg.fly_time = aim.fly_time;
+                dbg.timestamp = current_time;
+                dbg.fail_stage = controller.last_fail_stage();
+            }
+            fire_debug->get() = dbg;
         }
 
         // 遥测数据
