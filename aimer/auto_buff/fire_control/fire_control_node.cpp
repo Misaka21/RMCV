@@ -88,6 +88,7 @@ void fire_control_run(const std::string& /*config_path*/) {
 
     auto snapshot_obj = umt::BasicObjManager<autobuff::predictor::BuffSnapshot>::find_or_create("buff_snapshot");
     auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
+    auto aim_mode_obj = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
     auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     FireController controller;
@@ -107,7 +108,8 @@ void fire_control_run(const std::string& /*config_path*/) {
         const auto& snap = snapshot_obj->get();
         double now = get_current_time();
 
-        aimer::AimMode mode = snap.self_state.aim_mode;
+        // aim_mode 从 hardware 实时共享对象读取，不依赖可能过期的 snapshot
+        aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->get());
         aimer::AimMode prev_mode = last_mode;
 
         // Update predict_to_send filter when a new frame arrives

@@ -33,6 +33,8 @@ void start_predictor_node() {
 
     stats::FpsStats stats("BuffPredictorNode", "tracked");
 
+    bool was_active = false;
+
     while (running->get()) {
         watchdog::heartbeat("buff_predictor");
         try {
@@ -41,8 +43,15 @@ void start_predictor_node() {
             // 仅在能量机关模式下工作
             if (det.robot_state.aim_mode != aimer::AimMode::ENERGY_SMALL &&
                 det.robot_state.aim_mode != aimer::AimMode::ENERGY_LARGE) {
+                was_active = false;
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;
+            }
+
+            // 从非活跃状态重新进入: 重置 predictor 清除旧数据
+            if (!was_active) {
+                predictor.reset();
+                was_active = true;
             }
 
             auto t0 = SteadyClock::now();
@@ -68,8 +77,9 @@ void start_predictor_node() {
             dashboard::set("buff_predictor.direction", static_cast<int>(snap.direction));
 
         } catch (const umt::MessageError_Timeout&) {
-            // continue
+            was_active = false;
         } catch (const umt::MessageError_Stopped&) {
+            was_active = false;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         } catch (const std::exception& e) {
             debug::print(debug::PrintMode::ERROR, "BuffPredictorNode",

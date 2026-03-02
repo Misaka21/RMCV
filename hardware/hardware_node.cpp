@@ -273,6 +273,9 @@ void start_hardware_node() {
         // 订阅串口数据（线程安全，缓冲区大小 300）
         umt::Subscriber<serial::SerialReceiveData> serial_subscriber("serial_receive", 300);
 
+        // 实时 aim_mode (供火控直接读取，不依赖过期 snapshot)
+        auto current_aim_mode = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
+
         // 通知其他线程硬件节点已开始发布（初始为false，发布后设为true）
         auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
         // 全局运行标志 (初始 true，退出时设为 false)
@@ -334,6 +337,7 @@ void start_hardware_node() {
                 if (frame.serial_valid) {
                     frame.serial_data.enemy_color = injected_enemy_color;
                     frame.serial_data.allow_fire = injected_allow_fire;
+                    current_aim_mode->get() = frame.serial_data.aim_mode;
                 }
 
                 // 应用IMU pitch/roll/yaw取反
