@@ -43,11 +43,14 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
         // FPS 统计: FPS=循环次数, sent=实际发送成功次数
         stats::FpsStats fps_stats("SerialSender", "sent");
 
+        auto next_tick = std::chrono::steady_clock::now();
+
         while (app_running->get()) {
             try {
                 // 检查发送是否启用
                 if (!send_enabled->get()) {
                     std::this_thread::sleep_for(10ms);
+                    next_tick = std::chrono::steady_clock::now();
                     continue;
                 }
 
@@ -83,8 +86,9 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                 // 更新统计: 每次循环计数，发送成功时 secondary_hit=true
                 fps_stats.update(0, sent);
 
-                // 短暂休眠避免过度占用CPU
-                std::this_thread::sleep_for(1ms);
+                // 精确 1ms 周期: sleep_until 自动补偿循环体耗时
+                next_tick += 1ms;
+                std::this_thread::sleep_until(next_tick);
 
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "SerialSender", "Exception: {}", e.what());
