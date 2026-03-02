@@ -71,7 +71,7 @@
 
 [Detector.Yolo]
     #@string 推理后端: "openvino" 或 "tensorrt"
-    backend = "openvino"
+    backend = "tensorrt"
     #@string 模型文件路径 (相对于 asset 目录)
     model_path = "buff_25_best.onnx"
     #@double 置信度阈值

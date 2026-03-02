@@ -60,6 +60,7 @@ target_include_directories(buff_detector_tensorrt PUBLIC
 target_link_libraries(buff_detector_tensorrt PUBLIC
     auto_buff_common
     aimer_common
+    detector_tensorrt
     ${TensorRT_LIBS}
     ${OpenCV_LIBS}
     CUDA::cudart

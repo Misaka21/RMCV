@@ -21,6 +21,7 @@
 
 #include "plugin/param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
+#include "aimer/common/trt_init_mutex.hpp"
 
 namespace autoaim::detector {
 
@@ -77,6 +78,9 @@ void TrtLogger::log(Severity severity, const char* msg) noexcept {
 TensorrtDetector::TensorrtDetector(const TensorrtConfig& config, EnemyColor color)
     : config_(config), detect_color_(color)
 {
+    // TRT builder 不是线程安全的，串行化所有 TRT 初始化
+    std::lock_guard<std::mutex> init_lock(aimer::trt_init_mutex());
+
     // 设置 CUDA 调度模式为阻塞同步，避免 CPU 忙等待
     // 注意：必须在第一个 CUDA API 调用之前设置
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);

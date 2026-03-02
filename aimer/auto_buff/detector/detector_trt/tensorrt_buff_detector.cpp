@@ -21,6 +21,7 @@
 
 #include "plugin/param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
+#include "aimer/common/trt_init_mutex.hpp"
 
 namespace autobuff::detector {
 
@@ -45,6 +46,9 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
     , color_(color)
     , decoder_(config.conf_threshold, config.nms_threshold)
 {
+    // TRT builder 不是线程安全的，串行化所有 TRT 初始化
+    std::lock_guard<std::mutex> init_lock(aimer::trt_init_mutex());
+
     // 阻塞同步模式，避免 CPU 忙等待
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
     if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess) {
@@ -68,8 +72,11 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
     } else {
         debug::print("info", "TensorRT-Buff", "Building engine from ONNX...");
         build_engine_from_onnx();
+        debug::print("info", "TensorRT-Buff", "[init] Engine built OK");
         save_engine(engine_path);
     }
+
+    debug::print("info", "TensorRT-Buff", "[init] Creating CUDA stream...");
 
     // 创建 CUDA 流
     cudaError_t stream_err = cudaStreamCreate(&stream_);
@@ -80,11 +87,22 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
 
     // 解析 binding 信息 (旧版 API，兼容 TRT 8.2+)
     int num_bindings = engine_->getNbBindings();
+    debug::print("info", "TensorRT-Buff", "[init] Number of bindings: {}", num_bindings);
+
     for (int i = 0; i < num_bindings; ++i) {
         const char* name   = engine_->getBindingName(i);
         bool is_input      = engine_->bindingIsInput(i);
         nvinfer1::Dims dims = engine_->getBindingDimensions(i);
         nvinfer1::DataType dtype = engine_->getBindingDataType(i);
+
+        std::string dims_str;
+        for (int d = 0; d < dims.nbDims; ++d) {
+            dims_str += std::to_string(dims.d[d]);
+            if (d + 1 < dims.nbDims) dims_str += "x";
+        }
+        debug::print("info", "TensorRT-Buff",
+            "[init]   Binding {}: name='{}', input={}, dims=[{}], dtype={}",
+            i, name, is_input, dims_str, static_cast<int>(dtype));
 
         if (is_input) {
             input_name_        = name;
@@ -114,11 +132,19 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
 
     size_t input_elem_size = use_fp16_input_ ? sizeof(__half) : sizeof(float);
 
+    debug::print("info", "TensorRT-Buff",
+        "[init] input_size={}, output_size={}, fp16_input={}",
+        input_size_, output_size_, use_fp16_input_);
+
     // 预分配原图缓冲区 (最大 1920x1200)
     img_buffer_size_ = 1920 * 1200 * 3;
     cudaError_t err0 = cudaMalloc(&img_device_,    img_buffer_size_);
     cudaError_t err1 = cudaMalloc(&input_device_,  input_size_ * input_elem_size);
     cudaError_t err2 = cudaMalloc(&output_device_, output_size_ * sizeof(float));
+
+    debug::print("info", "TensorRT-Buff",
+        "[init] cudaMalloc: err0={}, err1={}, err2={}",
+        static_cast<int>(err0), static_cast<int>(err1), static_cast<int>(err2));
 
     if (err0 != cudaSuccess || err1 != cudaSuccess || err2 != cudaSuccess) {
         throw std::runtime_error("Failed to allocate CUDA memory");
@@ -127,9 +153,11 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
     output_buffer_.resize(output_size_);
 
     debug::print("info", "TensorRT-Buff",
-        "Engine loaded. Input: '{}', Output: '{}'", input_name_, output_name_);
+        "Engine loaded. Input: '{}' (binding {}), Output: '{}' (binding {})",
+        input_name_, input_binding_idx_, output_name_, output_binding_idx_);
 
     // Warmup
+    debug::print("info", "TensorRT-Buff", "[init] Warming up...");
     void* bindings[2];
     bindings[input_binding_idx_]  = input_device_;
     bindings[output_binding_idx_] = output_device_;
