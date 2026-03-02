@@ -108,19 +108,28 @@ void BuffPredictor::build_ccw_rank(BuffSnapshot& snap) const {
         return;
     }
 
+    // 以第一个亮槽为锚点，用环形偏移排序，避免 0/2π 边界跳变
+    double anchor = lit_slots[0].angle;
+    auto ccw_offset = [anchor](double angle) {
+        double d = angle - anchor;
+        d = std::fmod(d, 2.0 * M_PI);
+        if (d < 0.0) d += 2.0 * M_PI;
+        return d;
+    };
+
     autobuff::RotateDir dir = snap.direction;
 
     if (dir == autobuff::RotateDir::CW) {
-        // 顺时针: 角度从大到小排序
+        // 顺时针: 环形偏移从大到小 (等价于 CW 偏移从小到大)
         std::sort(lit_slots.begin(), lit_slots.end(),
-                  [](const SlotAngle& a, const SlotAngle& b) {
-                      return a.angle > b.angle;
+                  [&](const SlotAngle& a, const SlotAngle& b) {
+                      return ccw_offset(a.angle) > ccw_offset(b.angle);
                   });
     } else {
-        // 逆时针或未知: 角度从小到大排序
+        // 逆时针或未知: 环形偏移从小到大
         std::sort(lit_slots.begin(), lit_slots.end(),
-                  [](const SlotAngle& a, const SlotAngle& b) {
-                      return a.angle < b.angle;
+                  [&](const SlotAngle& a, const SlotAngle& b) {
+                      return ccw_offset(a.angle) < ccw_offset(b.angle);
                   });
     }
 
