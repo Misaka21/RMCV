@@ -63,11 +63,11 @@ public:
     /**
      * @brief 从配置文件创建检测器
      * @param color 敌方颜色
-     * @param config_file 配置文件名 (默认 detector.toml)
+     * @param config_file 配置文件名 (默认 armor_detector.toml)
      */
     static std::unique_ptr<Detector> from_config(
         EnemyColor color,
-        const std::string& config_file = "detector.toml"
+        const std::string& config_file = "armor_detector.toml"
     );
 
     // ============================================================================

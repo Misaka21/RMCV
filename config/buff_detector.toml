@@ -5,7 +5,7 @@
 
 [Detector]
     #@string 检测器类型: "traditional" 或 "yolo"
-    type = "traditional"
+    type = "yolo"
     #@bool 是否开启调试模式 (显示 OpenCV 窗口)
     debug = true
 

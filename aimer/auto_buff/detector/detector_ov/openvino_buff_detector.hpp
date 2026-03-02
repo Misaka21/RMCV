@@ -67,11 +67,11 @@ public:
     OpenvinoBuffDetector(const OvBuffConfig& config, EnemyColor color);
 
     /**
-     * @brief 从 buff.toml 配置文件创建检测器
+     * @brief 从 buff_detector.toml 配置文件创建检测器
      */
     static std::unique_ptr<OpenvinoBuffDetector> from_config(
         EnemyColor color,
-        const std::string& config_file = "buff.toml"
+        const std::string& config_file = "buff_detector.toml"
     );
 
     ~OpenvinoBuffDetector() override;

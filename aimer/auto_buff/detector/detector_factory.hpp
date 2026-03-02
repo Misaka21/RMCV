@@ -26,7 +26,7 @@ namespace autobuff::detector {
  */
 std::unique_ptr<BuffDetectorInterface> create_detector_from_config(
     EnemyColor color,
-    const std::string& config_file = "buff.toml"
+    const std::string& config_file = "buff_detector.toml"
 );
 
 /**
@@ -37,7 +37,7 @@ std::unique_ptr<BuffDetectorInterface> create_detector_from_config(
  */
 std::unique_ptr<BuffDetectorInterface> create_traditional_detector(
     EnemyColor color,
-    const std::string& config_file = "buff.toml"
+    const std::string& config_file = "buff_detector.toml"
 );
 
 }  // namespace autobuff::detector

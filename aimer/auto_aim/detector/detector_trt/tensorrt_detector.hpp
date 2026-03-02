@@ -109,7 +109,7 @@ public:
      */
     static std::unique_ptr<TensorrtDetector> from_config(
         EnemyColor color,
-        const std::string& config_file = "detector.toml"
+        const std::string& config_file = "armor_detector.toml"
     );
 
     ~TensorrtDetector() override;

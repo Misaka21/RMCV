@@ -149,7 +149,7 @@ v2 版本已修复，使用串口线程记录的 `data.recv_time_us`。
 **原因**: 装甲板检测失败率高
 
 **解决**:
-- 检查检测器参数（`config/detector.toml`）
+- 检查检测器参数（`config/armor_detector.toml`）
 - 调整相机曝光和增益
 - 选择更明显的装甲板
 

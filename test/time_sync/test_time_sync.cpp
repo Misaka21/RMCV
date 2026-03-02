@@ -309,7 +309,7 @@ int main() {
 
     // 创建检测器
     auto detector = autoaim::detector::Detector::from_config(
-        autoaim::detector::EnemyColor::RED, "detector.toml");
+        autoaim::detector::EnemyColor::RED, "armor_detector.toml");
     fmt::print("检测器已创建\n\n");
 
     // 主循环

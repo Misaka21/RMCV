@@ -166,7 +166,7 @@ int main(int argc, char* argv[]) {
 
     // 启动能量机关检测器节点线程
     std::thread buff_detector_thread([]() {
-        autobuff::detector::background_buff_detector_run("buff.toml");
+        autobuff::detector::background_buff_detector_run("buff_detector.toml");
     });
 
     // 启动能量机关预测器节点线程

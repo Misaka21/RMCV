@@ -20,7 +20,7 @@ namespace autobuff::detector {
  * @brief 检测器节点配置
  */
 struct BuffDetectorNodeConfig {
-    std::string config_file = "buff.toml";
+    std::string config_file = "buff_detector.toml";
     bool async_mode = false;  // 是否使用异步模式
 };
 
@@ -90,7 +90,7 @@ private:
  *
  * 用于 Python 绑定或异步启动
  */
-void background_buff_detector_run(const std::string& config_file = "buff.toml");
+void background_buff_detector_run(const std::string& config_file = "buff_detector.toml");
 
 }  // namespace autobuff::detector
 

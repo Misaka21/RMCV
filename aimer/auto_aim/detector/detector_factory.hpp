@@ -29,7 +29,7 @@ namespace autoaim::detector {
  */
 std::unique_ptr<DetectorInterface> create_detector_from_config(
     EnemyColor color,
-    const std::string& config_file = "detector.toml"
+    const std::string& config_file = "armor_detector.toml"
 );
 
 }  // namespace autoaim::detector

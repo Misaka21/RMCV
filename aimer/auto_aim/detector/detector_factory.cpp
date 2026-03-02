@@ -49,7 +49,7 @@ std::unique_ptr<DetectorInterface> create_detector_from_config(
 #else
             throw std::runtime_error(
                 "OpenVINO detector not available. "
-                "Install OpenVINO and rebuild, or change detector.toml to use another backend.");
+                "Install OpenVINO and rebuild, or change armor_detector.toml to use another backend.");
 #endif
         }
 
@@ -59,7 +59,7 @@ std::unique_ptr<DetectorInterface> create_detector_from_config(
 #else
             throw std::runtime_error(
                 "TensorRT detector not available. "
-                "Install TensorRT and rebuild, or change detector.toml to use another backend.");
+                "Install TensorRT and rebuild, or change armor_detector.toml to use another backend.");
 #endif
         }
 

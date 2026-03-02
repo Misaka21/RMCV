@@ -96,7 +96,7 @@ public:
 
     static std::unique_ptr<TensorrtBuffDetector> from_config(
         EnemyColor color,
-        const std::string& config_file = "buff.toml"
+        const std::string& config_file = "buff_detector.toml"
     );
 
     ~TensorrtBuffDetector() override;

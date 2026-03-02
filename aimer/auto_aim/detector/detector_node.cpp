@@ -63,7 +63,7 @@ void run_sync_loop(detector::DetectorInterface* det) {
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
-    auto config = static_param::parse_file("detector.toml");
+    auto config = static_param::parse_file("armor_detector.toml");
     bool debug_mode = static_param::get_param<bool>(config, "Detector", "debug");
 
     stats::FpsStats stats("DetectorNode", "detected");
@@ -137,7 +137,7 @@ void run_async_loop(detector::DetectorInterface* det) {
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
-    auto config = static_param::parse_file("detector.toml");
+    auto config = static_param::parse_file("armor_detector.toml");
     bool debug_mode = static_param::get_param<bool>(config, "Detector", "debug");
 
     stats::FpsStats push_stats("DetectorNode-Push", "");

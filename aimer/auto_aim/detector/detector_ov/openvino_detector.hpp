@@ -69,7 +69,7 @@ public:
 
     static std::unique_ptr<OpenvinoDetector> from_config(
         EnemyColor color,
-        const std::string& config_file = "detector.toml"
+        const std::string& config_file = "armor_detector.toml"
     );
 
     ~OpenvinoDetector() override;

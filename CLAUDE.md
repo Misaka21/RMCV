@@ -81,7 +81,7 @@ The project uses a dual-parameter system:
 
 Configuration files are located in `config/` with `.toml` extension:
 - `hardware.toml` - Camera and serial port settings
-- `detector.toml` - Detection algorithm parameters
+- `armor_detector.toml` - Armor detection algorithm parameters
 - `aimer.toml` - Auto-aim system configuration
 - `test.toml` - Testing parameters
 
