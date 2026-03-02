@@ -32,6 +32,8 @@ private:
     models::SmallEkfModel small_model_;
     models::LargeLsmModel large_model_;
 
+    BuffMode last_mode_ = BuffMode::UNKNOWN;
+
     int last_track_slot_ = -1;
     double last_track_phi_ = 0.0;
     double last_timestamp_ = 0.0;

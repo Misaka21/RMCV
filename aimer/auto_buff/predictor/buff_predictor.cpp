@@ -21,6 +21,7 @@ void BuffPredictor::reset() {
     const_model_.reset();
     small_model_.reset();
     large_model_.reset();
+    last_mode_ = BuffMode::UNKNOWN;
     has_last_track_ = false;
     last_track_slot_ = -1;
     last_track_phi_ = 0.0;
@@ -124,20 +125,31 @@ BuffSnapshot BuffPredictor::predict(const BuffDetectionResult& det) {
         return snap;
     }
 
+    // 模式切换时重置相关模型
+    if (snap.mode != last_mode_) {
+        if (snap.mode == autobuff::BuffMode::LARGE_ACTIVE
+            || last_mode_ == autobuff::BuffMode::LARGE_ACTIVE) {
+            large_model_.reset();
+        }
+        last_mode_ = snap.mode;
+    }
+
     // ============================================================
     // 3. 选择跟踪槽位
     // ============================================================
     int track_slot = choose_track_slot(debounced, det);
     const bool has_phi = det.has_r_center() && (track_slot >= 0) &&
                          det.targets[track_slot].valid;
-    const double phi_meas = has_phi ? det.targets[track_slot].angle : 0.0;
+    const double phi_meas = has_phi
+        ? det.targets[track_slot].angle - track_slot * (2.0 * M_PI / NUM_SLOTS)
+        : 0.0;
 
     // ============================================================
     // 4. 方向估计 (集中化, 所有模型共享)
     // ============================================================
     double dt = has_last_track_ ? (det.timestamp - last_timestamp_) : 0.0;
 
-    if (has_phi && has_last_track_ && last_track_slot_ == track_slot) {
+    if (has_phi && has_last_track_) {
         dir_estimator_.feed(phi_meas, last_track_phi_, dt);
     }
 
