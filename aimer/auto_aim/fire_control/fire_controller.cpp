@@ -20,6 +20,7 @@ void FireController::reset()
     last_plan_ = {};
     last_armor_aim_ = {};
     last_solution_frame_id_ = -1;
+    last_no_target_frame_id_ = -1;
     last_target_confidence_ = 0.0;
     has_cached_solution_ = false;
     lost_count_ = 0;
@@ -114,6 +115,12 @@ FireCommand FireController::control(
         return reuse_last_solution(snapshot, latency);
     }
 
+    // 同一帧已经判定无目标，直接返回，避免 500Hz 下重复 select()
+    if (!has_cached_solution_ && snapshot.frame_id == last_no_target_frame_id_) {
+        last_fail_stage_ = 1;
+        return no_target_command();
+    }
+
     // 2. 目标选择
     const double prediction_dt = latency.prediction_latency();
     TargetSelection selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
@@ -123,13 +130,18 @@ FireCommand FireController::control(
     if (!selection.has_target) {
         last_fail_stage_ = 1;  // 选目标失败
         has_cached_solution_ = false;
-        lost_count_++;
+        if (snapshot.frame_id != last_no_target_frame_id_) {
+            lost_count_++;
+            last_no_target_frame_id_ = snapshot.frame_id;
+        }
         if (lost_count_ > MAX_LOST_COUNT) {
             reset();
+            last_fail_stage_ = 1;
         }
         return no_target_command();
     }
     lost_count_ = 0;
+    last_no_target_frame_id_ = -1;
 
     // 获取目标车辆的引用 (用索引访问，避免指针悬空问题)
     const auto& vehicle = snapshot.vehicles[selection.target_id];

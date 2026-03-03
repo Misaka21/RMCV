@@ -232,14 +232,4 @@ bool TargetSelector::has_visible_armor(
     return false;
 }
 
-bool TargetSelector::should_keep_target(int target_id, double current_time) const
-{
-    if (target_id != current_target_id_) return false;
-
-    double keep_time = runtime_param::get_param<double>(
-        "AutoAim.FireControl.TargetSelector.keep_time"
-    );
-    return (current_time - last_seen_time_) < keep_time;
-}
-
 }  // namespace autoaim::fire_control

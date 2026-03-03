@@ -7,12 +7,14 @@
 
 #include <cmath>
 #include <chrono>
+#include <limits>
 #include <thread>
 
 #include "aimer/common/robot_state.hpp"
 #include "aimer/common/latency/latency_estimator.hpp"
 #include "aimer/common/trajectory/solver_factory.hpp"
 #include "fire_controller.hpp"
+#include "selection/armor_aim.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/common/fire_control_types.hpp"
 #include "umt/BasicObjManager.hpp"
@@ -25,6 +27,7 @@ namespace autoaim::fire_control {
 namespace {
 
 constexpr int64_t AIM_MODE_STALE_TIMEOUT_US = 300000;  // 300ms
+constexpr int64_t SNAPSHOT_STALE_TIMEOUT_US = 200000;  // 200ms
 
 // 获取当前时间 (秒)
 double get_current_time() {
@@ -49,7 +52,14 @@ const predictor::VehicleState* choose_latency_target(
     return snapshot.get_primary();
 }
 
-int choose_latency_armor_idx(const predictor::VehicleState& vehicle) {
+int choose_latency_armor_idx(
+    const predictor::VehicleState& vehicle,
+    int preferred_armor_idx
+) {
+    if (preferred_armor_idx >= 0 && preferred_armor_idx < vehicle.armor_count) {
+        return preferred_armor_idx;
+    }
+
     int idx = vehicle.recommended_armor_idx;
     if (idx >= 0 && idx < vehicle.armor_count) {
         return idx;
@@ -73,7 +83,8 @@ int choose_latency_armor_idx(const predictor::VehicleState& vehicle) {
 ::fire_control::LatencyInfo build_latency(
     const aimer::LatencyEstimator& estimator,
     const predictor::BattlefieldSnapshot& snapshot,
-    int preferred_target_id
+    int preferred_target_id,
+    int preferred_armor_idx
 ) {
     // img_to_predict
     double img_to_predict = (snapshot.predict_timestamp > 0)
@@ -83,7 +94,7 @@ int choose_latency_armor_idx(const predictor::VehicleState& vehicle) {
     // 目标距离
     double distance = 5.0;
     if (const auto* target = choose_latency_target(snapshot, preferred_target_id)) {
-        int armor_idx = choose_latency_armor_idx(*target);
+        int armor_idx = choose_latency_armor_idx(*target, preferred_armor_idx);
         if (armor_idx >= 0) {
             Eigen::Vector3d pos = target->predict_armor_position(armor_idx, 0.0);
             if (pos.squaredNorm() > 1e-9) {
@@ -109,20 +120,29 @@ int choose_latency_armor_idx(const predictor::VehicleState& vehicle) {
 void finalize_latency(
     ::fire_control::LatencyInfo& latency,
     const predictor::BattlefieldSnapshot& snapshot,
-    int preferred_target_id
+    int preferred_target_id,
+    int preferred_armor_idx
 ) {
     const auto* target = choose_latency_target(snapshot, preferred_target_id);
     if (!target) return;
 
-    int armor_idx = choose_latency_armor_idx(*target);
-    if (armor_idx < 0) return;
+    ArmorAim armor_aim;
 
     constexpr int NUM_ITERATIONS = 2;
     for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
         double dt = latency.prediction_latency();
-        Eigen::Vector3d pos = target->predict_armor_position(
-            armor_idx, dt
-        );
+
+        // 与 FireController 使用同一套选板逻辑，避免 fly_time 基于错误装甲板估计
+        Eigen::Vector3d pos = Eigen::Vector3d::Zero();
+        ArmorAimResult armor_result = armor_aim.compute(*target, dt);
+        if (armor_result.valid) {
+            pos = armor_result.target_pos;
+        } else {
+            int armor_idx = choose_latency_armor_idx(*target, preferred_armor_idx);
+            if (armor_idx >= 0) {
+                pos = target->predict_armor_position(armor_idx, dt);
+            }
+        }
 
         if (pos.squaredNorm() < 1e-9) {
             continue;
@@ -159,9 +179,13 @@ void fire_control_run(const std::string& /* config_path */) {
 
     // 模式跟踪
     aimer::AimMode last_mode = aimer::AimMode::DISABLED;
+    bool last_snapshot_stale = true;
     int last_frame_id = -1;
+    int last_snapshot_frame_id = -1;
+    int64_t last_snapshot_update_us = 0;
     int cached_latency_frame_id = -1;
     int cached_latency_target_id = -1;
+    int cached_latency_armor_idx = -2;
     double cached_latency_predict_ts = -1.0;
     LatencyInfo cached_latency{};
     bool has_cached_latency = false;
@@ -180,6 +204,20 @@ void fire_control_run(const std::string& /* config_path */) {
         double current_time = get_current_time();
         int64_t current_time_us = get_current_time_us();
 
+        if (snapshot.frame_id != last_snapshot_frame_id) {
+            last_snapshot_frame_id = snapshot.frame_id;
+            last_snapshot_update_us = current_time_us;
+        }
+
+        int64_t snapshot_age_us = (snapshot.self_state.timestamp_us > 0)
+            ? (current_time_us - snapshot.self_state.timestamp_us)
+            : std::numeric_limits<int64_t>::max();
+        bool snapshot_stale = (snapshot.self_state.timestamp_us <= 0)
+            || (snapshot_age_us < 0)
+            || (snapshot_age_us > SNAPSHOT_STALE_TIMEOUT_US)
+            || (last_snapshot_update_us > 0
+                && (current_time_us - last_snapshot_update_us) > SNAPSHOT_STALE_TIMEOUT_US);
+
         // aim_mode 从 hardware 实时共享对象读取，不依赖可能过期的 snapshot
         aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->get());
         int64_t aim_mode_time_us = aim_mode_time_obj->get();
@@ -187,6 +225,10 @@ void fire_control_run(const std::string& /* config_path */) {
             (current_time_us - aim_mode_time_us) > AIM_MODE_STALE_TIMEOUT_US) {
             mode = aimer::AimMode::DISABLED;
         }
+        if (mode == aimer::AimMode::AUTOAIM && snapshot_stale && !last_snapshot_stale) {
+            controller.reset();
+        }
+        last_snapshot_stale = snapshot_stale;
         aimer::AimMode prev_mode = last_mode;
 
         // 检测新帧，更新延迟估计
@@ -213,31 +255,42 @@ void fire_control_run(const std::string& /* config_path */) {
         // 构建延迟信息:
         // 优先沿用上一次火控实际选中的目标，避免 primary 与实际打击目标不一致。
         int latency_target_id = snapshot.primary_target_id;
+        int latency_armor_idx = -1;
         const auto& last_sel = controller.last_selection();
+        const auto& last_armor = controller.last_armor_aim();
         if (last_sel.has_target && snapshot.is_valid(last_sel.target_id)) {
             latency_target_id = last_sel.target_id;
+            if (last_armor.valid) {
+                latency_armor_idx = last_armor.armor_idx;
+            }
         }
 
         LatencyInfo latency{};
-        if (mode == aimer::AimMode::AUTOAIM) {
+        if (mode == aimer::AimMode::AUTOAIM && !snapshot_stale) {
             bool need_rebuild_latency = !has_cached_latency
                 || snapshot.frame_id != cached_latency_frame_id
                 || latency_target_id != cached_latency_target_id
+                || latency_armor_idx != cached_latency_armor_idx
                 || std::abs(snapshot.predict_timestamp - cached_latency_predict_ts) > 1e-9;
 
             if (need_rebuild_latency) {
-                latency = build_latency(latency_estimator, snapshot, latency_target_id);
+                latency = build_latency(
+                    latency_estimator, snapshot, latency_target_id, latency_armor_idx
+                );
                 // 迭代更新 fire_to_hit (延迟准备在 node 层完成)
-                finalize_latency(latency, snapshot, latency_target_id);
+                finalize_latency(latency, snapshot, latency_target_id, latency_armor_idx);
 
                 cached_latency = latency;
                 cached_latency_frame_id = snapshot.frame_id;
                 cached_latency_target_id = latency_target_id;
+                cached_latency_armor_idx = latency_armor_idx;
                 cached_latency_predict_ts = snapshot.predict_timestamp;
                 has_cached_latency = true;
             } else {
                 latency = cached_latency;
             }
+        } else if (mode == aimer::AimMode::AUTOAIM && snapshot_stale) {
+            has_cached_latency = false;
         } else if (has_cached_latency) {
             // 非 AUTOAIM 模式复用上次延迟用于可视化，不再重算弹道。
             latency = cached_latency;
@@ -249,7 +302,12 @@ void fire_control_run(const std::string& /* config_path */) {
 
         switch (mode) {
         case aimer::AimMode::AUTOAIM:
-            cmd = controller.control(snapshot, current_time, latency);
+            if (snapshot_stale) {
+                // 预测停更时立即失能，避免持续复用旧目标
+                cmd.control_enabled = false;
+            } else {
+                cmd = controller.control(snapshot, current_time, latency);
+            }
             break;
 
         case aimer::AimMode::ENERGY_SMALL:

@@ -54,16 +54,20 @@ struct GimbalState {
         double new_yaw = euler[0];
         double new_pitch = euler[1];
 
-        // 计算角速度 (简单差分)
-        if (dt > 0.001) {
-            yaw_vel = normalize_angle(new_yaw - last_yaw) / dt;
-            pitch_vel = (new_pitch - last_pitch) / dt;
-        }
+        // 先缓存旧值，再更新当前角度，避免角速度差分错位一拍
+        double prev_yaw = yaw;
+        double prev_pitch = pitch;
 
-        last_yaw = yaw;
-        last_pitch = pitch;
+        last_yaw = prev_yaw;
+        last_pitch = prev_pitch;
         yaw = new_yaw;
         pitch = new_pitch;
+
+        // 计算角速度 (简单差分)
+        if (dt > 0.001) {
+            yaw_vel = normalize_angle(yaw - prev_yaw) / dt;
+            pitch_vel = (pitch - prev_pitch) / dt;
+        }
     }
 
     static double normalize_angle(double angle) {

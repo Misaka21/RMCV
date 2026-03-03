@@ -32,7 +32,7 @@ using ::fire_control::FireCommand;
 
 // ==================== 常量定义 ====================
 
-constexpr double CONTROL_DT = 0.002;        // 控制周期 10ms (100Hz)
+constexpr double CONTROL_DT = 0.002;        // 控制周期 2ms (500Hz)
 
 // ==================== AutoAim 专用类型 ====================
 

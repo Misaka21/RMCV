@@ -3,11 +3,12 @@
  * @brief 统一可视化线程
  *
  * 所有 imshow 集中在此线程，支持视图切换:
- *   - "predictor": snapshot.debug_img + 火控 OSD + 战场面板 + 延迟面板 + 像素标记
+ *   - "predictor": predictor_debug.image + 火控 OSD + 战场面板 + 延迟面板 + 像素标记
  *   - "detector":  detector_debug_img 直显
  *
  * 数据源:
  *   BasicObjManager<BattlefieldSnapshot> "battlefield"
+ *   BasicObjManager<PredictorDebugFrame> "predictor_debug"
  *   BasicObjManager<FireDebugInfo> "fire_debug"
  *   BasicObjManager<cv::Mat> "detector_debug_img"
  */
@@ -36,6 +37,7 @@ namespace visualizer {
 
 using SteadyClock = std::chrono::steady_clock;
 using autoaim::predictor::BattlefieldSnapshot;
+using autoaim::predictor::PredictorDebugFrame;
 using autoaim::predictor::SpinLevel;
 using autoaim::predictor::VehicleState;
 using autoaim::predictor::MAX_TARGETS;
@@ -241,6 +243,7 @@ static void draw_battlefield_panel(cv::Mat& vis, const BattlefieldSnapshot& snap
  * @brief 左下角延迟信息面板 (pipeline + 条形图)
  */
 static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot,
+                                const PredictorDebugFrame& predictor_dbg,
                                 const FireDebugInfo& dbg) {
     int panel_x = 10;
     int panel_y = vis.rows - 110;
@@ -267,8 +270,8 @@ static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot
         SteadyClock::now().time_since_epoch()).count();
     float total_pipeline_ms = (now_us - snapshot.self_state.timestamp_us) / 1000.0f;
 
-    draw_line("Detect", snapshot.detect_latency_ms, cv::Scalar(100, 200, 255));
-    draw_line("Predict", snapshot.predict_latency_ms, cv::Scalar(100, 255, 200));
+    draw_line("Detect", predictor_dbg.detect_latency_ms, cv::Scalar(100, 200, 255));
+    draw_line("Predict", predictor_dbg.predict_latency_ms, cv::Scalar(100, 255, 200));
     draw_line("Pipeline", total_pipeline_ms, cv::Scalar(0, 255, 255));
 
     // 火控延迟分解 (来自 FireDebugInfo)
@@ -290,13 +293,13 @@ static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot
         cv::Point(text_x + static_cast<int>(max_ms * scale), bar_y + bar_h),
         cv::Scalar(50, 50, 50), -1);
 
-    int detect_w = static_cast<int>(snapshot.detect_latency_ms * scale);
+    int detect_w = static_cast<int>(predictor_dbg.detect_latency_ms * scale);
     cv::rectangle(vis,
         cv::Point(text_x, bar_y),
         cv::Point(text_x + detect_w, bar_y + bar_h),
         cv::Scalar(100, 150, 255), -1);
 
-    int predict_w = static_cast<int>(snapshot.predict_latency_ms * scale);
+    int predict_w = static_cast<int>(predictor_dbg.predict_latency_ms * scale);
     cv::rectangle(vis,
         cv::Point(text_x + detect_w, bar_y),
         cv::Point(text_x + detect_w + predict_w, bar_y + bar_h),
@@ -366,6 +369,7 @@ void start_visualizer_node() {
     debug::print(debug::PrintMode::INFO, "Visualizer", "Starting visualizer node...");
 
     auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find_or_create("battlefield");
+    auto predictor_debug = umt::BasicObjManager<PredictorDebugFrame>::find_or_create("predictor_debug");
     auto fire_debug = umt::BasicObjManager<FireDebugInfo>::find_or_create("fire_debug");
     auto detector_debug_img = umt::BasicObjManager<cv::Mat>::find_or_create("detector_debug_img");
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
@@ -423,18 +427,19 @@ void start_visualizer_node() {
             } else {
                 // 默认: predictor 视图
                 const auto& snapshot = battlefield->get();
+                const auto& predictor_dbg = predictor_debug->get();
                 const auto& dbg = fire_debug->get();
 
                 // 去重策略:
                 // - 新图像帧总是重绘
                 // - 同一图像帧下，若 fire_debug 心跳有更新也允许重绘（可见 500Hz 火控动态）
-                bool same_frame = (snapshot.frame_id == last_frame_id);
+                bool same_frame = (predictor_dbg.frame_id == last_frame_id);
                 bool autoaim_mode = aimer::to_aim_mode(dbg.fc_mode) == aimer::AimMode::AUTOAIM;
                 bool fc_updated = autoaim_mode
                     && (dbg.fc_heartbeat > 0.0)
                     && std::abs(dbg.fc_heartbeat - last_dbg_heartbeat) > 1e-9;
 
-                if ((same_frame && !fc_updated) || snapshot.debug_img.empty()) {
+                if ((same_frame && !fc_updated) || predictor_dbg.image.empty()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
@@ -448,21 +453,21 @@ void start_visualizer_node() {
                     }
                 }
 
-                last_frame_id = snapshot.frame_id;
+                last_frame_id = predictor_dbg.frame_id;
                 last_dbg_heartbeat = dbg.fc_heartbeat;
                 last_render_time = SteadyClock::now();
 
                 // 拷贝到复用缓冲区再叠加 OSD，减少重复分配抖动
-                vis = copy_to_reused_buffer(snapshot.debug_img, vis_buffer);
+                vis = copy_to_reused_buffer(predictor_dbg.image, vis_buffer);
 
                 // OSD 面板
                 draw_fire_debug_panel(vis, dbg);
                 draw_battlefield_panel(vis, snapshot);
-                draw_latency_panel(vis, snapshot, dbg);
+                draw_latency_panel(vis, snapshot, predictor_dbg, dbg);
 
                 // 像素标记 (枪管、瞄准点等)
                 if (dbg.fc_heartbeat > 0) {
-                    draw_pixel_markers(vis, dbg, snapshot.self_state.q_imu);
+                    draw_pixel_markers(vis, dbg, predictor_dbg.q_imu);
                 }
             }
 
