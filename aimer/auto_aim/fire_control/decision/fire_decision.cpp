@@ -32,9 +32,14 @@ bool FireDecision::decide(
     double pitch_err = aim.pitch - gimbal.pitch;
     double distance = aim.distance;
 
+    // 角误差超过 90° 时，切线函数会翻转符号，直接判定不可开火
+    if (std::abs(yaw_err) >= M_PI_2 || std::abs(pitch_err) >= M_PI_2) {
+        return false;
+    }
+
     // 3. 将角度误差转换为落点偏移距离 (米)
-    double hit_offset_yaw = distance * std::tan(std::abs(yaw_err));
-    double hit_offset_pitch = distance * std::tan(std::abs(pitch_err));
+    double hit_offset_yaw = distance * std::abs(std::tan(yaw_err));
+    double hit_offset_pitch = distance * std::abs(std::tan(pitch_err));
 
     // 4. 获取装甲板尺寸 (从 ArmorAimResult)
     double armor_width = (armor_aim.armor_width > 0)
@@ -64,8 +69,12 @@ double FireDecision::compute_tracking_error(
     double pitch_err = aim.pitch - gimbal.pitch;
     double distance = aim.distance;
 
-    double hit_offset_yaw = distance * std::tan(std::abs(yaw_err));
-    double hit_offset_pitch = distance * std::tan(std::abs(pitch_err));
+    if (std::abs(yaw_err) >= M_PI_2 || std::abs(pitch_err) >= M_PI_2) {
+        return 1e9;
+    }
+
+    double hit_offset_yaw = distance * std::abs(std::tan(yaw_err));
+    double hit_offset_pitch = distance * std::abs(std::tan(pitch_err));
 
     return std::hypot(hit_offset_yaw, hit_offset_pitch);
 }
