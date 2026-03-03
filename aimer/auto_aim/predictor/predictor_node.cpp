@@ -18,6 +18,7 @@
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "aimer/common/fire_control_types.hpp"
+#include "aimer/common/robot_state.hpp"
 #include "enemy_predictor.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
@@ -158,23 +159,186 @@ void start_predictor_node() {
                         }
                     }
 
-                    // 诊断: 右上角显示 fire_debug 状态
+                    // 左上角诊断面板
                     {
                         bool fc_alive = fd.fc_heartbeat > 0;
-                        // fail_stage: 0=未执行 1=选目标失败 2=装甲板瞄准失败 3=弹道解算失败 9=成功
-                        std::string line1 = fmt::format("FC: {}  mode={}  stg={} id={} bs={:.1f}",
-                            fc_alive ? "OK" : "DEAD", fd.fc_mode,
-                            fd.fail_stage, fd.target_id, fd.bullet_speed);
-                        std::string line2 = fmt::format("snap: mask={:#06x} pri={} frm={}",
-                            fd.snapshot_valid_mask, fd.snapshot_primary_id,
-                            fd.snapshot_frame_id);
-                        cv::putText(vis, line1, {vis.cols - 320, 20},
-                            cv::FONT_HERSHEY_SIMPLEX, 0.45,
-                            fd.fail_stage == 9 ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255),
-                            1, cv::LINE_AA);
-                        cv::putText(vis, line2, {vis.cols - 320, 38},
-                            cv::FONT_HERSHEY_SIMPLEX, 0.45, {200, 200, 200},
-                            1, cv::LINE_AA);
+                        const char* mode_name = aimer::aim_mode_name(
+                            aimer::to_aim_mode(fd.fc_mode));
+                        const char* stage_name = ::fire_control::FireDebugInfo::fail_stage_name(
+                            fd.fail_stage);
+
+                        // 面板参数
+                        int panel_w = 380;
+                        int panel_h = fd.valid ? 160 : 100;
+                        int panel_x = 5;
+                        int panel_y = 5;
+
+                        // 半透明背景
+                        int safe_w = std::min(panel_w, vis.cols - panel_x);
+                        int safe_h = std::min(panel_h, vis.rows - panel_y);
+                        if (safe_w > 0 && safe_h > 0) {
+                            cv::Mat roi = vis(cv::Rect(panel_x, panel_y, safe_w, safe_h));
+                            roi = roi * 0.3;
+                        }
+
+                        int tx = panel_x + 6;
+                        int ty = panel_y + 14;
+                        int lh = 15;
+                        auto put = [&](const std::string& text, cv::Scalar color = {200, 200, 200}) {
+                            cv::putText(vis, text, {tx, ty}, cv::FONT_HERSHEY_SIMPLEX,
+                                0.40, color, 1, cv::LINE_AA);
+                            ty += lh;
+                        };
+
+                        // 第1行: 火控线程状态 + 模式
+                        put(fmt::format("FC: {}  Mode: {}",
+                            fc_alive ? "ALIVE" : "DEAD", mode_name),
+                            fc_alive ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255));
+
+                        // 第2行: 管线状态
+                        cv::Scalar stage_color = (fd.fail_stage == 9)
+                            ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 100, 255);
+                        put(fmt::format("Stage: {}  Target: #{}  Armor: [{}]",
+                            stage_name, fd.snapshot_primary_id, fd.armor_idx),
+                            stage_color);
+
+                        // 第3行: 弹速 + snapshot
+                        put(fmt::format("Bullet: {:.1f}m/s  Snap: frm={} mask={:#06x}",
+                            fd.bullet_speed, fd.snapshot_frame_id, fd.snapshot_valid_mask));
+
+                        // 第4行: 云台角度 + 角速度
+                        put(fmt::format("Gimbal: Y={:+.1f}  P={:+.1f}  Yv={:+.0f}  Pv={:+.0f} deg/s",
+                            fd.gimbal_yaw * 57.3, fd.gimbal_pitch * 57.3,
+                            fd.gimbal_yaw_vel * 57.3, fd.gimbal_pitch_vel * 57.3));
+
+                        // 第5行: 延迟分解
+                        put(fmt::format("Latency: {:.1f}ms (img={:.1f} pred={:.1f} send={:.1f} fly={:.1f})",
+                            fd.latency_total, fd.latency_img_to_predict,
+                            fd.latency_predict_to_send, fd.latency_send_to_control,
+                            fd.latency_fire_to_hit));
+
+                        if (fd.valid) {
+                            ty += 3;
+
+                            // 第6行: 距离 + 飞行时间
+                            put(fmt::format("Dist: {:.2f}m  FlyTime: {:.1f}ms",
+                                fd.distance, fd.fly_time * 1000));
+
+                            // 第7行: 瞄准角 (AimResult)
+                            put(fmt::format("Aim:  Y={:+.2f}  P={:+.2f} deg",
+                                fd.aim_yaw * 57.3, fd.aim_pitch * 57.3),
+                                {0, 165, 255});
+
+                            // 第8行: 发送角 (FireCommand)
+                            put(fmt::format("Cmd:  Y={:+.2f}  P={:+.2f} deg",
+                                fd.cmd_yaw * 57.3, fd.cmd_pitch * 57.3),
+                                {0, 255, 255});
+
+                            // 第9行: 跟踪误差 + 开火状态
+                            std::string fire_str = fd.fire_now ? "  >>> FIRE <<<" : "";
+                            put(fmt::format("Error: {:.2f} deg{}",
+                                fd.tracking_error * 57.3, fire_str),
+                                fd.fire_now ? cv::Scalar(0, 0, 255) : cv::Scalar(100, 200, 255));
+                        }
+                    }
+
+                    // 右下角战场信息面板
+                    {
+                        // 收集有效目标信息
+                        struct VehInfo {
+                            int id;
+                            std::string type_name;
+                            double dist;
+                            double omega_dps;     // 角速度 (deg/s)
+                            double vx, vy;        // 中心速度
+                            double radius;
+                            int visible_count;
+                            std::string armor_ids;
+                            bool is_primary;
+                            const char* spin_label;
+                        };
+                        std::vector<VehInfo> vehs;
+
+                        snapshot.for_each_valid([&](int id, const predictor::VehicleState& v) {
+                            VehInfo info;
+                            info.id = id;
+                            info.type_name = autoaim::armor_number_to_string(v.enemy_type);
+                            info.dist = v.center.norm();
+                            info.omega_dps = v.spin.omega * 57.3;
+                            info.vx = v.velocity.x();
+                            info.vy = v.velocity.y();
+                            info.radius = v.spin.radius;
+                            info.is_primary = (id == snapshot.primary_target_id);
+
+                            // 陀螺等级
+                            switch (v.spin.level) {
+                                case predictor::SpinLevel::NONE: info.spin_label = "NONE"; break;
+                                case predictor::SpinLevel::LOW:  info.spin_label = "LOW";  break;
+                                case predictor::SpinLevel::HIGH: info.spin_label = "HIGH"; break;
+                                default: info.spin_label = "?"; break;
+                            }
+
+                            // 可见装甲板
+                            info.visible_count = 0;
+                            std::string ids;
+                            for (int a = 0; a < v.armor_count; ++a) {
+                                if (v.armors[a].visible) {
+                                    info.visible_count++;
+                                    if (!ids.empty()) ids += ",";
+                                    ids += std::to_string(a);
+                                }
+                            }
+                            info.armor_ids = ids.empty() ? "-" : ids;
+                            vehs.push_back(info);
+                        });
+
+                        if (!vehs.empty()) {
+                            // 每个目标2行，加标题1行
+                            int line_count = 1 + static_cast<int>(vehs.size()) * 2;
+                            int lh = 15;
+                            int panel_h = line_count * lh + 12;
+                            int panel_w = 340;
+                            int panel_x = vis.cols - panel_w - 5;
+                            int panel_y = vis.rows - panel_h - 5;
+
+                            // 半透明背景
+                            int safe_x = std::max(0, panel_x);
+                            int safe_y = std::max(0, panel_y);
+                            int safe_w = std::min(panel_w, vis.cols - safe_x);
+                            int safe_h = std::min(panel_h, vis.rows - safe_y);
+                            if (safe_w > 0 && safe_h > 0) {
+                                cv::Mat roi = vis(cv::Rect(safe_x, safe_y, safe_w, safe_h));
+                                roi = roi * 0.3;
+                            }
+
+                            int tx = panel_x + 6;
+                            int ty = panel_y + 14;
+                            auto put = [&](const std::string& text, cv::Scalar color = {200, 200, 200}) {
+                                cv::putText(vis, text, {tx, ty}, cv::FONT_HERSHEY_SIMPLEX,
+                                    0.38, color, 1, cv::LINE_AA);
+                                ty += lh;
+                            };
+
+                            put(fmt::format("Battlefield  ({} tracked)", vehs.size()), {255, 255, 255});
+
+                            for (const auto& v : vehs) {
+                                cv::Scalar color = v.is_primary ? cv::Scalar(0, 255, 255) : cv::Scalar(180, 180, 180);
+                                // 第1行: 类型 + 距离 + 可见装甲板
+                                put(fmt::format("{}#{} {:.1f}m  arm[{}] {}{}",
+                                    v.is_primary ? ">" : " ",
+                                    v.id, v.dist, v.armor_ids,
+                                    v.type_name == "sentry" ? "Sentry" :
+                                    v.type_name == "outpost" ? "Outpost" :
+                                    v.type_name == "base" ? "Base" :
+                                    "Inf" + v.type_name,
+                                    v.is_primary ? " [PRI]" : ""),
+                                    color);
+                                // 第2行: 陀螺状态 + 速度
+                                put(fmt::format("  spin:{} w={:+.0f}d/s r={:.2f}m  vel=({:.1f},{:.1f})",
+                                    v.spin_label, v.omega_dps, v.radius, v.vx, v.vy),
+                                    {150, 150, 150});
+                            }
+                        }
                     }
 
                     if (fd.valid) {
@@ -213,47 +377,6 @@ void start_predictor_node() {
                             double dy = cmd_px.y - aim_px.y;
                             if (dx * dx + dy * dy > 4.0) {  // 至少2px
                                 cv::arrowedLine(vis, aim_px, cmd_px, {0, 0, 255}, 2, cv::LINE_AA, 0, 0.3);
-                            }
-                        }
-
-                        // 右下角状态面板
-                        {
-                            int panel_w = 210;
-                            int panel_h = 90;
-                            int panel_x = vis.cols - panel_w - 10;
-                            int panel_y = vis.rows - panel_h - 10;
-
-                            // 半透明背景
-                            cv::Mat roi = vis(cv::Rect(panel_x, panel_y, panel_w, panel_h));
-                            roi = roi * 0.4;
-
-                            int tx = panel_x + 8;
-                            int ty = panel_y + 16;
-                            int lh = 15;
-                            auto put = [&](const std::string& text, cv::Scalar color) {
-                                cv::putText(vis, text, {tx, ty}, cv::FONT_HERSHEY_SIMPLEX,
-                                    0.42, color, 1, cv::LINE_AA);
-                                ty += lh;
-                            };
-
-                            put(fmt::format("TGT: {}  ARM: {}", fd.target_id, fd.armor_idx),
-                                {200, 200, 200});
-                            put(fmt::format("DIST: {:.2f}m  FLY: {:.1f}ms", fd.distance, fd.fly_time * 1000),
-                                {200, 200, 200});
-                            put(fmt::format("ERR: {:.2f}deg", fd.tracking_error * 180.0 / M_PI),
-                                {100, 200, 255});
-                            put(fmt::format("AIM: ({:.2f}, {:.2f})deg",
-                                fd.aim_yaw * 180.0 / M_PI, fd.aim_pitch * 180.0 / M_PI),
-                                {0, 165, 255});
-                            put(fmt::format("CMD: ({:.2f}, {:.2f})deg",
-                                fd.cmd_yaw * 180.0 / M_PI, fd.cmd_pitch * 180.0 / M_PI),
-                                {0, 255, 255});
-
-                            // FIRE 标志
-                            if (fd.fire_now) {
-                                cv::putText(vis, "FIRE",
-                                    {panel_x + panel_w - 60, panel_y + 16},
-                                    cv::FONT_HERSHEY_SIMPLEX, 0.55, {0, 0, 255}, 2, cv::LINE_AA);
                             }
                         }
                     }
