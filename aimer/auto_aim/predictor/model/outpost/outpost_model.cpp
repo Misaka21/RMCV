@@ -34,14 +34,15 @@ void OutpostModel::update(const std::vector<ArmorObservation>& observations, dou
 
     // 选择最正对的装甲板 (过滤顶部装甲板)
     const ArmorData* best = nullptr;
-    double best_z_to_v = 1e9;
+    double best_abs_z_to_v = 1e9;
     for (const auto& armor : armors_with_id) {
         // 过滤顶部装甲板: pitch > 45° (朝上)
         if (armor.observation.z[obs::PITCH] > outpost_model::TOP_ARMOR_PITCH_THRESHOLD) {
             continue;
         }
-        if (armor.z_to_v() < best_z_to_v) {
-            best_z_to_v = armor.z_to_v();
+        double abs_z_to_v = std::abs(armor.z_to_v());
+        if (abs_z_to_v < best_abs_z_to_v) {
+            best_abs_z_to_v = abs_z_to_v;
             best = &armor;
         }
     }

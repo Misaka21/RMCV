@@ -5,6 +5,7 @@
 
 #include "fire_controller.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "plugin/param/runtime_parameter.hpp"
@@ -25,6 +26,8 @@ void FireController::reset()
     has_cached_solution_ = false;
     lost_count_ = 0;
     last_fail_stage_ = 0;
+    last_time_ = 0.0;
+    last_plan_time_ = 0.0;
 }
 
 bool FireController::evaluate_fire_window(
@@ -62,27 +65,6 @@ bool FireController::evaluate_fire_window(
     return can_fire;
 }
 
-FireCommand FireController::reuse_last_solution(
-    const predictor::BattlefieldSnapshot& snapshot,
-    const LatencyInfo& latency
-)
-{
-    if (!has_cached_solution_) {
-        last_fail_stage_ = 1;
-        return no_target_command();
-    }
-
-    bool can_fire = evaluate_fire_window(snapshot, latency, last_target_confidence_);
-    last_fail_stage_ = 9;
-    return generate_command(
-        last_selection_,
-        last_plan_,
-        last_aim_,
-        can_fire,
-        last_target_confidence_
-    );
-}
-
 FireCommand FireController::control(
     const predictor::BattlefieldSnapshot& snapshot,
     double current_time,
@@ -110,23 +92,32 @@ FireCommand FireController::control(
         }
     }
 
-    // 同一帧沿用已解算结果: 避免重复选目标/选板/弹道解算
-    if (has_cached_solution_ && snapshot.frame_id == last_solution_frame_id_) {
-        return reuse_last_solution(snapshot, latency);
-    }
-
     // 同一帧已经判定无目标，直接返回，避免 500Hz 下重复 select()
     if (!has_cached_solution_ && snapshot.frame_id == last_no_target_frame_id_) {
         last_fail_stage_ = 1;
         return no_target_command();
     }
 
-    // 2. 目标选择
-    const double prediction_dt = latency.prediction_latency();
-    TargetSelection selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
+    // 2. 计算预测时间:
+    // latency 给出 img->hit 轴的固定部分，current_time - snapshot.timestamp
+    // 是控制循环内同一帧的实时外推增量。
+    const double frame_extrapolation_dt = std::max(0.0, current_time - snapshot.timestamp);
+    const double prediction_dt = latency.prediction_latency() + frame_extrapolation_dt;
+
+    // 3. 目标选择
+    // 同一帧优先沿用上次目标选择，避免 500Hz 下重复 select() 抖动；
+    // 但后续仍会用新的 prediction_dt 重算选板与弹道。
+    TargetSelection selection;
+    if (has_cached_solution_ && snapshot.frame_id == last_solution_frame_id_
+        && last_selection_.has_target && snapshot.is_valid(last_selection_.target_id))
+    {
+        selection = last_selection_;
+    } else {
+        selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
+    }
     last_selection_ = selection;
 
-    // 3. 无目标处理
+    // 4. 无目标处理
     if (!selection.has_target) {
         last_fail_stage_ = 1;  // 选目标失败
         has_cached_solution_ = false;
@@ -143,6 +134,12 @@ FireCommand FireController::control(
     lost_count_ = 0;
     last_no_target_frame_id_ = -1;
 
+    if (!snapshot.is_valid(selection.target_id)) {
+        last_fail_stage_ = 1;
+        has_cached_solution_ = false;
+        return no_target_command();
+    }
+
     // 获取目标车辆的引用 (用索引访问，避免指针悬空问题)
     const auto& vehicle = snapshot.vehicles[selection.target_id];
 
@@ -154,7 +151,7 @@ FireCommand FireController::control(
     selection.predicted_pos = vehicle.predict_armor_position(debug_armor_idx, prediction_dt);
     last_selection_ = selection;
 
-    // 4. 装甲板瞄准
+    // 5. 装甲板瞄准
     ArmorAimResult armor_result = armor_aim_.compute(
         vehicle,
         prediction_dt
@@ -167,12 +164,11 @@ FireCommand FireController::control(
         return no_target_command();
     }
 
-    // 5. 弹道解算
+    // 6. 弹道解算
     AimResult aim = ::fire_control::trajectory::solve(
         armor_result.target_pos,
         snapshot.self_state.bullet_speed
     );
-    last_aim_ = aim;
 
     if (!aim.valid) {
         last_fail_stage_ = 3;  // 弹道解算失败
@@ -180,14 +176,30 @@ FireCommand FireController::control(
         return no_target_command();
     }
 
-    // 6. 构造 GimbalPlan
+    // 7. 构造 GimbalPlan
+    const double plan_dt = (last_plan_time_ > 0) ? (current_time - last_plan_time_) : CONTROL_DT;
+    double yaw_rate = 0.0;
+    double pitch_rate = 0.0;
+    if (last_aim_.valid && plan_dt > 1e-4) {
+        yaw_rate = GimbalState::normalize_angle(aim.yaw - last_aim_.yaw) / plan_dt;
+        pitch_rate = (aim.pitch - last_aim_.pitch) / plan_dt;
+    }
+
+    const double steady_tau = std::max(0.0, runtime_param::get_param<double>(
+        "AutoAim.FireControl.Latency.steady_state_time_constant"
+    ));
+
     GimbalPlan plan;
     plan.valid = true;
-    plan.yaw = aim.yaw;
-    plan.pitch = aim.pitch;
+    plan.yaw = aim.yaw + steady_tau * yaw_rate;
+    plan.pitch = aim.pitch + steady_tau * pitch_rate;
+    plan.yaw_vel = yaw_rate;
+    plan.pitch_vel = pitch_rate;
     last_plan_ = plan;
+    last_aim_ = aim;
+    last_plan_time_ = current_time;
 
-    // 7. 开火判断 (使用 ArmorAimResult 中的装甲板信息)
+    // 8. 开火判断 (使用 ArmorAimResult 中的装甲板信息)
     last_solution_frame_id_ = snapshot.frame_id;
     last_target_confidence_ = vehicle.confidence;
     has_cached_solution_ = true;

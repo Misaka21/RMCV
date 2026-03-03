@@ -83,11 +83,6 @@ private:
         double confidence
     ) const;
 
-    FireCommand reuse_last_solution(
-        const predictor::BattlefieldSnapshot& snapshot,
-        const LatencyInfo& latency
-    );
-
     FireCommand no_target_command();
 
     // ==================== 组件 ====================
@@ -100,6 +95,7 @@ private:
 
     GimbalState gimbal_state_;
     double last_time_ = 0;
+    double last_plan_time_ = 0;
 
     // ==================== 缓存 ====================
 

@@ -139,11 +139,10 @@ ArmorAimResult ArmorAim::compute_indirect(
     double omega = vehicle.spin.omega;
     int armor_count = vehicle.armor_count;
 
-    // 陀螺旋转方向
-    bool ccw = (omega > 0);  // 逆时针
+    // 陀螺旋转方向: omega>0 为逆时针
+    bool ccw = (omega > 0);
 
-    // 计算每块装甲板到"出现位置"的角度差
-    // 出现位置 = 装甲板朝向角达到 ±max_orientation_angle 时
+    // 出现边界角: 与 rm.cv.fans 保持同向定义
     double target_z_to_v = ccw ? -max_orientation_angle : max_orientation_angle;
 
     int best_armor = -1;
@@ -152,17 +151,13 @@ ArmorAimResult ArmorAim::compute_indirect(
     for (int i = 0; i < armor_count; ++i) {
         double armor_z_to_v = vehicle.armors[i].z_to_v;
 
-        // 计算该装甲板旋转到 target_z_to_v 需要的角度
-        double angle_diff;
-        if (ccw) {
-            // 逆时针: 装甲板 z_to_v 减小
-            angle_diff = armor_z_to_v - target_z_to_v;
-            if (angle_diff < 0) angle_diff += 2 * M_PI;
-        } else {
-            // 顺时针: 装甲板 z_to_v 增大
-            angle_diff = target_z_to_v - armor_z_to_v;
-            if (angle_diff < 0) angle_diff += 2 * M_PI;
-        }
+        // 沿旋转方向计算“前向角距离”:
+        // CCW: target - current
+        // CW : current - target
+        double angle_diff = ccw
+            ? aimer::math::reduced_angle(target_z_to_v - armor_z_to_v)
+            : aimer::math::reduced_angle(armor_z_to_v - target_z_to_v);
+        if (angle_diff < 0) angle_diff += 2 * M_PI;
 
         // 转换为时间
         double time_to_emerge = angle_diff / std::abs(omega);

@@ -5,6 +5,8 @@
 
 #include "base_model.hpp"
 
+#include <cmath>
+
 namespace autoaim::predictor {
 
 BaseModel::BaseModel(int target_id, EnemyType enemy_type)
@@ -22,10 +24,11 @@ void BaseModel::update(const std::vector<ArmorObservation>& observations, double
 
     // 选择最佳观测
     const ArmorObservation* best = nullptr;
-    double best_z_to_v = 1e9;
+    double best_abs_z_to_v = 1e9;
     for (const auto& obs : observations) {
-        if (obs.valid && obs.z_to_v < best_z_to_v) {
-            best_z_to_v = obs.z_to_v;
+        double abs_z_to_v = std::abs(obs.z_to_v);
+        if (obs.valid && abs_z_to_v < best_abs_z_to_v) {
+            best_abs_z_to_v = abs_z_to_v;
             best = &obs;
         }
     }
