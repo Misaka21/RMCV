@@ -61,10 +61,8 @@ public:
 
     const TargetSelection& last_selection() const { return last_selection_; }
     const AimResult& last_aim() const { return last_aim_; }
-    const ArmorAimResult& last_armor_aim() const { return last_armor_aim_; }
     const GimbalPlan& last_plan() const { return last_plan_; }
     const GimbalState& gimbal_state() const { return gimbal_state_; }
-    int last_fail_stage() const { return last_fail_stage_; }
 
 private:
     // ==================== 辅助方法 ====================
@@ -98,7 +96,6 @@ private:
     ArmorAimResult last_armor_aim_;
 
     int lost_count_ = 0;
-    int last_fail_stage_ = 0;
     static constexpr int MAX_LOST_COUNT = 30;  // 300ms 后重置
 };
 

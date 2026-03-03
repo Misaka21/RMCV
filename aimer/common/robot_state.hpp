@@ -47,9 +47,8 @@ inline AimMode to_aim_mode(uint8_t raw) {
 /**
  * @brief 机器人状态 - 从 hardware::SyncFrame 提取
  *
- * 注意:
- * - enemy_color 由串口协议直接提供
- * - allow_fire 当前不走串口协议，固定为 true（不使用软门控）
+ * 注意: 新协议 (32字节) 不再包含 enemy_color 和 allow_fire 字段，
+ * 这些需要从配置文件或其他来源获取
  */
 struct RobotState {
     // IMU姿态 (云台坐标系 → 世界坐标系)
@@ -61,14 +60,14 @@ struct RobotState {
     // 弹速 (m/s)
     float bullet_speed = 15.0f;
 
-    // 敌方颜色 (0=未知, 1=红, 2=蓝)
+    // 敌方颜色 (0=未知, 1=红, 2=蓝) - 需要从配置获取
     uint8_t enemy_color = 0;
 
     // 自瞄模式
     AimMode aim_mode = AimMode::DISABLED;
 
-    // 是否允许射击（当前固定 true）
-    bool allow_fire = true;
+    // 是否允许射击 - 需要从配置获取
+    bool allow_fire = false;
 
     // 预瞄锁定 (右键按下=true, 释放=false)
     bool aiming_lock = false;
@@ -88,8 +87,9 @@ struct RobotState {
             state.bullet_speed = s.bullet_speed;
             state.aim_mode = to_aim_mode(s.aim_mode);  // uint8_t → AimMode
             state.aiming_lock = s.aiming_lock;
+            // enemy_color 和 allow_fire 从配置加载（不在协议中）
             state.enemy_color = s.enemy_color;
-            state.allow_fire = true;
+            state.allow_fire = s.allow_fire;
         }
         state.timestamp_us = frame.timestamp_us;
         return state;

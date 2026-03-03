@@ -56,7 +56,6 @@ FireCommand FireController::control(
 
     // 3. 无目标处理
     if (!selection.has_target) {
-        last_fail_stage_ = 1;  // 选目标失败
         lost_count_++;
         if (lost_count_ > MAX_LOST_COUNT) {
             reset();
@@ -84,23 +83,17 @@ FireCommand FireController::control(
     last_armor_aim_ = armor_result;
 
     if (!armor_result.valid) {
-        last_fail_stage_ = 2;  // 装甲板瞄准失败
         return no_target_command();
     }
 
     // 5. 弹道解算
-    // 弹速保底: 串口未上报时可能为0，solver 要求 >= 5.0
-    double bullet_speed = snapshot.self_state.bullet_speed;
-    if (bullet_speed < 10.0) bullet_speed = 15.0;
-
     AimResult aim = ::fire_control::trajectory::solve(
         armor_result.target_pos,
-        bullet_speed
+        snapshot.self_state.bullet_speed
     );
     last_aim_ = aim;
 
     if (!aim.valid) {
-        last_fail_stage_ = 3;  // 弹道解算失败
         return no_target_command();
     }
 
@@ -133,7 +126,6 @@ FireCommand FireController::control(
         }
     }
 
-    last_fail_stage_ = 9;  // 成功
     return generate_command(selection, plan, aim, can_fire, vehicle.confidence);
 }
 
