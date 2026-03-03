@@ -20,7 +20,7 @@
 
 [Plotter]
     #@bool 主开关
-    enable_plotter = true
+    enable_plotter = false
     #@string PlotJuggler 地址
     host = "192.168.1.102"
     #@int PlotJuggler 端口

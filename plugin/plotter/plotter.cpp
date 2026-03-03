@@ -44,7 +44,7 @@ public:
     void send(const std::string& json) {
         std::lock_guard<std::mutex> lock(mutex_);
         ensure_init();
-        ::sendto(socket_fd_, json.c_str(), json.length(), 0,
+        ::sendto(socket_fd_, json.c_str(), json.length(), MSG_DONTWAIT,
                  reinterpret_cast<const sockaddr*>(&dest_addr_), sizeof(dest_addr_));
     }
 
@@ -84,6 +84,10 @@ void init() {
 
 void set_enabled(bool enabled) {
     g_enabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool enabled() {
+    return g_enabled.load(std::memory_order_relaxed);
 }
 
 // 单条发送

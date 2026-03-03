@@ -185,11 +185,11 @@ void run_async_loop(detector::DetectorInterface* det) {
 
     debug::print(debug::PrintMode::INFO, "DetectorNode", "Running in async mode");
 
-    // Pop 主循环: 获取检测结果并发布
     while (running->get()) {
         watchdog::heartbeat("detector");
 
         auto async_result = det->pop();  // 内部 condition_variable 阻塞等待
+
         if (async_result.image.empty()) continue;  // stop() 唤醒时返回空
 
         // 构建并发布结果

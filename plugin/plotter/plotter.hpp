@@ -11,6 +11,11 @@ namespace plotter {
 void init();
 
 /**
+ * 查询是否启用
+ */
+bool enabled();
+
+/**
  * 设置全局开关
  */
 void set_enabled(bool enabled);

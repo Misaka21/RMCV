@@ -21,8 +21,8 @@ EnemyPredictor::~EnemyPredictor() = default;
 
 BattlefieldSnapshot EnemyPredictor::predict(const DetectionResult& detection, double timestamp) {
     current_time_ = timestamp;
-    frame_id_ = detection.frame_id;  // 使用相机原始帧号
-    current_state_ = detection.state;  // 保存自身状态
+    frame_id_ = detection.frame_id;
+    current_state_ = detection.state;
 
     // 阶段1: 观测 (PnP)
     update_observations(detection, timestamp);

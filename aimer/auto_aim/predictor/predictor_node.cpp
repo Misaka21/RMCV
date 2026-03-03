@@ -52,8 +52,10 @@ void start_predictor_node() {
 
     while (running->get()) {
         watchdog::heartbeat("predictor");
+
         try {
             auto detection = sub.pop_for(1000);
+            auto t_pop = SteadyClock::now();
 
             // 非自瞄模式时跳过预测
             if (detection.state.aim_mode != aimer::AimMode::AUTOAIM) {
@@ -64,39 +66,29 @@ void start_predictor_node() {
             // 使用相机帧时间戳（从 SyncFrame 传递过来，微秒转秒）
             double timestamp = detection.state.timestamp_us / 1e6;
 
-            // DEBUG: 输入装甲板数量
-            if (!detection.armors.empty()) {
-                //fmt::print(fmt::fg(fmt::color::magenta),
-                //    "[DEBUG] Input: {} armors\n", detection.armors.size());
-            }
-
-            // 运行预测
-            auto predict_start = SteadyClock::now();
+            // [阶段2] EKF 预测
             auto snapshot = predictor.predict(detection, timestamp);
-            auto predict_end = SteadyClock::now();
+            auto t_predict = SteadyClock::now();
 
             float latency = std::chrono::duration_cast<std::chrono::microseconds>(
-                predict_end - predict_start).count() / 1000.0f;
+                t_predict - t_pop).count() / 1000.0f;
 
             // 设置预测完成时间戳 (供火控计算 predict_to_send 延迟)
-            auto predict_time_since_epoch = predict_end.time_since_epoch();
+            auto predict_time_since_epoch = t_predict.time_since_epoch();
             snapshot.predict_timestamp = std::chrono::duration<double>(predict_time_since_epoch).count();
 
-            // clone 原图像给火控调试用
+            // [阶段3] clone 图像
             if (!detection.img.empty()) {
                 snapshot.debug_img = detection.img.clone();
             }
 
-            // 写入共享对象 (火控通过 BasicObjManager 读取)
+            // [阶段4] 写入共享对象
             battlefield->get() = snapshot;
 
-            // 输出云台状态到 PlotJuggler
-            // q_imu 是 IMU 原始姿态，需要修正 R_gimbal2imubody 得到真正的云台角度
+            // [阶段5] 输出云台状态到 PlotJuggler
             {
-                // Gimbal → Imu 的旋转修正
                 const auto& R_g2i = aimer::tf::Transform<
                     aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
-                // q_gimbal = R_g2i^T * q_imu (从 Imu 坐标系转到 Gimbal 坐标系)
                 Eigen::Quaterniond q_gimbal(R_g2i.transpose() * snapshot.self_state.q_imu.toRotationMatrix());
                 auto [yaw, pitch] = aimer::math::quat_to_yaw_pitch(q_gimbal);
                 plotter::begin();
@@ -105,21 +97,20 @@ void start_predictor_node() {
                 plotter::end();
             }
 
-            // 统计
+            // [阶段6] 统计 + Dashboard
             int tracked = 0;
             for (int i = 1; i < MAX_TARGETS; ++i) {
                 if (snapshot.is_valid(i)) tracked++;
             }
-            stats.update(latency, tracked > 0);  // tick + print_if_needed
-
-            // 更新 Dashboard 数据
+            stats.update(latency, tracked > 0);
             dashboard::set("predictor.latency_ms", latency);
             dashboard::set("predictor.tracked_count", tracked);
             dashboard::set("predictor.fps", stats.last_fps);
 
-            // 可视化 (在有 Web 订阅者或 show_window 时执行)
+            // [阶段7] 可视化
             bool show_window = runtime_param::get_param<bool>("AutoAim.Predictor.show_window");
             bool has_sub = pub_debug.has_subscriber();
+
             if ((has_sub || show_window) && !detection.img.empty()) {
                 cv::Mat vis = detection.img.clone();
                 predictor.draw(vis, detection.state.q_imu, timestamp);

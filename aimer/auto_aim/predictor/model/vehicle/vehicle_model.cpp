@@ -231,7 +231,7 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     prev_timestamp_ = timestamp;
 
     // ========== 输出到 PlotJuggler ==========
-    {
+    if (plotter::enabled()) {
         std::string prefix = fmt::format("/target_{}", target_id_);
 
         plotter::begin();
