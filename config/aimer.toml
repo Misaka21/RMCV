@@ -25,10 +25,6 @@
 
 [AutoAim]
 [AutoAim.Predictor]
-    # 可视化
-    #@bool 是否显示预测可视化窗口
-    show_window = true
-
     # 整车运动模型选择: "spin" (旧), "lmtd", "sp" (新, 推荐)
     #@string 整车运动模型
     motion_model = "sp"
@@ -484,3 +480,11 @@
     still_speed_scale = 2.0
     #@double 最大有效距离 (m)
     max_distance = 10.0
+
+# ==================== 可视化配置 ====================
+
+[Visualizer]
+    #@bool 是否显示可视化窗口
+    show_window = true
+    #@string 显示视图: "predictor" 或 "detector"
+    view = "predictor"

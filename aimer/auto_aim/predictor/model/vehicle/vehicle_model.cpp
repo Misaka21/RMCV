@@ -438,7 +438,6 @@ VehicleState VehicleModel::predict(double timestamp) const {
             );
             as.velocity = vs.velocity + tangent_vel;
             as.yaw = theta + i * (2.0 * M_PI / armor_num);
-            as.visible = (i == 0);  // 只有当前追踪的可见
             as.last_seen = last_update_time_;
 
             // 评分: 越正对越好 (用 cos(装甲板朝向 - 视线方向))
@@ -451,6 +450,11 @@ VehicleState VehicleModel::predict(double timestamp) const {
             // 装甲板类型和朝向角
             as.type = correct_armor_type(ArmorType::SMALL, enemy_type_);
             as.z_to_v = angle_diff;
+
+            // 可见性: 追踪板一定可见，朝向角<60°且有多块观测时也可见
+            int tracked = motion_->get_tracked_id();
+            as.visible = (i == tracked) ||
+                         (prev_armors_.size() >= 2 && as.score > 0.5);
 
             if (as.score > local_best_score) {
                 local_best_score = as.score;

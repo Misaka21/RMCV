@@ -7,6 +7,7 @@ set(lib_name "plugin")
 aux_source_directory(./debug debug_src)
 aux_source_directory(./param param_src)
 aux_source_directory(./plotter plotter_src)
+aux_source_directory(./visualizer visualizer_src)
 
 # Webview sources (仅在启用时编译)
 if(ENABLE_WEBVIEW)
@@ -14,7 +15,7 @@ if(ENABLE_WEBVIEW)
 endif()
 
 # Create plugin library
-add_library(${lib_name} STATIC ${debug_src} ${param_src} ${plotter_src} ${webview_src})
+add_library(${lib_name} STATIC ${debug_src} ${param_src} ${plotter_src} ${visualizer_src} ${webview_src})
 
 target_include_directories(${lib_name} PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}

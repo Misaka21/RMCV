@@ -12,8 +12,6 @@
 #include <fmt/format.h>
 #include <opencv2/imgproc.hpp>
 
-#include <opencv2/highgui.hpp>
-
 #include "aimer/common/types.hpp"
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
@@ -42,7 +40,6 @@ void start_predictor_node() {
     // 设置 UMT
     umt::Subscriber<DetectionResult> sub("detections");
     auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find_or_create("battlefield");
-    umt::Publisher<cv::Mat> vis_pub("predictor_vis");  // 可视化帧 (供录制)
     umt::Publisher<cv::Mat> pub_debug("/predictor/debug");  // Web 调试图像
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
@@ -77,13 +74,23 @@ void start_predictor_node() {
             auto predict_time_since_epoch = t_predict.time_since_epoch();
             snapshot.predict_timestamp = std::chrono::duration<double>(predict_time_since_epoch).count();
 
-            // [阶段3] clone 图像
-            if (!detection.img.empty()) {
+            // [阶段3] clone 图像 + EKF 绘制 (仅在需要时)
+            bool need_vis = runtime_param::get_param<bool>("Visualizer.show_window")
+                || pub_debug.has_subscriber();
+            if (need_vis && !detection.img.empty()) {
                 snapshot.debug_img = detection.img.clone();
+                predictor.draw(snapshot.debug_img, detection.state.q_imu, timestamp);
             }
+            snapshot.detect_latency_ms = detection.latency_ms;
+            snapshot.predict_latency_ms = latency;
 
             // [阶段4] 写入共享对象
             battlefield->get() = snapshot;
+
+            // Web 调试图像
+            if (pub_debug.has_subscriber() && !snapshot.debug_img.empty()) {
+                pub_debug.push(snapshot.debug_img);
+            }
 
             // [阶段5] 输出云台状态到 PlotJuggler
             {
@@ -106,142 +113,6 @@ void start_predictor_node() {
             dashboard::set("predictor.latency_ms", latency);
             dashboard::set("predictor.tracked_count", tracked);
             dashboard::set("predictor.fps", stats.last_fps);
-
-            // [阶段7] 可视化
-            bool show_window = runtime_param::get_param<bool>("AutoAim.Predictor.show_window");
-            bool has_sub = pub_debug.has_subscriber();
-
-            if ((has_sub || show_window) && !detection.img.empty()) {
-                cv::Mat vis = detection.img.clone();
-                predictor.draw(vis, detection.state.q_imu, timestamp);
-
-                // 左上角战场信息面板
-                {
-                    int lh = 15;
-                    int tx = 8;
-                    int ty = 16;
-                    auto put = [&](const std::string& text, cv::Scalar color = {200, 200, 200}) {
-                        cv::putText(vis, text, {tx, ty}, cv::FONT_HERSHEY_SIMPLEX,
-                            0.38, color, 1, cv::LINE_AA);
-                        ty += lh;
-                    };
-
-                    // 收集有效目标
-                    int n_tracked = 0;
-                    snapshot.for_each_valid([&](int, const VehicleState&) { n_tracked++; });
-
-                    // 半透明背景
-                    int panel_h = 18 + n_tracked * 2 * lh + (n_tracked > 0 ? 4 : 0);
-                    int panel_w = 360;
-                    int safe_w = std::min(panel_w, vis.cols);
-                    int safe_h = std::min(panel_h, vis.rows);
-                    if (safe_w > 0 && safe_h > 0) {
-                        cv::Mat bg = vis(cv::Rect(0, 0, safe_w, safe_h));
-                        bg = bg * 0.3;
-                    }
-
-                    put(fmt::format("Battlefield  {} tracked  bs={:.1f}m/s",
-                        n_tracked, snapshot.self_state.bullet_speed), {255, 255, 255});
-
-                    snapshot.for_each_valid([&](int id, const VehicleState& v) {
-                        bool is_pri = (id == snapshot.primary_target_id);
-                        cv::Scalar color = is_pri ? cv::Scalar(0, 255, 255) : cv::Scalar(180, 180, 180);
-
-                        // 目标类型名
-                        std::string type_str = armor_number_to_string(v.enemy_type);
-                        if (type_str != "sentry" && type_str != "outpost" && type_str != "base") {
-                            type_str = "Inf" + type_str;
-                        }
-
-                        // 可见装甲板
-                        std::string arm_str;
-                        for (int a = 0; a < v.armor_count; ++a) {
-                            if (v.armors[a].visible) {
-                                if (!arm_str.empty()) arm_str += ",";
-                                arm_str += std::to_string(a);
-                            }
-                        }
-                        if (arm_str.empty()) arm_str = "-";
-
-                        // 陀螺等级
-                        const char* spin_label = "NONE";
-                        if (v.spin.level == SpinLevel::LOW) spin_label = "LOW";
-                        else if (v.spin.level == SpinLevel::HIGH) spin_label = "HIGH";
-
-                        // 第1行: 类型+距离+装甲板
-                        put(fmt::format("{}#{} {}  {:.1f}m  arm[{}]{}",
-                            is_pri ? ">" : " ", id, type_str, v.center.norm(),
-                            arm_str, is_pri ? " [PRI]" : ""), color);
-
-                        // 第2行: 陀螺+速度
-                        put(fmt::format("  spin:{} w={:+.0f}d/s r={:.2f}m  v=({:.1f},{:.1f})",
-                            spin_label, v.spin.omega * 57.3, v.spin.radius,
-                            v.velocity.x(), v.velocity.y()), {150, 150, 150});
-                    });
-                }
-
-                // 左下角延迟信息面板
-                auto now = SteadyClock::now();
-                auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                    now.time_since_epoch()).count();
-                int64_t exposure_us = detection.state.timestamp_us;
-                float total_latency_ms = (now_us - exposure_us) / 1000.0f;
-                float detect_latency_ms = detection.latency_ms;
-                float predict_latency_ms = latency;
-
-                int panel_x = 10;
-                int panel_y = vis.rows - 90;
-                int panel_w = 200;
-                int panel_h = 80;
-                cv::Mat roi = vis(cv::Rect(panel_x, panel_y, panel_w, panel_h));
-                roi = roi * 0.4;
-
-                int text_x = panel_x + 8;
-                int text_y = panel_y + 18;
-                int line_h = 16;
-                auto draw_latency_line = [&](const std::string& label, float ms, cv::Scalar color) {
-                    std::string text = fmt::format("{}: {:.1f}ms", label, ms);
-                    cv::putText(vis, text, cv::Point(text_x, text_y),
-                        cv::FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv::LINE_AA);
-                    text_y += line_h;
-                };
-
-                draw_latency_line("Detect", detect_latency_ms, cv::Scalar(100, 200, 255));
-                draw_latency_line("Predict", predict_latency_ms, cv::Scalar(100, 255, 200));
-                draw_latency_line("Total", total_latency_ms, cv::Scalar(0, 255, 255));
-
-                int bar_y = text_y + 5;
-                int bar_h = 10;
-                float max_ms = std::max(50.0f, total_latency_ms);
-                float scale = (panel_w - 20) / max_ms;
-
-                cv::rectangle(vis,
-                    cv::Point(text_x, bar_y),
-                    cv::Point(text_x + static_cast<int>(max_ms * scale), bar_y + bar_h),
-                    cv::Scalar(50, 50, 50), -1);
-
-                int detect_w = static_cast<int>(detect_latency_ms * scale);
-                cv::rectangle(vis,
-                    cv::Point(text_x, bar_y),
-                    cv::Point(text_x + detect_w, bar_y + bar_h),
-                    cv::Scalar(100, 150, 255), -1);
-
-                int predict_w = static_cast<int>(predict_latency_ms * scale);
-                cv::rectangle(vis,
-                    cv::Point(text_x + detect_w, bar_y),
-                    cv::Point(text_x + detect_w + predict_w, bar_y + bar_h),
-                    cv::Scalar(100, 255, 150), -1);
-
-                vis_pub.push(vis);
-
-                if (has_sub) {
-                    pub_debug.push(vis);
-                }
-                if (show_window) {
-                    cv::imshow("Predictor", vis);
-                    cv::waitKey(1);
-                }
-            }
 
         } catch (const umt::MessageError_Timeout&) {
             // 超时，继续

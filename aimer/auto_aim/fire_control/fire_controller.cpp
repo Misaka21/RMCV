@@ -20,6 +20,7 @@ void FireController::reset()
     last_plan_ = {};
     last_armor_aim_ = {};
     lost_count_ = 0;
+    last_fail_stage_ = 0;
 }
 
 FireCommand FireController::control(
@@ -56,6 +57,7 @@ FireCommand FireController::control(
 
     // 3. 无目标处理
     if (!selection.has_target) {
+        last_fail_stage_ = 1;  // 选目标失败
         lost_count_++;
         if (lost_count_ > MAX_LOST_COUNT) {
             reset();
@@ -83,6 +85,7 @@ FireCommand FireController::control(
     last_armor_aim_ = armor_result;
 
     if (!armor_result.valid) {
+        last_fail_stage_ = 2;  // 装甲板瞄准失败
         return no_target_command();
     }
 
@@ -94,6 +97,7 @@ FireCommand FireController::control(
     last_aim_ = aim;
 
     if (!aim.valid) {
+        last_fail_stage_ = 3;  // 弹道解算失败
         return no_target_command();
     }
 
@@ -126,6 +130,7 @@ FireCommand FireController::control(
         }
     }
 
+    last_fail_stage_ = 9;  // 成功
     return generate_command(selection, plan, aim, can_fire, vehicle.confidence);
 }
 

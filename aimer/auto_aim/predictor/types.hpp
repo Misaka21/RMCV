@@ -363,6 +363,10 @@ struct BattlefieldSnapshot {
     double predict_timestamp = 0;  // 预测完成时间戳 (predict_t)
     int frame_id = 0;
 
+    // 延迟信息 (供 visualizer 显示)
+    float detect_latency_ms = 0;   // 检测耗时 (ms)
+    float predict_latency_ms = 0;  // 预测耗时 (ms)
+
     // 原图像 (供火控调试绘制用)
     cv::Mat debug_img;
 

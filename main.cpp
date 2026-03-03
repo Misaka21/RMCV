@@ -25,6 +25,7 @@
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/plotter/plotter.hpp"
 #include "plugin/rmcv_bag/recorder_node.hpp"
+#include "plugin/visualizer/visualizer_node.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
 #include "plugin/webview/dashboard.hpp"
 #include "umt/umt.hpp"
@@ -187,6 +188,11 @@ int main(int argc, char* argv[]) {
         rmcv_bag::start_recorder_node();
     });
 
+    // 启动可视化节点线程
+    std::thread visualizer_thread([]() {
+        visualizer::start_visualizer_node();
+    });
+
     // 启动看门狗节点线程
     std::string heartbeat_file = debug::get_session_path() + "/heartbeat";
     std::thread watchdog_thread([heartbeat_file]() {
@@ -269,8 +275,17 @@ int main(int argc, char* argv[]) {
     if (buff_detector_thread.joinable()) {
         buff_detector_thread.join();
     }
+    if (buff_predictor_thread.joinable()) {
+        buff_predictor_thread.join();
+    }
+    if (buff_fire_control_thread.joinable()) {
+        buff_fire_control_thread.join();
+    }
     if (recorder_thread.joinable()) {
         recorder_thread.join();
+    }
+    if (visualizer_thread.joinable()) {
+        visualizer_thread.join();
     }
     if (watchdog_thread.joinable()) {
         watchdog_thread.join();
