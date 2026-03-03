@@ -217,14 +217,37 @@ struct FireDebugInfo {
     double fly_time = 0;
     double timestamp = 0;
 
-    // 诊断: 火控线程当前看到的模式 (无论是否 AUTOAIM 都写)
-    uint8_t fc_mode = 0;           // 火控线程读到的 aim_mode
-    double fc_heartbeat = 0;       // 火控线程每次循环都更新，>0 表示线程存活
-    uint16_t snapshot_valid_mask = 0;  // 火控读到的 snapshot.valid_mask
-    int snapshot_primary_id = -1;      // 火控读到的 snapshot.primary_target_id
-    int snapshot_frame_id = -1;        // 火控读到的 snapshot.frame_id
+    // 云台角速度
+    double gimbal_yaw_vel = 0;
+    double gimbal_pitch_vel = 0;
+
+    // 延迟分解 (ms)
+    double latency_img_to_predict = 0;
+    double latency_predict_to_send = 0;
+    double latency_send_to_control = 0;
+    double latency_fire_to_hit = 0;
+    double latency_total = 0;          // prediction_latency()
+
+    // 诊断
+    uint8_t fc_mode = 0;               // AimMode 枚举值
+    double fc_heartbeat = 0;           // >0 表示火控线程存活
+    uint16_t snapshot_valid_mask = 0;
+    int snapshot_primary_id = -1;
+    int snapshot_frame_id = -1;
     int fail_stage = 0;                // 0=未执行, 1=选目标失败, 2=装甲板瞄准失败, 3=弹道解算失败, 9=成功
-    double bullet_speed = 0;           // 弹速 (用于诊断弹道解算失败)
+    double bullet_speed = 0;
+
+    // fail_stage 转人可读字符串
+    static const char* fail_stage_name(int stage) {
+        switch (stage) {
+            case 0: return "IDLE";
+            case 1: return "NO_TARGET";
+            case 2: return "NO_ARMOR";
+            case 3: return "TRAJ_FAIL";
+            case 9: return "OK";
+            default: return "???";
+        }
+    }
 };
 
 }  // namespace fire_control

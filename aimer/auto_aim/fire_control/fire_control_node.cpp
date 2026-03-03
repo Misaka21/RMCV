@@ -198,7 +198,16 @@ void fire_control_run(const std::string& /* config_path */) {
                 const auto& gimbal = controller.gimbal_state();
                 dbg.gimbal_yaw = gimbal.yaw;
                 dbg.gimbal_pitch = gimbal.pitch;
+                dbg.gimbal_yaw_vel = gimbal.yaw_vel;
+                dbg.gimbal_pitch_vel = gimbal.pitch_vel;
             }
+
+            // 延迟分解 (ms)
+            dbg.latency_img_to_predict = latency.img_to_predict * 1000;
+            dbg.latency_predict_to_send = latency.predict_to_send * 1000;
+            dbg.latency_send_to_control = latency.send_to_control * 1000;
+            dbg.latency_fire_to_hit = latency.fire_to_hit * 1000;
+            dbg.latency_total = latency.prediction_latency() * 1000;
 
             if (mode == aimer::AimMode::AUTOAIM) {
                 const auto& aim = controller.last_aim();
