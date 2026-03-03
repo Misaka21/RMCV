@@ -23,9 +23,17 @@ namespace autobuff::fire_control {
 
 namespace {
 
+constexpr int64_t AIM_MODE_STALE_TIMEOUT_US = 300000;  // 300ms
+
 double get_current_time() {
     auto now = std::chrono::steady_clock::now();
     return std::chrono::duration<double>(now.time_since_epoch()).count();
+}
+
+int64_t get_current_time_us() {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        now.time_since_epoch()).count();
 }
 
 int choose_latency_slot(const autobuff::predictor::BuffSnapshot& snap) {
@@ -89,6 +97,7 @@ void fire_control_run(const std::string& /*config_path*/) {
     auto snapshot_obj = umt::BasicObjManager<autobuff::predictor::BuffSnapshot>::find_or_create("buff_snapshot");
     auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
     auto aim_mode_obj = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
+    auto aim_mode_time_obj = umt::BasicObjManager<int64_t>::find_or_create("current_aim_mode_time_us", 0);
     auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     FireController controller;
@@ -107,9 +116,15 @@ void fire_control_run(const std::string& /*config_path*/) {
 
         const auto& snap = snapshot_obj->get();
         double now = get_current_time();
+        int64_t now_us = get_current_time_us();
 
         // aim_mode 从 hardware 实时共享对象读取，不依赖可能过期的 snapshot
         aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->get());
+        int64_t aim_mode_time_us = aim_mode_time_obj->get();
+        if (aim_mode_time_us <= 0 ||
+            (now_us - aim_mode_time_us) > AIM_MODE_STALE_TIMEOUT_US) {
+            mode = aimer::AimMode::DISABLED;
+        }
         aimer::AimMode prev_mode = last_mode;
 
         // Update predict_to_send filter when a new frame arrives
@@ -179,4 +194,3 @@ void start_fire_control_node(const std::string& config_path) {
 }
 
 }  // namespace autobuff::fire_control
-

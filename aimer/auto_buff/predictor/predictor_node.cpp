@@ -34,20 +34,37 @@ void start_predictor_node() {
     stats::FpsStats stats("BuffPredictorNode", "tracked");
 
     bool was_active = false;
+    constexpr double INACTIVE_RESET_DELAY_S = 0.4;
+    double inactive_since_s = -1.0;
+
+    auto now_seconds = []() -> double {
+        return std::chrono::duration<double>(
+            SteadyClock::now().time_since_epoch()).count();
+    };
+    auto mark_inactive = [&](double t_now_s) {
+        if (inactive_since_s < 0.0) {
+            inactive_since_s = t_now_s;
+        }
+        if ((t_now_s - inactive_since_s) > INACTIVE_RESET_DELAY_S) {
+            was_active = false;
+        }
+    };
 
     while (running->get()) {
         watchdog::heartbeat("buff_predictor");
         try {
             auto det = sub.pop_for(1000);
+            double t_now_s = now_seconds();
 
             // 仅在能量机关模式下工作
             if (det.robot_state.aim_mode != aimer::AimMode::ENERGY_SMALL &&
                 det.robot_state.aim_mode != aimer::AimMode::ENERGY_LARGE) {
-                was_active = false;
+                mark_inactive(t_now_s);
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 continue;
             }
 
+            inactive_since_s = -1.0;
             // 从非活跃状态重新进入: 重置 predictor 清除旧数据
             if (!was_active) {
                 predictor.reset();
@@ -77,9 +94,9 @@ void start_predictor_node() {
             dashboard::set("buff_predictor.direction", static_cast<int>(snap.direction));
 
         } catch (const umt::MessageError_Timeout&) {
-            was_active = false;
+            mark_inactive(now_seconds());
         } catch (const umt::MessageError_Stopped&) {
-            was_active = false;
+            mark_inactive(now_seconds());
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         } catch (const std::exception& e) {
             debug::print(debug::PrintMode::ERROR, "BuffPredictorNode",
@@ -91,4 +108,3 @@ void start_predictor_node() {
 }
 
 }  // namespace autobuff::predictor
-

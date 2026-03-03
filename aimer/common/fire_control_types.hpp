@@ -213,7 +213,7 @@ struct FireDebugInfo {
     double gimbal_pitch = 0;
 
     double distance = 0;
-    double tracking_error = 0;
+    double tracking_error = 0;  // 跟踪误差 (m)
     double fly_time = 0;
     double timestamp = 0;
 

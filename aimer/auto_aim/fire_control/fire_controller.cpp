@@ -124,8 +124,9 @@ FireCommand FireController::control(
         double fire_advance = runtime_param::get_param<double>(
             "AutoAim.FireControl.PID.fire_advance"
         );
-        double now_to_hit = latency.now_to_hit();
-        if (armor_result.time_to_fire > now_to_hit + fire_advance) {
+        // time_to_fire 是基于图像时刻的预测时间，因此应与 img->hit 同轴比较。
+        double img_to_hit = latency.hit_latency();
+        if (armor_result.time_to_fire > img_to_hit + fire_advance) {
             can_fire = false;
         }
     }

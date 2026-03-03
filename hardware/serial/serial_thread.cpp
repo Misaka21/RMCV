@@ -107,6 +107,10 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
     try {
         // 使用 Message 系统发布接收数据（线程安全）
         umt::Publisher<SerialReceiveData> publisher("serial_receive");
+        // 实时 aim_mode（供火控直接读取）
+        auto current_aim_mode = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
+        auto current_aim_mode_time_us =
+            umt::BasicObjManager<int64_t>::find_or_create("current_aim_mode_time_us", 0);
         auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
         auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
         auto debug_print = umt::BasicObjManager<bool>::find_or_create("serial_debug_print", false);
@@ -149,6 +153,9 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                     if (SerialUtils::packet_to_receive_data(packet, receive_data)) {
                         // 设置时间戳
                         receive_data.recv_time_us = recv_time_us;
+                        // 更新实时模式源（避免依赖可能停更的上游快照）
+                        current_aim_mode->get() = receive_data.aim_mode;
+                        current_aim_mode_time_us->get() = recv_time_us;
 
                         // 遥测数据
                         dashboard::set("serial.yaw", receive_data.yaw);
@@ -437,6 +444,14 @@ bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceive
             data.roll = roll;
         }
 
+        // [19] enemy_color
+        uint8_t enemy_color = 0;
+        if (packet.unload_data(enemy_color, 19)) {
+            data.enemy_color = enemy_color;
+        }
+
+        // 默认放行；hardware_node 可按配置注入覆盖。
+        data.allow_fire = true;
         return true;
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::ERROR, "SerialUtils", "packet_to_receive_data: {}", e.what());

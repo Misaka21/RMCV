@@ -23,6 +23,8 @@ namespace autoaim::fire_control {
 
 namespace {
 
+constexpr int64_t AIM_MODE_STALE_TIMEOUT_US = 300000;  // 300ms
+
 // 获取当前时间 (秒)
 double get_current_time() {
     auto now = std::chrono::steady_clock::now();
@@ -30,10 +32,47 @@ double get_current_time() {
     return std::chrono::duration<double>(duration).count();
 }
 
+int64_t get_current_time_us() {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        now.time_since_epoch()).count();
+}
+
+const predictor::VehicleState* choose_latency_target(
+    const predictor::BattlefieldSnapshot& snapshot,
+    int preferred_target_id
+) {
+    if (snapshot.is_valid(preferred_target_id)) {
+        return &snapshot.vehicles[preferred_target_id];
+    }
+    return snapshot.get_primary();
+}
+
+int choose_latency_armor_idx(const predictor::VehicleState& vehicle) {
+    int idx = vehicle.recommended_armor_idx;
+    if (idx >= 0 && idx < vehicle.armor_count) {
+        return idx;
+    }
+    if (vehicle.armor_count <= 0) {
+        return -1;
+    }
+
+    int best_idx = 0;
+    double best_score = vehicle.armors[0].score;
+    for (int i = 1; i < vehicle.armor_count; ++i) {
+        if (vehicle.armors[i].score > best_score) {
+            best_score = vehicle.armors[i].score;
+            best_idx = i;
+        }
+    }
+    return best_idx;
+}
+
 // 从 snapshot 提取延迟构建所需参数
 ::fire_control::LatencyInfo build_latency(
     const aimer::LatencyEstimator& estimator,
-    const predictor::BattlefieldSnapshot& snapshot
+    const predictor::BattlefieldSnapshot& snapshot,
+    int preferred_target_id
 ) {
     // img_to_predict
     double img_to_predict = (snapshot.predict_timestamp > 0)
@@ -42,10 +81,13 @@ double get_current_time() {
 
     // 目标距离
     double distance = 5.0;
-    if (snapshot.get_primary()) {
-        const auto* armor = snapshot.get_primary()->get_recommended_armor();
-        if (armor) {
-            distance = armor->position.norm();
+    if (const auto* target = choose_latency_target(snapshot, preferred_target_id)) {
+        int armor_idx = choose_latency_armor_idx(*target);
+        if (armor_idx >= 0) {
+            Eigen::Vector3d pos = target->predict_armor_position(armor_idx, 0.0);
+            if (pos.squaredNorm() > 1e-9) {
+                distance = pos.norm();
+            }
         }
     }
 
@@ -65,17 +107,25 @@ double get_current_time() {
  */
 void finalize_latency(
     ::fire_control::LatencyInfo& latency,
-    const predictor::BattlefieldSnapshot& snapshot
+    const predictor::BattlefieldSnapshot& snapshot,
+    int preferred_target_id
 ) {
-    const auto* target = snapshot.get_primary();
+    const auto* target = choose_latency_target(snapshot, preferred_target_id);
     if (!target) return;
+
+    int armor_idx = choose_latency_armor_idx(*target);
+    if (armor_idx < 0) return;
 
     constexpr int NUM_ITERATIONS = 2;
     for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
         double dt = latency.prediction_latency();
         Eigen::Vector3d pos = target->predict_armor_position(
-            target->recommended_armor_idx, dt
+            armor_idx, dt
         );
+
+        if (pos.squaredNorm() < 1e-9) {
+            continue;
+        }
 
         ::fire_control::AimResult aim = ::fire_control::trajectory::solve(
             pos, snapshot.self_state.bullet_speed
@@ -97,6 +147,7 @@ void fire_control_run(const std::string& /* config_path */) {
     auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
     auto fire_debug = umt::BasicObjManager<::fire_control::FireDebugInfo>::find_or_create("fire_debug");
     auto aim_mode_obj = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
+    auto aim_mode_time_obj = umt::BasicObjManager<int64_t>::find_or_create("current_aim_mode_time_us", 0);
     auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     // 自瞄控制器
@@ -121,9 +172,15 @@ void fire_control_run(const std::string& /* config_path */) {
         // 获取战场快照
         const auto& snapshot = battlefield->get();
         double current_time = get_current_time();
+        int64_t current_time_us = get_current_time_us();
 
         // aim_mode 从 hardware 实时共享对象读取，不依赖可能过期的 snapshot
         aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->get());
+        int64_t aim_mode_time_us = aim_mode_time_obj->get();
+        if (aim_mode_time_us <= 0 ||
+            (current_time_us - aim_mode_time_us) > AIM_MODE_STALE_TIMEOUT_US) {
+            mode = aimer::AimMode::DISABLED;
+        }
         aimer::AimMode prev_mode = last_mode;
 
         // 检测新帧，更新延迟估计
@@ -147,11 +204,17 @@ void fire_control_run(const std::string& /* config_path */) {
             last_mode = mode;
         }
 
-        // 构建延迟信息
-        LatencyInfo latency = build_latency(latency_estimator, snapshot);
+        // 构建延迟信息:
+        // 优先沿用上一次火控实际选中的目标，避免 primary 与实际打击目标不一致。
+        int latency_target_id = snapshot.primary_target_id;
+        const auto& last_sel = controller.last_selection();
+        if (last_sel.has_target && snapshot.is_valid(last_sel.target_id)) {
+            latency_target_id = last_sel.target_id;
+        }
+        LatencyInfo latency = build_latency(latency_estimator, snapshot, latency_target_id);
 
         // 迭代更新 fire_to_hit (延迟准备在 node 层完成)
-        finalize_latency(latency, snapshot);
+        finalize_latency(latency, snapshot, latency_target_id);
 
         // 根据模式处理
         ::fire_control::FireCommand cmd{};

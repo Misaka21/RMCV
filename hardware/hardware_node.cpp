@@ -222,6 +222,7 @@ void start_hardware_node() {
 
         // Fake serial config
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
+        bool injected_allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
 
         // enemy_color / allow_fire 不在新协议中：统一从配置注入（fake/real 串口都需要）
         // 目前复用 Serial.fake_data.* 字段作为注入源，避免再加一套配置表。
@@ -247,7 +248,7 @@ void start_hardware_node() {
             // 以下字段不在协议中，从配置加载
             fake_data.enemy_color = static_cast<uint8_t>(
                 static_param::get_param<int64_t>(config, "Serial.fake_data", "enemy_color"));
-            fake_data.allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
+            fake_data.allow_fire = injected_allow_fire;
         }
 
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Delta_t: {} us", delta_t_us);
@@ -275,6 +276,8 @@ void start_hardware_node() {
 
         // 实时 aim_mode (供火控直接读取，不依赖过期 snapshot)
         auto current_aim_mode = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
+        auto current_aim_mode_time_us =
+            umt::BasicObjManager<int64_t>::find_or_create("current_aim_mode_time_us", 0);
 
         // 通知其他线程硬件节点已开始发布（初始为false，发布后设为true）
         auto hardware_running = umt::BasicObjManager<bool>::find_or_create("hardware_running", false);
@@ -338,6 +341,7 @@ void start_hardware_node() {
                     frame.serial_data.enemy_color = injected_enemy_color;
                     frame.serial_data.allow_fire = injected_allow_fire;
                     current_aim_mode->get() = frame.serial_data.aim_mode;
+                    current_aim_mode_time_us->get() = frame.timestamp_us;
                 }
 
                 // 应用IMU pitch/roll/yaw取反
