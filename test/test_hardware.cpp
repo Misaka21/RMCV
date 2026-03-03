@@ -47,7 +47,7 @@ int main() {
             auto now = std::chrono::steady_clock::now();
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - stats_time).count() >= 1000) {
                 debug::print(debug::PrintMode::INFO, "TestHardware",
-                    "FPS: {}, Synced: {}, IMU: yaw={:.2f} pitch={:.2f}",
+                    "FPS: {}, Synced: {}, IMU: yaw={:.4f} pitch={:.4f} (rad)",
                     frame_count, sync_count,
                     frame.serial_data.yaw, frame.serial_data.pitch);
                 frame_count = 0;
@@ -60,8 +60,8 @@ int main() {
                 cv::Mat display;
                 cv::resize(frame.image, display, cv::Size(720, 540));
 
-                // Draw IMU info on image
-                std::string info = fmt::format("IMU: yaw={:.1f} pitch={:.1f} valid={}",
+                // Draw IMU info on image (弧度)
+                std::string info = fmt::format("IMU: yaw={:.3f} pitch={:.3f} (rad) valid={}",
                     frame.serial_data.yaw, frame.serial_data.pitch, frame.serial_valid ? "Y" : "N");
                 cv::putText(display, info, cv::Point(10, 30),
                     cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2);

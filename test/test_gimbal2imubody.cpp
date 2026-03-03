@@ -317,7 +317,7 @@ void draw_info_text(cv::Mat& canvas,
     y += 20;
 
     // IMU 原始数据
-    std::string imu_info = fmt::format("IMU Raw: yaw={:.1f}°  pitch={:.1f}°  roll={:.1f}°",
+    std::string imu_info = fmt::format("IMU Raw: yaw={:.1f}  pitch={:.1f}  roll={:.1f} (rad)",
                                        imu_data.yaw, imu_data.pitch, imu_data.roll);
     cv::putText(canvas, imu_info, cv::Point(20, y),
                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(150, 150, 150), 1, cv::LINE_AA);
@@ -480,11 +480,11 @@ int main() {
                 state.get_rotation_matrix()
             );
 
-            // 创建 RobotState 并设置 q_imu
+            // 创建 RobotState 并设置 q_imu (serial_data 已经是弧度)
             aimer::RobotState robot_state;
-            robot_state.set_euler(frame.serial_data.yaw,
-                                 frame.serial_data.pitch,
-                                 frame.serial_data.roll);
+            robot_state.set_euler_rad(frame.serial_data.yaw,
+                                     frame.serial_data.pitch,
+                                     frame.serial_data.roll);
 
             // 创建黑色画布
             cv::Mat canvas(800, 1200, CV_8UC3, cv::Scalar(0, 0, 0));

@@ -165,8 +165,8 @@ int main() {
                 cv::putText(canvas, info, cv::Point(10, 30),
                             cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
 
-                // 显示串口原始数据
-                std::string serial_info = fmt::format("Serial: yaw={:.1f} pitch={:.1f} roll={:.1f}",
+                // 显示串口原始数据 (弧度)
+                std::string serial_info = fmt::format("Serial: yaw={:.3f} pitch={:.3f} roll={:.3f} (rad)",
                                                       frame.serial_data.yaw,
                                                       frame.serial_data.pitch,
                                                       frame.serial_data.roll);

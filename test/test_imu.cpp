@@ -4,6 +4,7 @@
 //
 
 #include <chrono>
+#include <cmath>
 #include <thread>
 #include <fmt/format.h>
 #include <fmt/color.h>
@@ -60,16 +61,17 @@ int main() {
             float pitch = frame.serial_data.pitch;
             float roll = frame.serial_data.roll;
 
-            // 计算变化方向
+            // 计算变化方向 (弧度，阈值 ~0.5°)
+            constexpr float DELTA_THRESHOLD = 0.01f;
             auto arrow = [](float delta) -> const char* {
-                if (delta > 0.5f) return "↑";
-                if (delta < -0.5f) return "↓";
+                if (delta > DELTA_THRESHOLD) return "↑";
+                if (delta < -DELTA_THRESHOLD) return "↓";
                 return " ";
             };
 
             auto color = [](float delta) {
-                if (delta > 0.5f) return fmt::fg(fmt::color::green);
-                if (delta < -0.5f) return fmt::fg(fmt::color::red);
+                if (delta > DELTA_THRESHOLD) return fmt::fg(fmt::color::green);
+                if (delta < -DELTA_THRESHOLD) return fmt::fg(fmt::color::red);
                 return fmt::fg(fmt::color::white);
             };
 
@@ -78,18 +80,18 @@ int main() {
                 float dp = pitch - last_pitch;
                 float dr = roll - last_roll;
 
-                // 处理 yaw 跨越 ±180° 的情况
-                if (dy > 180) dy -= 360;
-                if (dy < -180) dy += 360;
+                // 处理 yaw 跨越 ±π 的情况
+                if (dy > M_PI) dy -= 2 * M_PI;
+                if (dy < -M_PI) dy += 2 * M_PI;
 
                 fmt::print("\r");
                 fmt::print("yaw: ");
-                fmt::print(color(dy), "{:+7.2f} {} ", yaw, arrow(dy));
+                fmt::print(color(dy), "{:+7.4f} {} ", yaw, arrow(dy));
                 fmt::print("  pitch: ");
-                fmt::print(color(dp), "{:+7.2f} {} ", pitch, arrow(dp));
+                fmt::print(color(dp), "{:+7.4f} {} ", pitch, arrow(dp));
                 fmt::print("  roll: ");
-                fmt::print(color(dr), "{:+7.2f} {} ", roll, arrow(dr));
-                fmt::print("    ");
+                fmt::print(color(dr), "{:+7.4f} {} ", roll, arrow(dr));
+                fmt::print("(rad)    ");
                 std::fflush(stdout);
             }
 
