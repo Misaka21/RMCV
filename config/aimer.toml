@@ -238,11 +238,11 @@
 
     # 过程噪声 Q (70df1a 基线)
     #@double 旋转中心位置过程噪声
-    q_pos = 0.22
+    q_pos = 2.2
     #@double 旋转中心速度过程噪声
-    q_vel = 320.0
+    q_vel = 32.0
     #@double 朝向角θ过程噪声
-    q_theta = 0.05
+    q_theta = 0.5
     #@double 角速度ω过程噪声，较大值以更快响应陀螺加减速
     q_omega = 900.0
     #@double 基础半径r过程噪声

@@ -124,6 +124,71 @@ void start_predictor_node() {
                 cv::Mat vis = detection.img.clone();
                 predictor.draw(vis, detection.state.q_imu, timestamp);
 
+                // 左上角战场信息面板
+                {
+                    int lh = 15;
+                    int tx = 8;
+                    int ty = 16;
+                    auto put = [&](const std::string& text, cv::Scalar color = {200, 200, 200}) {
+                        cv::putText(vis, text, {tx, ty}, cv::FONT_HERSHEY_SIMPLEX,
+                            0.38, color, 1, cv::LINE_AA);
+                        ty += lh;
+                    };
+
+                    // 收集有效目标
+                    int n_tracked = 0;
+                    snapshot.for_each_valid([&](int, const VehicleState&) { n_tracked++; });
+
+                    // 半透明背景
+                    int panel_h = 18 + n_tracked * 2 * lh + (n_tracked > 0 ? 4 : 0);
+                    int panel_w = 360;
+                    int safe_w = std::min(panel_w, vis.cols);
+                    int safe_h = std::min(panel_h, vis.rows);
+                    if (safe_w > 0 && safe_h > 0) {
+                        cv::Mat bg = vis(cv::Rect(0, 0, safe_w, safe_h));
+                        bg = bg * 0.3;
+                    }
+
+                    put(fmt::format("Battlefield  {} tracked  bs={:.1f}m/s",
+                        n_tracked, snapshot.self_state.bullet_speed), {255, 255, 255});
+
+                    snapshot.for_each_valid([&](int id, const VehicleState& v) {
+                        bool is_pri = (id == snapshot.primary_target_id);
+                        cv::Scalar color = is_pri ? cv::Scalar(0, 255, 255) : cv::Scalar(180, 180, 180);
+
+                        // 目标类型名
+                        std::string type_str = armor_number_to_string(v.enemy_type);
+                        if (type_str != "sentry" && type_str != "outpost" && type_str != "base") {
+                            type_str = "Inf" + type_str;
+                        }
+
+                        // 可见装甲板
+                        std::string arm_str;
+                        for (int a = 0; a < v.armor_count; ++a) {
+                            if (v.armors[a].visible) {
+                                if (!arm_str.empty()) arm_str += ",";
+                                arm_str += std::to_string(a);
+                            }
+                        }
+                        if (arm_str.empty()) arm_str = "-";
+
+                        // 陀螺等级
+                        const char* spin_label = "NONE";
+                        if (v.spin.level == SpinLevel::LOW) spin_label = "LOW";
+                        else if (v.spin.level == SpinLevel::HIGH) spin_label = "HIGH";
+
+                        // 第1行: 类型+距离+装甲板
+                        put(fmt::format("{}#{} {}  {:.1f}m  arm[{}]{}",
+                            is_pri ? ">" : " ", id, type_str, v.center.norm(),
+                            arm_str, is_pri ? " [PRI]" : ""), color);
+
+                        // 第2行: 陀螺+速度
+                        put(fmt::format("  spin:{} w={:+.0f}d/s r={:.2f}m  v=({:.1f},{:.1f})",
+                            spin_label, v.spin.omega * 57.3, v.spin.radius,
+                            v.velocity.x(), v.velocity.y()), {150, 150, 150});
+                    });
+                }
+
                 // 左下角延迟信息面板
                 auto now = SteadyClock::now();
                 auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(
