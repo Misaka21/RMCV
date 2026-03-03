@@ -469,6 +469,10 @@
     # ========== 新策略参数==========
     #@double 目标保持时间 (s)，目标消失后等待此时间再切换
     keep_time = 0.1
+    #@double 目标记忆时间 (s)，超过后释放锁存目标
+    memorizing_time = 5.0
+    #@double 前哨站目标保持时间 (s)
+    keep_time_outpost = 0.5
     #@double 最大有效角度 (rad, 约70°)，超过此角度的装甲板不考虑
     max_angle = 1.2
     #@double 允许 INDIRECT 兜底时的最小角速度阈值 (rad/s)

@@ -19,6 +19,9 @@
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_TARGET_SELECTOR_HPP__
 #define __AIMER_AUTO_AIM_FIRE_CONTROL_TARGET_SELECTOR_HPP__
 
+#include <limits>
+#include <utility>
+
 #include "aimer/auto_aim/fire_control/types.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
@@ -70,6 +73,14 @@ public:
     int current_target() const { return current_target_id_; }
 
 private:
+    struct VisibleCandidate {
+        int target_id = -1;
+        int armor_idx = -1;
+        double score = std::numeric_limits<double>::infinity();
+
+        bool valid() const { return target_id >= 0 && armor_idx >= 0; }
+    };
+
     // ==================== 辅助方法 ====================
 
     /**
@@ -99,6 +110,39 @@ private:
     ) const;
 
     /**
+     * @brief 按 rm.cv.fans TargetCatcher 思路，尝试捕获候选目标
+     */
+    void try_catch_target(
+        const VisibleCandidate& candidate,
+        const predictor::BattlefieldSnapshot& snapshot,
+        double current_time,
+        const GimbalState& gimbal,
+        double max_angle,
+        double dt
+    );
+
+    /**
+     * @brief 根据 memorizing_time 判断当前目标是否过期
+     */
+    int latched_target(double current_time) const;
+
+    /**
+     * @brief 获取当前目标保持时间 (按 enemy_type 区分)
+     */
+    double keep_as_target_time(const predictor::VehicleState& vehicle) const;
+
+    /**
+     * @brief 评估单个敌人的最佳可见候选板（仅 visible + 角度可打）
+     */
+    VisibleCandidate evaluate_visible_candidate(
+        int target_id,
+        const predictor::VehicleState& vehicle,
+        const GimbalState& gimbal,
+        double max_angle,
+        double dt
+    ) const;
+
+    /**
      * @brief 选择该敌人中最靠近喵中心的可见装甲板
      * @return 装甲板索引，若无可见可打装甲板则返回 -1
      */
@@ -112,8 +156,9 @@ private:
     // ==================== 状态 ====================
 
     int current_target_id_ = -1;
-    int forced_target_id_ = -1;      // 预瞄锁定的目标
-    double last_seen_time_ = 0;      // 上次看到当前目标的时间
+    int forced_target_id_ = -1;       // 预瞄锁定的目标
+    double target_caught_time_ = 0.0; // 最近一次确认当前目标的时刻
+    double current_target_score_ = std::numeric_limits<double>::infinity();
 };
 
 }  // namespace autoaim::fire_control

@@ -55,7 +55,7 @@ int pick_fallback_armor_idx(const predictor::VehicleState& vehicle) {
 }  // namespace
 
 // ============================================================================
-// 主选择函数
+// 主选择函数（参考 rm.cv.fans TargetCatcher：抓取-保持-超时释放）
 // ============================================================================
 
 TargetSelection TargetSelector::select(
@@ -64,121 +64,108 @@ TargetSelection TargetSelector::select(
     double dt)
 {
     TargetSelection result;
-    double current_time = snapshot.timestamp;
-
-    // 读取参数
-    double keep_time = runtime_param::get_param<double>(
-        "AutoAim.FireControl.TargetSelector.keep_time"
-    );
-    double max_angle = runtime_param::get_param<double>(
+    const double current_time = snapshot.timestamp;
+    const double max_angle = runtime_param::get_param<double>(
         "AutoAim.FireControl.TargetSelector.max_angle"
     );
 
     // ========== 1. 预瞄锁定优先 ==========
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
-
         if (has_visible_armor(vehicle, max_angle, dt, true)) {
-            int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
-            if (armor_idx < 0) {
-                armor_idx = pick_fallback_armor_idx(vehicle);
-            }
-            result.has_target = true;
-            result.target_id = forced_target_id_;
-            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
-
-            current_target_id_ = forced_target_id_;
-            last_seen_time_ = current_time;
-            return result;
-        }
-    }
-
-    // ========== 2. 检查当前目标是否还有效 ==========
-    bool current_target_valid = false;
-    if (current_target_id_ >= 0 && snapshot.is_valid(current_target_id_)) {
-        const auto& vehicle = snapshot.vehicles[current_target_id_];
-
-        if (has_visible_armor(vehicle, max_angle, dt, true)) {
-            current_target_valid = true;
-            last_seen_time_ = current_time;
-            int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
-            if (armor_idx < 0) {
-                armor_idx = pick_fallback_armor_idx(vehicle);
-            }
-
-            // 当前目标仍然有效，保持追踪
-            result.has_target = true;
-            result.target_id = current_target_id_;
-            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
-        }
-    }
-
-    // ========== 3. 如果当前目标有效，检查是否在保持期内 ==========
-    if (current_target_valid) {
-        return result;  // 继续追踪当前目标
-    }
-
-    // 当前目标无效，检查是否在保持期内
-    if (current_target_id_ >= 0 && (current_time - last_seen_time_) < keep_time) {
-        // 在保持期内，不切换目标；若模型仍有效则继续输出当前目标
-        if (snapshot.is_valid(current_target_id_)) {
-            const auto& vehicle = snapshot.vehicles[current_target_id_];
-            if (has_visible_armor(vehicle, max_angle, dt, true)) {
-                int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
-                if (armor_idx < 0) {
-                    armor_idx = pick_fallback_armor_idx(vehicle);
+            const auto forced_candidate = evaluate_visible_candidate(
+                forced_target_id_, vehicle, gimbal, max_angle, dt
+            );
+            int armor_idx = forced_candidate.valid()
+                ? forced_candidate.armor_idx
+                : pick_fallback_armor_idx(vehicle);
+            if (armor_idx >= 0) {
+                current_target_id_ = forced_target_id_;
+                target_caught_time_ = current_time;
+                if (forced_candidate.valid()) {
+                    current_target_score_ = forced_candidate.score;
                 }
+
                 result.has_target = true;
-                result.target_id = current_target_id_;
+                result.target_id = forced_target_id_;
+                result.priority = forced_candidate.valid()
+                    ? (1.0 / (1.0 + forced_candidate.score))
+                    : 0.0;
                 result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+                return result;
             }
         }
-        return result;
     }
 
-    // ========== 4. 需要选择新目标：选最靠近中心的敌人 ==========
-    int best_target_id = -1;
-    int best_armor_idx = -1;
-    double min_center_dist = std::numeric_limits<double>::infinity();
-
+    // ========== 2. 构造“最中心可见目标”候选 ==========
+    VisibleCandidate best_candidate;
     snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
         if (!vehicle.valid || vehicle.confidence < 0.1) return;
+        auto candidate = evaluate_visible_candidate(id, vehicle, gimbal, max_angle, dt);
+        if (!candidate.valid()) return;
 
-        // 选新目标时只允许“当前可见可打”的装甲板参与竞争，避免幽灵目标抢占
-        int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
-        if (armor_idx < 0) {
-            return;
-        }
-
-        Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, dt);
-        double dist = compute_center_distance(pos, gimbal);
-
-        if (dist < min_center_dist) {
-            min_center_dist = dist;
-            best_target_id = id;
-            best_armor_idx = armor_idx;
+        // 置信度衰减：同样中心距离下优先更稳定的目标
+        candidate.score /= std::max(0.1, vehicle.confidence);
+        if (candidate.score < best_candidate.score) {
+            best_candidate = candidate;
         }
     });
 
-    // ========== 5. 找到了新目标 ==========
-    if (best_target_id >= 0) {
-        const auto& vehicle = snapshot.vehicles[best_target_id];
-        int armor_idx = best_armor_idx;
-        if (armor_idx < 0) {
-            armor_idx = pick_fallback_armor_idx(vehicle);
-        }
-
-        result.has_target = true;
-        result.target_id = best_target_id;
-        result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
-
-        current_target_id_ = best_target_id;
-        last_seen_time_ = current_time;
-    } else {
-        // 没有目标
+    // ========== 3. 按 TargetCatcher 逻辑更新锁存目标 ==========
+    const int tracked_target = latched_target(current_time);
+    if (tracked_target < 0) {
         current_target_id_ = -1;
+        current_target_score_ = std::numeric_limits<double>::infinity();
+    }
+    if (tracked_target >= 0 && snapshot.is_valid(tracked_target)) {
+        const auto& tracked_vehicle = snapshot.vehicles[tracked_target];
+        if (has_visible_armor(tracked_vehicle, max_angle, dt, true)) {
+            // 当前目标仍可打，持续“抓取”当前目标，抑制抖动切换
+            target_caught_time_ = current_time;
+            auto tracked_visible = evaluate_visible_candidate(
+                tracked_target, tracked_vehicle, gimbal, max_angle, dt
+            );
+            if (tracked_visible.valid()) {
+                current_target_score_ = tracked_visible.score;
+            }
+        } else if (best_candidate.valid()) {
+            try_catch_target(
+                best_candidate, snapshot, current_time, gimbal, max_angle, dt
+            );
+        }
+    } else if (best_candidate.valid()) {
+        try_catch_target(
+            best_candidate, snapshot, current_time, gimbal, max_angle, dt
+        );
     }
 
+    // ========== 4. 输出当前锁存目标 ==========
+    const int selected_target = latched_target(current_time);
+    if (selected_target < 0 || !snapshot.is_valid(selected_target)) {
+        return result;
+    }
+
+    const auto& selected_vehicle = snapshot.vehicles[selected_target];
+    if (!has_visible_armor(selected_vehicle, max_angle, dt, true)) {
+        return result;
+    }
+
+    const auto selected_visible = evaluate_visible_candidate(
+        selected_target, selected_vehicle, gimbal, max_angle, dt
+    );
+    int armor_idx = selected_visible.valid()
+        ? selected_visible.armor_idx
+        : pick_fallback_armor_idx(selected_vehicle);
+    if (armor_idx < 0) {
+        return result;
+    }
+
+    result.has_target = true;
+    result.target_id = selected_target;
+    result.priority = selected_visible.valid()
+        ? (1.0 / (1.0 + selected_visible.score))
+        : 0.0;
+    result.predicted_pos = selected_vehicle.predict_armor_position(armor_idx, dt);
     return result;
 }
 
@@ -201,7 +188,8 @@ void TargetSelector::clear_target()
 {
     forced_target_id_ = -1;
     current_target_id_ = -1;
-    last_seen_time_ = 0;
+    target_caught_time_ = 0;
+    current_target_score_ = std::numeric_limits<double>::infinity();
 }
 
 // ============================================================================
@@ -264,6 +252,127 @@ bool TargetSelector::has_visible_armor(
     }
 
     return false;
+}
+
+void TargetSelector::try_catch_target(
+    const VisibleCandidate& candidate,
+    const predictor::BattlefieldSnapshot& snapshot,
+    double current_time,
+    const GimbalState& gimbal,
+    double max_angle,
+    double dt
+)
+{
+    if (!candidate.valid()) {
+        return;
+    }
+
+    if (current_target_id_ < 0 || !snapshot.is_valid(current_target_id_)) {
+        current_target_id_ = candidate.target_id;
+        target_caught_time_ = current_time;
+        current_target_score_ = candidate.score;
+        return;
+    }
+
+    if (candidate.target_id == current_target_id_) {
+        target_caught_time_ = current_time;
+        current_target_score_ = candidate.score;
+        return;
+    }
+
+    const auto& current_vehicle = snapshot.vehicles[current_target_id_];
+    const double keep_time = keep_as_target_time(current_vehicle);
+    if (current_time - target_caught_time_ <= keep_time) {
+        return;
+    }
+
+    double baseline_score = current_target_score_;
+    auto current_visible = evaluate_visible_candidate(
+        current_target_id_, current_vehicle, gimbal, max_angle, dt
+    );
+    if (current_visible.valid()) {
+        baseline_score = current_visible.score / std::max(0.1, current_vehicle.confidence);
+    }
+
+    // 候选必须明显更好才切换，避免多车并行场景下左右跳
+    const double switch_hysteresis = std::clamp(
+        get_param_or("AutoAim.FireControl.TargetSelector.switch_hysteresis", 0.15),
+        0.0, 0.95
+    );
+    if (std::isfinite(baseline_score)) {
+        if (baseline_score <= 1e-6) {
+            return;
+        }
+        const double improve_ratio = (baseline_score - candidate.score) / baseline_score;
+        if (improve_ratio < switch_hysteresis) {
+            return;
+        }
+    }
+
+    current_target_id_ = candidate.target_id;
+    target_caught_time_ = current_time;
+    current_target_score_ = candidate.score;
+}
+
+int TargetSelector::latched_target(double current_time) const
+{
+    if (current_target_id_ < 0) {
+        return -1;
+    }
+    const double memorizing_time = get_param_or(
+        "AutoAim.FireControl.TargetSelector.memorizing_time", 5.0
+    );
+    if (current_time - target_caught_time_ > memorizing_time) {
+        return -1;
+    }
+    return current_target_id_;
+}
+
+double TargetSelector::keep_as_target_time(const predictor::VehicleState& vehicle) const
+{
+    const double default_keep = get_param_or(
+        "AutoAim.FireControl.TargetSelector.keep_time", 0.1
+    );
+
+    switch (vehicle.enemy_type) {
+        case predictor::EnemyType::OUTPOST:
+            return get_param_or("AutoAim.FireControl.TargetSelector.keep_time_outpost", 0.5);
+        case predictor::EnemyType::SENTRY:
+            return get_param_or("AutoAim.FireControl.TargetSelector.keep_time_sentry", default_keep);
+        case predictor::EnemyType::BASE:
+            return get_param_or("AutoAim.FireControl.TargetSelector.keep_time_base", default_keep);
+        case predictor::EnemyType::INFANTRY_3:
+        case predictor::EnemyType::INFANTRY_4:
+        case predictor::EnemyType::INFANTRY_5:
+            return get_param_or("AutoAim.FireControl.TargetSelector.keep_time_infantry", default_keep);
+        case predictor::EnemyType::HERO:
+            return get_param_or("AutoAim.FireControl.TargetSelector.keep_time_hero", default_keep);
+        case predictor::EnemyType::ENGINEER:
+            return get_param_or("AutoAim.FireControl.TargetSelector.keep_time_engineer", default_keep);
+        default:
+            return default_keep;
+    }
+}
+
+TargetSelector::VisibleCandidate TargetSelector::evaluate_visible_candidate(
+    int target_id,
+    const predictor::VehicleState& vehicle,
+    const GimbalState& gimbal,
+    double max_angle,
+    double dt
+) const
+{
+    VisibleCandidate candidate;
+    const int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
+    if (armor_idx < 0) {
+        return candidate;
+    }
+
+    candidate.target_id = target_id;
+    candidate.armor_idx = armor_idx;
+    const Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, dt);
+    candidate.score = compute_center_distance(pos, gimbal);
+    return candidate;
 }
 
 int TargetSelector::pick_best_visible_armor(
