@@ -99,10 +99,14 @@ FireCommand FireController::control(
     }
 
     // 2. 计算预测时间:
-    // latency 给出 img->hit 轴的固定部分，current_time - snapshot.timestamp
-    // 是控制循环内同一帧的实时外推增量。
-    const double frame_extrapolation_dt = std::max(0.0, current_time - snapshot.timestamp);
-    const double prediction_dt = latency.prediction_latency() + frame_extrapolation_dt;
+    // 目标状态时间轴在 img 时刻，当前时刻到命中预测应为:
+    // (current - img) + send_to_control + fire_to_hit
+    // 注意: 这里不应重复叠加 img_to_predict/predict_to_send。
+    const double img_age = std::max(0.0, current_time - snapshot.timestamp);
+    const double prediction_dt = img_age + latency.send_to_control + latency.fire_to_hit;
+
+    const int prev_target_id = last_selection_.has_target ? last_selection_.target_id : -1;
+    const int prev_armor_idx = last_armor_aim_.valid ? last_armor_aim_.armor_idx : -1;
 
     // 3. 目标选择
     // 同一帧优先沿用上次目标选择，避免 500Hz 下重复 select() 抖动；
@@ -185,14 +189,16 @@ FireCommand FireController::control(
         pitch_rate = (aim.pitch - last_aim_.pitch) / plan_dt;
     }
 
-    const double steady_tau = std::max(0.0, runtime_param::get_param<double>(
-        "AutoAim.FireControl.Latency.steady_state_time_constant"
-    ));
+    // 目标或装甲板切换时，角速度差分不再连续，避免额外预测出现尖峰
+    if (selection.target_id != prev_target_id || armor_result.armor_idx != prev_armor_idx) {
+        yaw_rate = 0.0;
+        pitch_rate = 0.0;
+    }
 
     GimbalPlan plan;
     plan.valid = true;
-    plan.yaw = aim.yaw + steady_tau * yaw_rate;
-    plan.pitch = aim.pitch + steady_tau * pitch_rate;
+    plan.yaw = aim.yaw;
+    plan.pitch = aim.pitch;
     plan.yaw_vel = yaw_rate;
     plan.pitch_vel = pitch_rate;
     last_plan_ = plan;
@@ -220,6 +226,20 @@ FireCommand FireController::generate_command(
     FireCommand cmd;
     cmd.control_enabled = true;
 
+    const double additional_predict_time = runtime_param::get_param<double>(
+        "AutoAim.FireControl.Cmd.additional_predict_time"
+    );
+    const double max_abs_vel = std::max(0.0, runtime_param::get_param<double>(
+        "AutoAim.FireControl.Cmd.max_abs_vel"
+    ));
+
+    double yaw_vel_for_ff = plan.yaw_vel;
+    double pitch_vel_for_ff = plan.pitch_vel;
+    if (max_abs_vel > 0.0) {
+        yaw_vel_for_ff = std::clamp(yaw_vel_for_ff, -max_abs_vel, max_abs_vel);
+        pitch_vel_for_ff = std::clamp(pitch_vel_for_ff, -max_abs_vel, max_abs_vel);
+    }
+
     // 落点偏置 (运行时可热更新)
     const double aim_offset_yaw = runtime_param::get_param<double>(
         "AutoAim.FireControl.AimOffset.yaw"
@@ -228,12 +248,15 @@ FireCommand FireController::generate_command(
         "AutoAim.FireControl.AimOffset.pitch"
     );
 
-    // 云台控制
-    cmd.yaw = static_cast<float>(plan.yaw + aim_offset_yaw);
+    // 云台控制:
+    // cmd = 目标角 + 额外预测时间 * 角速度 + 落点偏置
+    cmd.yaw = static_cast<float>(plan.yaw + additional_predict_time * yaw_vel_for_ff + aim_offset_yaw);
     cmd.yaw_vel = static_cast<float>(plan.yaw_vel);
     cmd.yaw_acc = static_cast<float>(plan.yaw_acc);
 
-    cmd.pitch = static_cast<float>(plan.pitch + aim_offset_pitch);
+    cmd.pitch = static_cast<float>(
+        plan.pitch + additional_predict_time * pitch_vel_for_ff + aim_offset_pitch
+    );
     cmd.pitch_vel = static_cast<float>(plan.pitch_vel);
     cmd.pitch_acc = static_cast<float>(plan.pitch_acc);
 

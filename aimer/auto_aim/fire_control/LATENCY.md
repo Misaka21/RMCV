@@ -148,32 +148,32 @@ img_to_predict = predict_timestamp - snapshot.timestamp
 - `+` 调大：提前打击，子弹在装甲板转到位之前出膛
 - `-` 调小：延后打击
 
-### 3.5 steady_state_time_constant (默认 15ms)
+### 3.5 additional_predict_time (默认 60ms)
 
-**含义**：稳态误差补偿时间常数
-
-**问题背景**：
-电控 PID 跟踪斜坡输入时存在稳态误差：
+**含义**：在最终下发命令阶段增加一段“额外前瞻”：
 ```
-实际角度 = 目标角度 - yaw_vel * τ
+cmd_yaw   = plan_yaw   + additional_predict_time * plan_yaw_vel
+cmd_pitch = plan_pitch + additional_predict_time * plan_pitch_vel
 ```
-其中 τ 是系统时间常数。
 
-**补偿方法**：
-发送 `yaw + τ * yaw_vel` 而不是 `yaw`
+**与 `send_to_control` 的区别**：
+- `send_to_control` 属于时间链路测量值，影响 `prediction_dt`
+- `additional_predict_time` 是发包前补偿，主要用于电控跟随滞后微调
 
 **调参方法**：
+1. 让目标做匀速平移
+2. 观察长期跟随偏差
+3. 若总体滞后，增大 `additional_predict_time`
+4. 若总体超前，减小 `additional_predict_time`
 
-**实验: 跟踪匀速目标**
-1. 目标匀速移动，测量稳态跟踪误差 Δθ
-2. 测量目标角速度 ω
-3. 计算 `τ = Δθ / ω`
+**安全项**：
+- `max_abs_vel` 用于限制参与额外前瞻的角速度，避免切板瞬间尖峰
 
 ## 4. 调参优先级
 
 1. **先调 send_to_control**：影响所有跟踪精度
 2. **再调 control_to_fire**：只影响反陀螺
-3. **最后调 steady_state_time_constant**：精细补偿
+3. **最后调 additional_predict_time**：修正长期跟随滞后/超前
 
 ## 5. 典型配置参考
 
@@ -182,7 +182,9 @@ img_to_predict = predict_timestamp - snapshot.timestamp
 [AutoAim.FireControl.Latency]
 send_to_control = 0.002       # 2ms
 control_to_fire = 0.015       # 15ms
-steady_state_time_constant = 0.010  # 10ms
+[AutoAim.FireControl.Cmd]
+additional_predict_time = 0.040
+max_abs_vel = 12.0
 ```
 
 ### 普通响应系统
@@ -190,7 +192,9 @@ steady_state_time_constant = 0.010  # 10ms
 [AutoAim.FireControl.Latency]
 send_to_control = 0.003       # 3ms
 control_to_fire = 0.020       # 20ms
-steady_state_time_constant = 0.015  # 15ms
+[AutoAim.FireControl.Cmd]
+additional_predict_time = 0.060
+max_abs_vel = 12.0
 ```
 
 ### 高延迟系统 (响应慢的电控)
@@ -198,7 +202,9 @@ steady_state_time_constant = 0.015  # 15ms
 [AutoAim.FireControl.Latency]
 send_to_control = 0.005       # 5ms
 control_to_fire = 0.030       # 30ms
-steady_state_time_constant = 0.020  # 20ms
+[AutoAim.FireControl.Cmd]
+additional_predict_time = 0.080
+max_abs_vel = 12.0
 ```
 
 ## 6. 代码实现

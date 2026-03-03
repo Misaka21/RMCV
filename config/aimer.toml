@@ -371,6 +371,13 @@
     # @param +: 调大将向上打击
     pitch = 0.0
 
+[AutoAim.FireControl.Cmd]
+    #@double 额外预测时间 (s)
+    # @param +: 调大将使对运动靶的跟踪更超前
+    additional_predict_time = 0.060
+    #@double 额外预测使用的角速度限幅 (rad/s)
+    max_abs_vel = 12.0
+
 [AutoAim.FireControl.Latency]
     # 延迟模型 (参考 rm.cv.fans)
     # 时间轴: img → predict → send → control → fire → hit
@@ -390,12 +397,6 @@
     # @param +: 调大将提早反陀螺模型的打击
     # @note 不参与预测时间计算，仅用于反陀螺打击时机
     control_to_fire = 0.020
-
-    #@double 稳态偏差补偿时间常数 t0 (s)
-    # 电控 PID 跟踪斜坡函数时存在稳态偏差 = yaw_v * t0
-    # 需要发送 yaw + t0 * yaw_v 来补偿
-    # 通过跟踪匀速目标实验来暴力测出
-    steady_state_time_constant = 0.015
 
 [AutoAim.FireControl.MPC]
     #@double 控制周期 (s)
