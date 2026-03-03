@@ -423,6 +423,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
 
         double theta = motion_->get_theta();
         double omega = spin_.omega;
+        int tracked_id = motion_->get_tracked_id();
 
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
@@ -452,8 +453,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
             as.z_to_v = angle_diff;
 
             // 可见性: 追踪板一定可见，朝向角<60°且有多块观测时也可见
-            int tracked = motion_->get_tracked_id();
-            as.visible = (i == tracked) ||
+            as.visible = (i == tracked_id) ||
                          (prev_armors_.size() >= 2 && as.score > 0.5);
 
             if (as.score > local_best_score) {

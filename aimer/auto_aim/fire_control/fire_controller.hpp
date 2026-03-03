@@ -77,6 +77,17 @@ private:
         double confidence
     );
 
+    bool evaluate_fire_window(
+        const predictor::BattlefieldSnapshot& snapshot,
+        const LatencyInfo& latency,
+        double confidence
+    ) const;
+
+    FireCommand reuse_last_solution(
+        const predictor::BattlefieldSnapshot& snapshot,
+        const LatencyInfo& latency
+    );
+
     FireCommand no_target_command();
 
     // ==================== 组件 ====================
@@ -96,6 +107,9 @@ private:
     AimResult last_aim_;
     GimbalPlan last_plan_;
     ArmorAimResult last_armor_aim_;
+    int last_solution_frame_id_ = -1;
+    double last_target_confidence_ = 0.0;
+    bool has_cached_solution_ = false;
 
     int lost_count_ = 0;
     int last_fail_stage_ = 0;

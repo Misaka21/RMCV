@@ -5,6 +5,7 @@
 
 #include "fire_control_node.hpp"
 
+#include <cmath>
 #include <chrono>
 #include <thread>
 
@@ -159,6 +160,11 @@ void fire_control_run(const std::string& /* config_path */) {
     // 模式跟踪
     aimer::AimMode last_mode = aimer::AimMode::DISABLED;
     int last_frame_id = -1;
+    int cached_latency_frame_id = -1;
+    int cached_latency_target_id = -1;
+    double cached_latency_predict_ts = -1.0;
+    LatencyInfo cached_latency{};
+    bool has_cached_latency = false;
 
     debug::print(debug::PrintMode::INFO, "AutoAimFireControl", "Running at 500Hz");
 
@@ -211,10 +217,31 @@ void fire_control_run(const std::string& /* config_path */) {
         if (last_sel.has_target && snapshot.is_valid(last_sel.target_id)) {
             latency_target_id = last_sel.target_id;
         }
-        LatencyInfo latency = build_latency(latency_estimator, snapshot, latency_target_id);
 
-        // 迭代更新 fire_to_hit (延迟准备在 node 层完成)
-        finalize_latency(latency, snapshot, latency_target_id);
+        LatencyInfo latency{};
+        if (mode == aimer::AimMode::AUTOAIM) {
+            bool need_rebuild_latency = !has_cached_latency
+                || snapshot.frame_id != cached_latency_frame_id
+                || latency_target_id != cached_latency_target_id
+                || std::abs(snapshot.predict_timestamp - cached_latency_predict_ts) > 1e-9;
+
+            if (need_rebuild_latency) {
+                latency = build_latency(latency_estimator, snapshot, latency_target_id);
+                // 迭代更新 fire_to_hit (延迟准备在 node 层完成)
+                finalize_latency(latency, snapshot, latency_target_id);
+
+                cached_latency = latency;
+                cached_latency_frame_id = snapshot.frame_id;
+                cached_latency_target_id = latency_target_id;
+                cached_latency_predict_ts = snapshot.predict_timestamp;
+                has_cached_latency = true;
+            } else {
+                latency = cached_latency;
+            }
+        } else if (has_cached_latency) {
+            // 非 AUTOAIM 模式复用上次延迟用于可视化，不再重算弹道。
+            latency = cached_latency;
+        }
 
         // 根据模式处理
         ::fire_control::FireCommand cmd{};
@@ -289,8 +316,6 @@ void fire_control_run(const std::string& /* config_path */) {
                 dbg.aim_pitch = aim.pitch;
                 dbg.cmd_yaw = cmd.yaw;
                 dbg.cmd_pitch = cmd.pitch;
-                dbg.gimbal_yaw = gimbal.yaw;
-                dbg.gimbal_pitch = gimbal.pitch;
 
                 dbg.distance = aim.distance;
                 dbg.tracking_error = cmd.tracking_error;

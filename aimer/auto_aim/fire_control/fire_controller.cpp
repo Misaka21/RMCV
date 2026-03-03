@@ -19,8 +19,67 @@ void FireController::reset()
     last_aim_ = {};
     last_plan_ = {};
     last_armor_aim_ = {};
+    last_solution_frame_id_ = -1;
+    last_target_confidence_ = 0.0;
+    has_cached_solution_ = false;
     lost_count_ = 0;
     last_fail_stage_ = 0;
+}
+
+bool FireController::evaluate_fire_window(
+    const predictor::BattlefieldSnapshot& snapshot,
+    const LatencyInfo& latency,
+    double confidence
+) const
+{
+    if (!last_aim_.valid || !last_armor_aim_.valid || !last_selection_.has_target) {
+        return false;
+    }
+
+    bool can_fire = fire_decision_.decide(
+        last_aim_,
+        last_armor_aim_,
+        gimbal_state_,
+        confidence
+    );
+
+    // 上层允许开火开关 (来自硬件层注入；不影响瞄准，只影响发射)
+    can_fire = can_fire && snapshot.self_state.allow_fire;
+
+    // INDIRECT 模式额外检查开火时机
+    if (can_fire && last_armor_aim_.mode == AimMode::INDIRECT) {
+        double fire_advance = runtime_param::get_param<double>(
+            "AutoAim.FireControl.PID.fire_advance"
+        );
+        // time_to_fire 是基于图像时刻的预测时间，因此应与 img->hit 同轴比较。
+        double img_to_hit = latency.hit_latency();
+        if (last_armor_aim_.time_to_fire > img_to_hit + fire_advance) {
+            can_fire = false;
+        }
+    }
+
+    return can_fire;
+}
+
+FireCommand FireController::reuse_last_solution(
+    const predictor::BattlefieldSnapshot& snapshot,
+    const LatencyInfo& latency
+)
+{
+    if (!has_cached_solution_) {
+        last_fail_stage_ = 1;
+        return no_target_command();
+    }
+
+    bool can_fire = evaluate_fire_window(snapshot, latency, last_target_confidence_);
+    last_fail_stage_ = 9;
+    return generate_command(
+        last_selection_,
+        last_plan_,
+        last_aim_,
+        can_fire,
+        last_target_confidence_
+    );
 }
 
 FireCommand FireController::control(
@@ -50,6 +109,11 @@ FireCommand FireController::control(
         }
     }
 
+    // 同一帧沿用已解算结果: 避免重复选目标/选板/弹道解算
+    if (has_cached_solution_ && snapshot.frame_id == last_solution_frame_id_) {
+        return reuse_last_solution(snapshot, latency);
+    }
+
     // 2. 目标选择
     double prediction_dt = latency.prediction_latency();
     TargetSelection selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
@@ -58,6 +122,7 @@ FireCommand FireController::control(
     // 3. 无目标处理
     if (!selection.has_target) {
         last_fail_stage_ = 1;  // 选目标失败
+        has_cached_solution_ = false;
         lost_count_++;
         if (lost_count_ > MAX_LOST_COUNT) {
             reset();
@@ -86,6 +151,7 @@ FireCommand FireController::control(
 
     if (!armor_result.valid) {
         last_fail_stage_ = 2;  // 装甲板瞄准失败
+        has_cached_solution_ = false;
         return no_target_command();
     }
 
@@ -98,6 +164,7 @@ FireCommand FireController::control(
 
     if (!aim.valid) {
         last_fail_stage_ = 3;  // 弹道解算失败
+        has_cached_solution_ = false;
         return no_target_command();
     }
 
@@ -109,27 +176,10 @@ FireCommand FireController::control(
     last_plan_ = plan;
 
     // 7. 开火判断 (使用 ArmorAimResult 中的装甲板信息)
-    bool can_fire = fire_decision_.decide(
-        aim,
-        armor_result,
-        gimbal_state_,
-        vehicle.confidence
-    );
-
-    // 上层允许开火开关 (来自硬件层注入；不影响瞄准，只影响发射)
-    can_fire = can_fire && snapshot.self_state.allow_fire;
-
-    // INDIRECT 模式额外检查开火时机
-    if (can_fire && armor_result.mode == AimMode::INDIRECT) {
-        double fire_advance = runtime_param::get_param<double>(
-            "AutoAim.FireControl.PID.fire_advance"
-        );
-        // time_to_fire 是基于图像时刻的预测时间，因此应与 img->hit 同轴比较。
-        double img_to_hit = latency.hit_latency();
-        if (armor_result.time_to_fire > img_to_hit + fire_advance) {
-            can_fire = false;
-        }
-    }
+    last_solution_frame_id_ = snapshot.frame_id;
+    last_target_confidence_ = vehicle.confidence;
+    has_cached_solution_ = true;
+    bool can_fire = evaluate_fire_window(snapshot, latency, vehicle.confidence);
 
     last_fail_stage_ = 9;  // 成功
     return generate_command(selection, plan, aim, can_fire, vehicle.confidence);
