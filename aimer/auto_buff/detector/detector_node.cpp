@@ -32,7 +32,7 @@ using SteadyClock = std::chrono::steady_clock;
 namespace {
 
 // 串口颜色转换为检测器颜色
-// 注: enemy_color 不在协议中，由 hardware 从配置注入到 serial_data
+// 注: enemy_color 由串口协议上报到 serial_data
 EnemyColor serial_to_enemy_color(uint8_t serial_color) {
     switch (serial_color) {
         case 1: return EnemyColor::RED;
@@ -57,9 +57,8 @@ aimer::RobotState build_robot_state(const serial::SerialReceiveData& data, int64
     state.bullet_speed = data.bullet_speed;
     state.aim_mode = aimer::to_aim_mode(data.aim_mode);
     state.aiming_lock = data.aiming_lock;
-    // enemy_color 和 allow_fire 从配置加载（不在协议中）
     state.enemy_color = data.enemy_color;
-    state.allow_fire = data.allow_fire;
+    state.allow_fire = true;
     state.timestamp_us = timestamp_us;
     return state;
 }
@@ -197,6 +196,13 @@ void BuffDetectorNode::process_frame_async() {
     stats::FpsStats push_stats("BuffDetectorNode-Push", "");
     stats::FpsStats pop_stats("BuffDetectorNode", "detected");
 
+    auto stop_async_detector = [&]() {
+        // stop() 用于唤醒 TensorRT 的阻塞 pop()
+        if (auto* trt = dynamic_cast<TensorrtBuffDetector*>(detector_.get())) {
+            trt->stop();
+        }
+    };
+
     // Push 线程
     std::thread push_thread([&]() {
         debug::print(debug::PrintMode::INFO, "BuffDetectorNode", "Push thread started");
@@ -224,51 +230,79 @@ void BuffDetectorNode::process_frame_async() {
 
             } catch (const umt::MessageError_Timeout&) {
                 // 超时，继续
+            } catch (const std::exception& e) {
+                debug::print(debug::PrintMode::ERROR, "BuffDetectorNode",
+                             "Push loop exception: {}", e.what());
+            } catch (...) {
+                debug::print(debug::PrintMode::ERROR, "BuffDetectorNode",
+                             "Push loop unknown exception");
             }
         }
 
         debug::print(debug::PrintMode::INFO, "BuffDetectorNode", "Push thread stopped");
 
         // 通知 pop 线程退出阻塞
-        if (auto* trt = dynamic_cast<TensorrtBuffDetector*>(detector_.get())) {
-            trt->stop();
-        }
+        stop_async_detector();
     });
 
     debug::print(debug::PrintMode::INFO, "BuffDetectorNode", "Running in async mode");
 
     // Pop 主循环: 直接阻塞在 pop() 上，零轮询开销
-    while (running_.load()) {
-        watchdog::heartbeat("buff_detector");
+    try {
+        while (running_.load()) {
+            watchdog::heartbeat("buff_detector");
 
-        auto async_result = detector_->pop();
-        if (async_result.image.empty()) continue;  // stop() 唤醒时返回空
+            try {
+                auto async_result = detector_->pop();
+                if (async_result.image.empty()) continue;  // stop() 唤醒时返回空
 
-        // 补充结果信息
-        async_result.detection.robot_state = build_robot_state(
-            async_result.serial_data, async_result.timestamp_us);
-        async_result.detection.image = async_result.image;
-        async_result.detection.latency_ms = async_result.latency_ms;
+                // 补充结果信息
+                async_result.detection.robot_state = build_robot_state(
+                    async_result.serial_data, async_result.timestamp_us);
+                async_result.detection.image = async_result.image;
+                async_result.detection.latency_ms = async_result.latency_ms;
 
-        // 发布结果
-        pub.push(async_result.detection);
+                // 发布结果
+                pub.push(async_result.detection);
 
-        // 统计
-        frame_count_++;
-        total_latency_ms_ += async_result.latency_ms;
-        pop_stats.update(async_result.latency_ms, async_result.detection.target_count > 0);
-        update_dashboard(async_result.latency_ms, async_result.detection.target_count,
-                        pop_stats.last_fps, async_result.detection.status);
+                // 统计
+                frame_count_++;
+                total_latency_ms_ += async_result.latency_ms;
+                pop_stats.update(async_result.latency_ms, async_result.detection.target_count > 0);
+                update_dashboard(async_result.latency_ms, async_result.detection.target_count,
+                                pop_stats.last_fps, async_result.detection.status);
 
-        // 发布调试图像
-        if (pub_debug.has_subscriber()) {
-            cv::Mat debug_img = detector_->get_debug_image();
-            if (!debug_img.empty()) {
-                pub_debug.push(debug_img);
+                // 发布调试图像
+                if (pub_debug.has_subscriber()) {
+                    cv::Mat debug_img = detector_->get_debug_image();
+                    if (!debug_img.empty()) {
+                        pub_debug.push(debug_img);
+                    }
+                }
+            } catch (const std::exception& e) {
+                debug::print(debug::PrintMode::ERROR, "BuffDetectorNode",
+                             "Pop loop exception: {}", e.what());
+                running_.store(false);
+                break;
+            } catch (...) {
+                debug::print(debug::PrintMode::ERROR, "BuffDetectorNode",
+                             "Pop loop unknown exception");
+                running_.store(false);
+                break;
             }
         }
+    } catch (const std::exception& e) {
+        debug::print(debug::PrintMode::ERROR, "BuffDetectorNode",
+                     "Async loop fatal exception: {}", e.what());
+        running_.store(false);
+    } catch (...) {
+        debug::print(debug::PrintMode::ERROR, "BuffDetectorNode",
+                     "Async loop fatal unknown exception");
+        running_.store(false);
     }
 
+    // 统一退出路径：先唤醒阻塞，再回收线程，避免 joinable thread 触发 terminate。
+    stop_async_detector();
     if (push_thread.joinable()) {
         push_thread.join();
     }

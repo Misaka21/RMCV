@@ -83,7 +83,7 @@ void run_sync_loop(detector::DetectorInterface* det) {
                 continue;
             }
 
-            // 敌方颜色 (来自硬件层注入；0=未知则保持 detector 当前值)
+            // 敌方颜色（来自串口协议；0=未知则保持 detector 当前值）
             if (frame.serial_data.enemy_color == 1) {
                 det->set_enemy_color(detector::EnemyColor::RED);
             } else if (frame.serial_data.enemy_color == 2) {
@@ -143,6 +143,13 @@ void run_async_loop(detector::DetectorInterface* det) {
     stats::FpsStats push_stats("DetectorNode-Push", "");
     stats::FpsStats pop_stats("DetectorNode", "detected");
 
+    auto stop_async_detector = [&]() {
+        // stop() 用于唤醒 TensorRT 的阻塞 pop()
+        if (auto* trt = dynamic_cast<detector::TensorrtDetector*>(det)) {
+            trt->stop();
+        }
+    };
+
     // Push 线程: 从相机读取帧，推送给检测器
     std::thread push_thread([&]() {
         debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread started");
@@ -160,7 +167,7 @@ void run_async_loop(detector::DetectorInterface* det) {
                     continue;
                 }
 
-                // 敌方颜色 (来自硬件层注入；0=未知则保持 detector 当前值)
+                // 敌方颜色（来自串口协议；0=未知则保持 detector 当前值）
                 if (frame.serial_data.enemy_color == 1) {
                     det->set_enemy_color(detector::EnemyColor::RED);
                 } else if (frame.serial_data.enemy_color == 2) {
@@ -172,50 +179,78 @@ void run_async_loop(detector::DetectorInterface* det) {
 
             } catch (const umt::MessageError_Timeout&) {
                 // 超时，继续
+            } catch (const std::exception& e) {
+                debug::print(debug::PrintMode::ERROR, "DetectorNode",
+                             "Push loop exception: {}", e.what());
+            } catch (...) {
+                debug::print(debug::PrintMode::ERROR, "DetectorNode",
+                             "Push loop unknown exception");
             }
         }
 
         debug::print(debug::PrintMode::INFO, "DetectorNode", "Push thread stopped");
 
         // 通知 pop 线程退出阻塞
-        if (auto* trt = dynamic_cast<detector::TensorrtDetector*>(det)) {
-            trt->stop();
-        }
+        stop_async_detector();
     });
 
     debug::print(debug::PrintMode::INFO, "DetectorNode", "Running in async mode");
 
-    while (running->get()) {
-        watchdog::heartbeat("detector");
+    // Pop 主循环: 获取检测结果并发布
+    try {
+        while (running->get()) {
+            watchdog::heartbeat("detector");
 
-        auto async_result = det->pop();  // 内部 condition_variable 阻塞等待
+            try {
+                auto async_result = det->pop();  // 内部 condition_variable 阻塞等待
+                if (async_result.image.empty()) continue;  // stop() 唤醒时返回空
 
-        if (async_result.image.empty()) continue;  // stop() 唤醒时返回空
+                // 构建并发布结果
+                auto result = detector::build_detection_result(async_result);
+                pub.push(result);
 
-        // 构建并发布结果
-        auto result = detector::build_detection_result(async_result);
-        pub.push(result);
+                // 统计
+                pop_stats.update(async_result.latency_ms, !result.armors.empty());
+                update_dashboard(async_result.latency_ms, result.armors.size(), pop_stats.last_fps);
 
-        // 统计
-        pop_stats.update(async_result.latency_ms, !result.armors.empty());
-        update_dashboard(async_result.latency_ms, result.armors.size(), pop_stats.last_fps);
+                // Web 调试图像
+                publish_debug_image(pub_debug, async_result.image, result.armors,
+                                    pop_stats.last_fps, async_result.latency_ms);
 
-        // Web 调试图像
-        publish_debug_image(pub_debug, async_result.image, result.armors,
-                            pop_stats.last_fps, async_result.latency_ms);
-
-        // 本地调试窗口
-        if (debug_mode && !async_result.image.empty()) {
-            hardware::SyncFrame frame;
-            frame.image = async_result.image;
-            frame.frame_id = async_result.frame_id;
-            frame.timestamp_us = async_result.timestamp_us;
-            frame.serial_data = async_result.serial_data;
-            frame.serial_valid = true;
-            detector::draw_debug_visualization(async_result.image, result, frame);
+                // 本地调试窗口
+                if (debug_mode && !async_result.image.empty()) {
+                    hardware::SyncFrame frame;
+                    frame.image = async_result.image;
+                    frame.frame_id = async_result.frame_id;
+                    frame.timestamp_us = async_result.timestamp_us;
+                    frame.serial_data = async_result.serial_data;
+                    frame.serial_valid = true;
+                    detector::draw_debug_visualization(async_result.image, result, frame);
+                }
+            } catch (const std::exception& e) {
+                debug::print(debug::PrintMode::ERROR, "DetectorNode",
+                             "Pop loop exception: {}", e.what());
+                running->set(false);
+                break;
+            } catch (...) {
+                debug::print(debug::PrintMode::ERROR, "DetectorNode",
+                             "Pop loop unknown exception");
+                running->set(false);
+                break;
+            }
         }
+    } catch (const std::exception& e) {
+        debug::print(debug::PrintMode::ERROR, "DetectorNode",
+                     "Async loop fatal exception: {}", e.what());
+        running->set(false);
+    } catch (...) {
+        debug::print(debug::PrintMode::ERROR, "DetectorNode",
+                     "Async loop fatal unknown exception");
+        running->set(false);
     }
 
+    // 统一退出路径：先唤醒阻塞，再回收线程，避免 joinable thread 触发 terminate。
+    stop_async_detector();
     if (push_thread.joinable()) {
         push_thread.join();
     }
