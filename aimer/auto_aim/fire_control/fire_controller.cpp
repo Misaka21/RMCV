@@ -156,9 +156,12 @@ FireCommand FireController::control(
     last_selection_ = selection;
 
     // 5. 装甲板瞄准
+    const int preferred_armor_idx = last_armor_aim_.valid ? last_armor_aim_.armor_idx : -1;
     ArmorAimResult armor_result = armor_aim_.compute(
         vehicle,
-        prediction_dt
+        prediction_dt,
+        &gimbal_state_,
+        preferred_armor_idx
     );
     last_armor_aim_ = armor_result;
 

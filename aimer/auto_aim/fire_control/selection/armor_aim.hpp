@@ -17,6 +17,7 @@
 
 #include <Eigen/Core>
 
+#include "aimer/common/fire_control_types.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
 namespace autoaim::fire_control {
@@ -73,13 +74,30 @@ public:
         double predict_dt
     ) const;
 
+    /**
+     * @brief 计算装甲板瞄准（带云台状态，启用喵中心最小移动策略）
+     *
+     * @param vehicle 目标车辆状态
+     * @param predict_dt 预测时间
+     * @param gimbal 当前云台状态（用于最小转动代价）
+     * @param preferred_armor_idx 上一帧装甲板索引（用于迟滞防抖）
+     */
+    ArmorAimResult compute(
+        const predictor::VehicleState& vehicle,
+        double predict_dt,
+        const ::fire_control::GimbalState* gimbal,
+        int preferred_armor_idx
+    ) const;
+
 private:
     /**
      * @brief 非陀螺瞄准 (直接跟踪推荐装甲板)
      */
     ArmorAimResult compute_non_spin(
         const predictor::VehicleState& vehicle,
-        double predict_dt
+        double predict_dt,
+        const ::fire_control::GimbalState* gimbal,
+        int preferred_armor_idx
     ) const;
 
     /**
@@ -87,7 +105,9 @@ private:
      */
     ArmorAimResult compute_spin(
         const predictor::VehicleState& vehicle,
-        double predict_dt
+        double predict_dt,
+        const ::fire_control::GimbalState* gimbal,
+        int preferred_armor_idx
     ) const;
 
     /**
@@ -97,7 +117,10 @@ private:
      */
     int choose_best_direct(
         const predictor::VehicleState& vehicle,
-        const std::vector<int>& direct_indices
+        const std::vector<int>& direct_indices,
+        double predict_dt,
+        const ::fire_control::GimbalState* gimbal,
+        int preferred_armor_idx
     ) const;
 
     /**

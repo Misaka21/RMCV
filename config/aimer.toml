@@ -59,6 +59,8 @@
     lost_timeout = 0.5
     #@double 装甲板滤波器信用时间 (s)
     armor_credit_time = 0.1
+    #@double 装甲板“可见”时间窗口 (s)，超过窗口仅保留预测不视为可见
+    visible_time_window = 0.04
 
 [AutoAim.Predictor.IDDebounce]
     # 新 target_id 需连续出现达到阈值才创建模型，抑制 T2/T3/T7 抖动分裂
@@ -432,6 +434,10 @@
 [AutoAim.FireControl.PID]
     #@double 最大跟踪角 (deg)，装甲板朝向超过此角度切换到 INDIRECT 模式
     max_orientation_angle = 60.0
+    #@double DIRECT 选板时朝向角权重（越大越偏好正对，越小越偏好喵中心最小转动）
+    direct_orientation_weight = 0.15
+    #@double DIRECT 选板切换迟滞比例（0.12=新板需至少好12%才切换）
+    switch_armor_hysteresis = 0.12
     #@double 开火提前量 (s)，INDIRECT 模式额外提前开火的时间
     # 实际开火时机 = time_to_fire <= control_to_fire + fire_advance
     fire_advance = 0.03
@@ -465,6 +471,8 @@
     keep_time = 0.1
     #@double 最大有效角度 (rad, 约70°)，超过此角度的装甲板不考虑
     max_angle = 1.2
+    #@double 允许 INDIRECT 兜底时的最小角速度阈值 (rad/s)
+    indirect_min_omega = 0.5
 
     # ========== 旧策略参数 (已注释，保留参考) ==========
     # 权重系数

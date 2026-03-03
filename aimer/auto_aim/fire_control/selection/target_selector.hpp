@@ -94,6 +94,18 @@ private:
     bool has_visible_armor(
         const predictor::VehicleState& vehicle,
         double max_angle,
+        double dt,
+        bool allow_indirect
+    ) const;
+
+    /**
+     * @brief 选择该敌人中最靠近喵中心的可见装甲板
+     * @return 装甲板索引，若无可见可打装甲板则返回 -1
+     */
+    int pick_best_visible_armor(
+        const predictor::VehicleState& vehicle,
+        const GimbalState& gimbal,
+        double max_angle,
         double dt
     ) const;
 

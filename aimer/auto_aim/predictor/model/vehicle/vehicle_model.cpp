@@ -424,6 +424,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
         double theta = motion_->get_theta();
         double omega = spin_.omega;
         int tracked_id = motion_->get_tracked_id();
+        const bool fresh_visible = dt <= get_armor_credit_time();
 
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
@@ -452,9 +453,10 @@ VehicleState VehicleModel::predict(double timestamp) const {
             as.type = correct_armor_type(ArmorType::SMALL, enemy_type_);
             as.z_to_v = angle_diff;
 
-            // 可见性: 追踪板一定可见，朝向角<60°且有多块观测时也可见
-            as.visible = (i == tracked_id) ||
-                         (prev_armors_.size() >= 2 && as.score > 0.5);
+            // 可见性: 必须在“新鲜观测窗口”内，防止纯预测板长期被当作可见
+            as.visible = fresh_visible &&
+                         ((i == tracked_id) ||
+                          (prev_armors_.size() >= 2 && as.score > 0.5));
 
             if (as.score > local_best_score) {
                 local_best_score = as.score;

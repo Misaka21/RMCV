@@ -12,6 +12,21 @@
 
 namespace autoaim::predictor {
 
+namespace {
+
+double get_param_or(const std::string& name, double default_value)
+{
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
+
+}  // namespace
+
 // ============================================================================
 // FilterThread
 // ============================================================================
@@ -146,7 +161,8 @@ ArmorState FilterThread::get_armor_state(double timestamp) const {
     as.z_to_v = armor_.z_to_v();
     as.position = predict_pos(timestamp);
     as.velocity = predict_vel(timestamp);
-    as.visible = true;
+    const double visible_time_window = get_param_or("AutoAim.Predictor.visible_time_window", 0.04);
+    as.visible = (timestamp - last_update_time_) <= visible_time_window;
     as.last_seen = last_update_time_;
 
     // 装甲板朝向: 用预测的方位角 + π (面向相机时法向与视线相反)

@@ -25,7 +25,18 @@ namespace autoaim::fire_control {
 
 namespace {
 
-int pick_armor_idx(const predictor::VehicleState& vehicle) {
+double get_param_or(const std::string& name, double default_value)
+{
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
+
+int pick_fallback_armor_idx(const predictor::VehicleState& vehicle) {
     if (vehicle.armor_count <= 0) return -1;
 
     if (vehicle.recommended_armor_idx >= 0
@@ -67,8 +78,11 @@ TargetSelection TargetSelector::select(
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
 
-        if (has_visible_armor(vehicle, max_angle, dt)) {
-            int armor_idx = pick_armor_idx(vehicle);
+        if (has_visible_armor(vehicle, max_angle, dt, true)) {
+            int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
+            if (armor_idx < 0) {
+                armor_idx = pick_fallback_armor_idx(vehicle);
+            }
             result.has_target = true;
             result.target_id = forced_target_id_;
             result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
@@ -84,10 +98,13 @@ TargetSelection TargetSelector::select(
     if (current_target_id_ >= 0 && snapshot.is_valid(current_target_id_)) {
         const auto& vehicle = snapshot.vehicles[current_target_id_];
 
-        if (has_visible_armor(vehicle, max_angle, dt)) {
+        if (has_visible_armor(vehicle, max_angle, dt, true)) {
             current_target_valid = true;
             last_seen_time_ = current_time;
-            int armor_idx = pick_armor_idx(vehicle);
+            int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
+            if (armor_idx < 0) {
+                armor_idx = pick_fallback_armor_idx(vehicle);
+            }
 
             // 当前目标仍然有效，保持追踪
             result.has_target = true;
@@ -106,47 +123,50 @@ TargetSelection TargetSelector::select(
         // 在保持期内，不切换目标；若模型仍有效则继续输出当前目标
         if (snapshot.is_valid(current_target_id_)) {
             const auto& vehicle = snapshot.vehicles[current_target_id_];
-            int armor_idx = pick_armor_idx(vehicle);
-
-            result.has_target = true;
-            result.target_id = current_target_id_;
-            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+            if (has_visible_armor(vehicle, max_angle, dt, true)) {
+                int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
+                if (armor_idx < 0) {
+                    armor_idx = pick_fallback_armor_idx(vehicle);
+                }
+                result.has_target = true;
+                result.target_id = current_target_id_;
+                result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+            }
         }
         return result;
     }
 
     // ========== 4. 需要选择新目标：选最靠近中心的敌人 ==========
     int best_target_id = -1;
+    int best_armor_idx = -1;
     double min_center_dist = std::numeric_limits<double>::infinity();
 
     snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
         if (!vehicle.valid || vehicle.confidence < 0.1) return;
 
-        // 找该敌人最近中心的装甲板
-        for (int i = 0; i < vehicle.armor_count; ++i) {
-            const auto& armor = vehicle.armors[i];
+        // 选新目标时只允许“当前可见可打”的装甲板参与竞争，避免幽灵目标抢占
+        int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
+        if (armor_idx < 0) {
+            return;
+        }
 
-            // 跳过不可见的 (陀螺模式除外)
-            if (!armor.visible && !vehicle.spin.active) continue;
+        Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, dt);
+        double dist = compute_center_distance(pos, gimbal);
 
-            // 角度过滤
-            if (std::abs(armor.z_to_v) > max_angle) continue;
-
-            // 计算到中心的距离
-            Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
-            double dist = compute_center_distance(pos, gimbal);
-
-            if (dist < min_center_dist) {
-                min_center_dist = dist;
-                best_target_id = id;
-            }
+        if (dist < min_center_dist) {
+            min_center_dist = dist;
+            best_target_id = id;
+            best_armor_idx = armor_idx;
         }
     });
 
     // ========== 5. 找到了新目标 ==========
     if (best_target_id >= 0) {
         const auto& vehicle = snapshot.vehicles[best_target_id];
-        int armor_idx = pick_armor_idx(vehicle);
+        int armor_idx = best_armor_idx;
+        if (armor_idx < 0) {
+            armor_idx = pick_fallback_armor_idx(vehicle);
+        }
 
         result.has_target = true;
         result.target_id = best_target_id;
@@ -215,13 +235,15 @@ double TargetSelector::compute_center_distance(
 bool TargetSelector::has_visible_armor(
     const predictor::VehicleState& vehicle,
     double max_angle,
-    double /* dt */) const
+    double /* dt */,
+    bool allow_indirect
+) const
 {
     for (int i = 0; i < vehicle.armor_count; ++i) {
         const auto& armor = vehicle.armors[i];
 
-        // 跳过不可见的 (陀螺模式除外)
-        if (!armor.visible && !vehicle.spin.active) continue;
+        // 仅可见装甲板可参与 DIRECT 可打判定
+        if (!armor.visible) continue;
 
         // 角度过滤 (侧面装甲板不打)
         if (std::abs(armor.z_to_v) > max_angle) continue;
@@ -229,7 +251,45 @@ bool TargetSelector::has_visible_armor(
         return true;  // 有可打击的装甲板
     }
 
+    // 仅在“保持/锁定已有目标”时允许陀螺 INDIRECT 兜底
+    if (allow_indirect) {
+        const double indirect_min_omega = get_param_or(
+            "AutoAim.FireControl.TargetSelector.indirect_min_omega", 0.5
+        );
+        if (vehicle.spin.active && std::abs(vehicle.spin.omega) >= indirect_min_omega
+            && vehicle.armor_count > 0)
+        {
+            return true;
+        }
+    }
+
     return false;
+}
+
+int TargetSelector::pick_best_visible_armor(
+    const predictor::VehicleState& vehicle,
+    const GimbalState& gimbal,
+    double max_angle,
+    double dt
+) const
+{
+    int best_idx = -1;
+    double best_dist = std::numeric_limits<double>::infinity();
+
+    for (int i = 0; i < vehicle.armor_count; ++i) {
+        const auto& armor = vehicle.armors[i];
+        if (!armor.visible) continue;
+        if (std::abs(armor.z_to_v) > max_angle) continue;
+
+        const Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
+        const double dist = compute_center_distance(pos, gimbal);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_idx = i;
+        }
+    }
+
+    return best_idx;
 }
 
 }  // namespace autoaim::fire_control

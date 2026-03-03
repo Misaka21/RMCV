@@ -7,7 +7,24 @@
 
 #include <cmath>
 
+#include "plugin/param/runtime_parameter.hpp"
+
 namespace autoaim::predictor {
+
+namespace {
+
+double get_param_or(const std::string& name, double default_value)
+{
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
+
+}  // namespace
 
 OutpostModel::OutpostModel(int target_id, EnemyType enemy_type)
     : target_id_(target_id)
@@ -64,6 +81,8 @@ VehicleState OutpostModel::predict(double timestamp) const {
 
     // 计算预测时间差
     double dt = timestamp - last_update_time_;
+    const double visible_time_window = get_param_or("AutoAim.Predictor.visible_time_window", 0.04);
+    const bool visible_fresh = dt <= visible_time_window;
 
     // 从 EKF 模型获取预测
     Eigen::Vector3d center = motion_.predict_center(dt);
@@ -91,7 +110,7 @@ VehicleState OutpostModel::predict(double timestamp) const {
         vs.armors[i].type = ArmorType::SMALL;
         vs.armors[i].position = armor_pos;
         vs.armors[i].velocity = velocity;  // 继承中心速度
-        vs.armors[i].visible = true;
+        vs.armors[i].visible = visible_fresh;
 
         // 装甲板朝向 = 中心到装甲板的方向
         double armor_theta = theta + i * (2.0 * M_PI / 3.0);
