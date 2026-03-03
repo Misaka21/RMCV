@@ -115,7 +115,7 @@ FireCommand FireController::control(
     }
 
     // 2. 目标选择
-    double prediction_dt = latency.prediction_latency();
+    const double prediction_dt = latency.prediction_latency();
     TargetSelection selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
     last_selection_ = selection;
 
@@ -139,13 +139,13 @@ FireCommand FireController::control(
     if (debug_armor_idx < 0 || debug_armor_idx >= vehicle.armor_count) {
         debug_armor_idx = 0;
     }
-    selection.predicted_pos = vehicle.predict_armor_position(debug_armor_idx, latency.prediction_latency());
+    selection.predicted_pos = vehicle.predict_armor_position(debug_armor_idx, prediction_dt);
     last_selection_ = selection;
 
     // 4. 装甲板瞄准
     ArmorAimResult armor_result = armor_aim_.compute(
         vehicle,
-        latency.prediction_latency()
+        prediction_dt
     );
     last_armor_aim_ = armor_result;
 
