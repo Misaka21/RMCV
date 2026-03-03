@@ -70,9 +70,10 @@ TargetSelection TargetSelector::select(
 {
     TargetSelection result;
     const double current_time = snapshot.timestamp;
+    // 与 ArmorAim 统一：可打角阈值使用同一参数，避免“选敌可打但选板不可打”抖动
     const double max_angle = runtime_param::get_param<double>(
-        "AutoAim.FireControl.TargetSelector.max_angle"
-    );
+        "AutoAim.FireControl.PID.max_orientation_angle"
+    ) * M_PI / 180.0;
 
     // ========== 1. 预瞄锁定优先 ==========
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
@@ -89,12 +90,15 @@ TargetSelection TargetSelector::select(
                 target_caught_time_ = current_time;
                 if (forced_candidate.valid()) {
                     current_target_score_ = normalize_score(forced_candidate.score, vehicle);
+                } else {
+                    // 强锁但当前无可见候选时，清空评分，避免解锁后沿用陈旧分数
+                    current_target_score_ = std::numeric_limits<double>::infinity();
                 }
 
                 result.has_target = true;
                 result.target_id = forced_target_id_;
                 result.priority = forced_candidate.valid()
-                    ? (1.0 / (1.0 + forced_candidate.score))
+                    ? (1.0 / (1.0 + normalize_score(forced_candidate.score, vehicle)))
                     : 0.0;
                 result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
                 return result;
@@ -169,7 +173,7 @@ TargetSelection TargetSelector::select(
     result.has_target = true;
     result.target_id = selected_target;
     result.priority = selected_visible.valid()
-        ? (1.0 / (1.0 + selected_visible.score))
+        ? (1.0 / (1.0 + normalize_score(selected_visible.score, selected_vehicle)))
         : 0.0;
     result.predicted_pos = selected_vehicle.predict_armor_position(armor_idx, dt);
     return result;

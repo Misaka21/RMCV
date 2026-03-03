@@ -473,7 +473,7 @@
     memorizing_time = 5.0
     #@double 前哨站目标保持时间 (s)
     keep_time_outpost = 0.5
-    #@double 最大有效角度 (rad, 约70°)，超过此角度的装甲板不考虑
+    #@double [deprecated] 历史参数，不再用于可打角判定（统一使用 PID.max_orientation_angle）
     max_angle = 1.2
     #@double 允许 INDIRECT 兜底时的最小角速度阈值 (rad/s)
     indirect_min_omega = 0.5
