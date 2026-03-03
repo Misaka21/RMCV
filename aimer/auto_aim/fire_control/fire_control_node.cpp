@@ -121,26 +121,33 @@ void finalize_latency(
     ::fire_control::LatencyInfo& latency,
     const predictor::BattlefieldSnapshot& snapshot,
     int preferred_target_id,
-    int preferred_armor_idx
+    int preferred_armor_idx,
+    const ::fire_control::GimbalState* gimbal
 ) {
     const auto* target = choose_latency_target(snapshot, preferred_target_id);
     if (!target) return;
 
     ArmorAim armor_aim;
+    int iter_preferred_armor_idx = preferred_armor_idx;
 
     constexpr int NUM_ITERATIONS = 2;
     for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
         double dt = latency.prediction_latency();
 
-        // 与 FireController 使用同一套选板逻辑，避免 fly_time 基于错误装甲板估计
+        // 与 FireController 使用同一套选板输入（云台状态 + 切板迟滞），
+        // 避免 fly_time 基于不同装甲板估计。
         Eigen::Vector3d pos = Eigen::Vector3d::Zero();
-        ArmorAimResult armor_result = armor_aim.compute(*target, dt);
+        ArmorAimResult armor_result = armor_aim.compute(
+            *target, dt, gimbal, iter_preferred_armor_idx
+        );
         if (armor_result.valid) {
             pos = armor_result.target_pos;
+            iter_preferred_armor_idx = armor_result.armor_idx;
         } else {
-            int armor_idx = choose_latency_armor_idx(*target, preferred_armor_idx);
+            int armor_idx = choose_latency_armor_idx(*target, iter_preferred_armor_idx);
             if (armor_idx >= 0) {
                 pos = target->predict_armor_position(armor_idx, dt);
+                iter_preferred_armor_idx = armor_idx;
             }
         }
 
@@ -278,7 +285,13 @@ void fire_control_run(const std::string& /* config_path */) {
                     latency_estimator, snapshot, latency_target_id, latency_armor_idx
                 );
                 // 迭代更新 fire_to_hit (延迟准备在 node 层完成)
-                finalize_latency(latency, snapshot, latency_target_id, latency_armor_idx);
+                finalize_latency(
+                    latency,
+                    snapshot,
+                    latency_target_id,
+                    latency_armor_idx,
+                    &controller.gimbal_state()
+                );
 
                 cached_latency = latency;
                 cached_latency_frame_id = snapshot.frame_id;
