@@ -15,6 +15,7 @@
 #include "visualizer_node.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <thread>
 
 #include <fmt/format.h>
@@ -63,6 +64,21 @@ static cv::Point2f angle_to_pixel(
     return aimer::tf::world_to_pixel(p_world, q_imu, valid);
 }
 
+/**
+ * @brief 拷贝到可复用缓冲区，避免每帧 clone 触发重复分配
+ */
+static cv::Mat copy_to_reused_buffer(const cv::Mat& src, cv::Mat& buffer) {
+    if (buffer.empty()
+        || buffer.rows != src.rows
+        || buffer.cols != src.cols
+        || buffer.type() != src.type())
+    {
+        buffer.create(src.size(), src.type());
+    }
+    src.copyTo(buffer);
+    return buffer;
+}
+
 // ==================== OSD 绘制函数 ====================
 
 /**
@@ -79,7 +95,7 @@ static void draw_fire_debug_panel(cv::Mat& vis, const FireDebugInfo& dbg) {
     };
 
     // 半透明背景
-    int panel_h = 150;
+    int panel_h = 170;
     int panel_w = 380;
     int safe_w = std::min(panel_w, vis.cols);
     int safe_h = std::min(panel_h, vis.rows);
@@ -120,13 +136,17 @@ static void draw_fire_debug_panel(cv::Mat& vis, const FireDebugInfo& dbg) {
         dbg.gimbal_yaw_vel * 57.3, dbg.gimbal_pitch_vel * 57.3), {150, 180, 220});
 
     // 5. Latency 分解
-    put(fmt::format("Lat: img{:.0f} +pred{:.0f} +send{:.0f} +fly{:.0f} ={:.0f}ms",
+    put(fmt::format("LatP: img{:.0f} +pred{:.0f} +send{:.0f} +fly{:.0f} ={:.0f}ms",
         dbg.latency_img_to_predict,
         dbg.latency_predict_to_send,
         dbg.latency_send_to_control,
         dbg.latency_fire_to_hit,
         dbg.latency_total),
         cv::Scalar(100, 200, 255));
+    put(fmt::format("LatH: +ctrl{:.0f} => {:.0f}ms",
+        dbg.latency_control_to_fire,
+        dbg.latency_hit_total),
+        cv::Scalar(120, 220, 255));
 
     // 以下仅在有效瞄准时显示
     if (dbg.fail_stage == 9) {
@@ -253,8 +273,10 @@ static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot
 
     // 火控延迟分解 (来自 FireDebugInfo)
     if (dbg.fc_heartbeat > 0) {
-        draw_line(fmt::format("FC total"), static_cast<float>(dbg.latency_total),
+        draw_line("FC pred", static_cast<float>(dbg.latency_total),
             cv::Scalar(255, 200, 100));
+        draw_line("FC hit", static_cast<float>(dbg.latency_hit_total),
+            cv::Scalar(120, 220, 255));
     }
 
     // 堆叠条形图
@@ -349,10 +371,13 @@ void start_visualizer_node() {
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     int last_frame_id = -1;
+    double last_dbg_heartbeat = -1.0;
+    auto last_render_time = SteadyClock::now();
     bool window_created = false;
     bool window_backend_available = true;
     bool window_backend_warned = false;
     const char* WINDOW_NAME = "RMCV";
+    cv::Mat vis_buffer;
 
     debug::print(debug::PrintMode::INFO, "Visualizer", "Visualizer node started");
 
@@ -393,24 +418,42 @@ void start_visualizer_node() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
                 }
-                vis = det_img.clone();
+                vis = copy_to_reused_buffer(det_img, vis_buffer);
 
             } else {
                 // 默认: predictor 视图
                 const auto& snapshot = battlefield->get();
+                const auto& dbg = fire_debug->get();
 
-                // 去重: 同一帧不重复渲染
-                if (snapshot.frame_id == last_frame_id || snapshot.debug_img.empty()) {
+                // 去重策略:
+                // - 新图像帧总是重绘
+                // - 同一图像帧下，若 fire_debug 心跳有更新也允许重绘（可见 500Hz 火控动态）
+                bool same_frame = (snapshot.frame_id == last_frame_id);
+                bool autoaim_mode = aimer::to_aim_mode(dbg.fc_mode) == aimer::AimMode::AUTOAIM;
+                bool fc_updated = autoaim_mode
+                    && (dbg.fc_heartbeat > 0.0)
+                    && std::abs(dbg.fc_heartbeat - last_dbg_heartbeat) > 1e-9;
+
+                if ((same_frame && !fc_updated) || snapshot.debug_img.empty()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
+
+                // 同帧刷新限频，避免在 500Hz 下占满 CPU
+                if (same_frame && fc_updated) {
+                    auto now = SteadyClock::now();
+                    if (now - last_render_time < std::chrono::milliseconds(8)) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        continue;
+                    }
+                }
+
                 last_frame_id = snapshot.frame_id;
+                last_dbg_heartbeat = dbg.fc_heartbeat;
+                last_render_time = SteadyClock::now();
 
-                // clone 一份用于 OSD 叠加
-                vis = snapshot.debug_img.clone();
-
-                // 读取火控调试信息
-                const auto& dbg = fire_debug->get();
+                // 拷贝到复用缓冲区再叠加 OSD，减少重复分配抖动
+                vis = copy_to_reused_buffer(snapshot.debug_img, vis_buffer);
 
                 // OSD 面板
                 draw_fire_debug_panel(vis, dbg);

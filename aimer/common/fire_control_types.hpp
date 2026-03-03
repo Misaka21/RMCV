@@ -225,8 +225,10 @@ struct FireDebugInfo {
     double latency_img_to_predict = 0;
     double latency_predict_to_send = 0;
     double latency_send_to_control = 0;
+    double latency_control_to_fire = 0;
     double latency_fire_to_hit = 0;
     double latency_total = 0;          // prediction_latency()
+    double latency_hit_total = 0;      // hit_latency()
 
     // 诊断
     uint8_t fc_mode = 0;               // AimMode 枚举值

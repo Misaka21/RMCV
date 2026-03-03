@@ -7,6 +7,7 @@
  */
 
 #include <chrono>
+#include <string>
 #include <thread>
 
 #include <fmt/format.h>
@@ -27,6 +28,24 @@
 namespace autoaim::predictor {
 
 using SteadyClock = std::chrono::steady_clock;
+
+namespace {
+
+bool get_runtime_bool_or(const std::string& name, bool default_value) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr == nullptr) return default_value;
+    if (auto* val = std::get_if<bool>(&*ptr)) return *val;
+    return default_value;
+}
+
+std::string get_runtime_string_or(const std::string& name, std::string default_value) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr == nullptr) return default_value;
+    if (auto* val = std::get_if<std::string>(&*ptr)) return *val;
+    return default_value;
+}
+
+}  // namespace
 
 /**
  * @brief 启动预测器节点
@@ -74,12 +93,27 @@ void start_predictor_node() {
             auto predict_time_since_epoch = t_predict.time_since_epoch();
             snapshot.predict_timestamp = std::chrono::duration<double>(predict_time_since_epoch).count();
 
-            // [阶段3] clone 图像 + EKF 绘制 (仅在需要时)
-            bool need_vis = runtime_param::get_param<bool>("Visualizer.show_window")
-                || pub_debug.has_subscriber();
+            // [阶段3] 可视化数据准备
+            // 默认不在预测线程做重绘，避免显示负载污染预测时序。
+            bool show_window = get_runtime_bool_or("Visualizer.show_window", false);
+            std::string view = show_window
+                ? get_runtime_string_or("Visualizer.view", "")
+                : std::string{};
+            bool need_predictor_view = show_window && view != "detector";
+            bool need_vis = need_predictor_view || pub_debug.has_subscriber();
+
             if (need_vis && !detection.img.empty()) {
-                snapshot.debug_img = detection.img.clone();
-                predictor.draw(snapshot.debug_img, detection.state.q_imu, timestamp);
+                // 轻量路径: 共享原图 (cv::Mat 引用计数)，不 clone 不重绘
+                snapshot.debug_img = detection.img;
+
+                // 可选重绘路径: 仅在显式参数开启时执行 predictor.draw
+                bool draw_overlay_in_predictor = get_runtime_bool_or(
+                    "AutoAim.Predictor.Visualization.draw_overlay_in_predictor", false);
+
+                if (draw_overlay_in_predictor) {
+                    snapshot.debug_img = detection.img.clone();
+                    predictor.draw(snapshot.debug_img, detection.state.q_imu, timestamp);
+                }
             }
             snapshot.detect_latency_ms = detection.latency_ms;
             snapshot.predict_latency_ms = latency;

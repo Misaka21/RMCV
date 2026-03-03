@@ -23,6 +23,26 @@
 
 namespace autoaim::fire_control {
 
+namespace {
+
+int pick_armor_idx(const predictor::VehicleState& vehicle) {
+    if (vehicle.armor_count <= 0) return -1;
+
+    if (vehicle.recommended_armor_idx >= 0
+        && vehicle.recommended_armor_idx < vehicle.armor_count)
+    {
+        return vehicle.recommended_armor_idx;
+    }
+
+    for (int i = 0; i < vehicle.armor_count; ++i) {
+        if (vehicle.armors[i].visible) return i;
+    }
+
+    return 0;
+}
+
+}  // namespace
+
 // ============================================================================
 // 主选择函数
 // ============================================================================
@@ -48,11 +68,10 @@ TargetSelection TargetSelector::select(
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
 
         if (has_visible_armor(vehicle, max_angle, dt)) {
+            int armor_idx = pick_armor_idx(vehicle);
             result.has_target = true;
             result.target_id = forced_target_id_;
-            result.predicted_pos = vehicle.predict_armor_position(
-                vehicle.recommended_armor_idx, dt
-            );
+            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
 
             current_target_id_ = forced_target_id_;
             last_seen_time_ = current_time;
@@ -68,13 +87,12 @@ TargetSelection TargetSelector::select(
         if (has_visible_armor(vehicle, max_angle, dt)) {
             current_target_valid = true;
             last_seen_time_ = current_time;
+            int armor_idx = pick_armor_idx(vehicle);
 
             // 当前目标仍然有效，保持追踪
             result.has_target = true;
             result.target_id = current_target_id_;
-            result.predicted_pos = vehicle.predict_armor_position(
-                vehicle.recommended_armor_idx, dt
-            );
+            result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
         }
     }
 
@@ -88,10 +106,7 @@ TargetSelection TargetSelector::select(
         // 在保持期内，不切换目标；若模型仍有效则继续输出当前目标
         if (snapshot.is_valid(current_target_id_)) {
             const auto& vehicle = snapshot.vehicles[current_target_id_];
-            int armor_idx = vehicle.recommended_armor_idx;
-            if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
-                armor_idx = 0;
-            }
+            int armor_idx = pick_armor_idx(vehicle);
 
             result.has_target = true;
             result.target_id = current_target_id_;
@@ -131,12 +146,11 @@ TargetSelection TargetSelector::select(
     // ========== 5. 找到了新目标 ==========
     if (best_target_id >= 0) {
         const auto& vehicle = snapshot.vehicles[best_target_id];
+        int armor_idx = pick_armor_idx(vehicle);
 
         result.has_target = true;
         result.target_id = best_target_id;
-        result.predicted_pos = vehicle.predict_armor_position(
-            vehicle.recommended_armor_idx, dt
-        );
+        result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
 
         current_target_id_ = best_target_id;
         last_seen_time_ = current_time;
@@ -178,9 +192,9 @@ std::pair<double, double> TargetSelector::pos_to_yaw_pitch(const Eigen::Vector3d
 {
     // 假设 pos 是世界坐标系下的位置 (相对于云台)
     // yaw = atan2(y, x)
-    // pitch = atan2(-z, √(x² + y²))  (向下为正)
+    // pitch = atan2(z, √(x² + y²))  (与项目统一约定: z 上为正, pitch 上为正)
     double yaw = std::atan2(pos.y(), pos.x());
-    double pitch = std::atan2(-pos.z(), std::hypot(pos.x(), pos.y()));
+    double pitch = std::atan2(pos.z(), std::hypot(pos.x(), pos.y()));
     return {yaw, pitch};
 }
 

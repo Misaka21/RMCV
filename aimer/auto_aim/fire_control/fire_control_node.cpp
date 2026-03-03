@@ -268,8 +268,10 @@ void fire_control_run(const std::string& /* config_path */) {
             dbg.latency_img_to_predict = latency.img_to_predict * 1000;
             dbg.latency_predict_to_send = latency.predict_to_send * 1000;
             dbg.latency_send_to_control = latency.send_to_control * 1000;
+            dbg.latency_control_to_fire = latency.control_to_fire * 1000;
             dbg.latency_fire_to_hit = latency.fire_to_hit * 1000;
             dbg.latency_total = latency.prediction_latency() * 1000;
+            dbg.latency_hit_total = latency.hit_latency() * 1000;
 
             if (mode == aimer::AimMode::AUTOAIM) {
                 const auto& aim = controller.last_aim();

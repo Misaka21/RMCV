@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 #include <thread>
 
 #include <fmt/format.h>
@@ -15,6 +16,7 @@
 #include "detector_helpers.hpp"
 #include "detector_trt/tensorrt_detector.hpp"
 #include "aimer/common/robot_state.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
@@ -31,6 +33,20 @@ using SteadyClock = std::chrono::steady_clock;
 
 namespace {
 
+bool get_runtime_bool_or(const std::string& name, bool default_value) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr == nullptr) return default_value;
+    if (auto* val = std::get_if<bool>(&*ptr)) return *val;
+    return default_value;
+}
+
+std::string get_runtime_string_or(const std::string& name, std::string default_value) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr == nullptr) return default_value;
+    if (auto* val = std::get_if<std::string>(&*ptr)) return *val;
+    return default_value;
+}
+
 // 更新 Dashboard 数据
 void update_dashboard(float latency_ms, size_t armor_count, float fps) {
     dashboard::set("detector.latency_ms", latency_ms);
@@ -38,17 +54,14 @@ void update_dashboard(float latency_ms, size_t armor_count, float fps) {
     dashboard::set("detector.fps", fps);
 }
 
-// 发布 Debug 图像 (如果有订阅者)
-void publish_debug_image(
-    umt::Publisher<cv::Mat>& pub,
-    const cv::Mat& image,
-    const std::vector<detector::DetectedArmor>& armors,
-    float fps,
-    float latency_ms
-) {
-    if (pub.has_subscriber() && !image.empty()) {
-        pub.push(detector::draw_debug_overlay(image, armors, fps, latency_ms));
-    }
+bool should_generate_overlay(umt::Publisher<cv::Mat>& pub_debug, bool debug_mode) {
+    if (pub_debug.has_subscriber() || debug_mode) return true;
+
+    // visualizer 的 detector 视图通过 detector_debug_img 对象读取，不走消息订阅。
+    // 这里在 detector 节点按需检查视图状态，避免无意义地每帧绘制 overlay。
+    bool show_window = get_runtime_bool_or("Visualizer.show_window", false);
+    if (!show_window) return false;
+    return get_runtime_string_or("Visualizer.view", "") == "detector";
 }
 
 }  // namespace
@@ -61,6 +74,7 @@ void run_sync_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
+    auto detector_debug_img = umt::BasicObjManager<cv::Mat>::find_or_create("detector_debug_img");
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     auto config = static_param::parse_file("armor_detector.toml");
@@ -108,9 +122,17 @@ void run_sync_loop(detector::DetectorInterface* det) {
             stats.update(latency_ms, !result.armors.empty());
             update_dashboard(latency_ms, result.armors.size(), stats.last_fps);
 
-            // Web 调试图像
-            publish_debug_image(pub_debug, frame.image, result.armors,
-                                stats.last_fps, latency_ms);
+            // 调试图像数据流:
+            // 1) 发布到 /detector/debug (web 调试/订阅方)
+            // 2) 写入 detector_debug_img (visualizer detector 视图)
+            if (should_generate_overlay(pub_debug, debug_mode) && !frame.image.empty()) {
+                cv::Mat overlay = detector::draw_debug_overlay(
+                    frame.image, result.armors, stats.last_fps, latency_ms);
+                detector_debug_img->get() = overlay;
+                if (pub_debug.has_subscriber()) {
+                    pub_debug.push(overlay);
+                }
+            }
 
             // 本地调试窗口
             if (debug_mode) {
@@ -135,6 +157,7 @@ void run_async_loop(detector::DetectorInterface* det) {
     umt::Subscriber<hardware::SyncFrame> sub("sync_frame");
     umt::Publisher<DetectionResult> pub("detections");
     umt::Publisher<cv::Mat> pub_debug("/detector/debug");
+    auto detector_debug_img = umt::BasicObjManager<cv::Mat>::find_or_create("detector_debug_img");
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     auto config = static_param::parse_file("armor_detector.toml");
@@ -213,9 +236,18 @@ void run_async_loop(detector::DetectorInterface* det) {
                 pop_stats.update(async_result.latency_ms, !result.armors.empty());
                 update_dashboard(async_result.latency_ms, result.armors.size(), pop_stats.last_fps);
 
-                // Web 调试图像
-                publish_debug_image(pub_debug, async_result.image, result.armors,
-                                    pop_stats.last_fps, async_result.latency_ms);
+                // 调试图像数据流:
+                // 1) 发布到 /detector/debug (web 调试/订阅方)
+                // 2) 写入 detector_debug_img (visualizer detector 视图)
+                if (should_generate_overlay(pub_debug, debug_mode) && !async_result.image.empty()) {
+                    cv::Mat overlay = detector::draw_debug_overlay(
+                        async_result.image, result.armors, pop_stats.last_fps,
+                        async_result.latency_ms);
+                    detector_debug_img->get() = overlay;
+                    if (pub_debug.has_subscriber()) {
+                        pub_debug.push(overlay);
+                    }
+                }
 
                 // 本地调试窗口
                 if (debug_mode && !async_result.image.empty()) {
