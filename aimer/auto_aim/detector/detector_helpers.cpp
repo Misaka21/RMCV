@@ -195,13 +195,13 @@ void draw_debug_visualization(
         // Gimbal → Imu 的旋转矩阵
         Eigen::Matrix3d R_gimbal2imu =
             aimer::tf::Transform<aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
-        // q_gimbal = R_gimbal2imu.transpose() * q_imu
-        Eigen::Quaterniond q_gimbal(R_gimbal2imu.transpose() * result.state.q_imu.toRotationMatrix());
-
-        auto euler_gimbal = q_gimbal.toRotationMatrix().eulerAngles(2, 1, 0);
-        double yaw_gimbal = euler_gimbal[0] * 180.0 / M_PI;
-        double pitch_gimbal = euler_gimbal[1] * 180.0 / M_PI;
-        double roll_gimbal = euler_gimbal[2] * 180.0 / M_PI;
+        // R_gimbal->world = R_imu->world * R_gimbal->imu
+        Eigen::Quaterniond q_gimbal(result.state.q_imu.toRotationMatrix() * R_gimbal2imu);
+        auto [yaw_gimbal_rad, pitch_gimbal_rad] = aimer::math::quat_to_yaw_pitch(q_gimbal);
+        Eigen::Matrix3d R_gimbal = q_gimbal.toRotationMatrix();
+        double yaw_gimbal = yaw_gimbal_rad * 180.0 / M_PI;
+        double pitch_gimbal = pitch_gimbal_rad * 180.0 / M_PI;
+        double roll_gimbal = std::atan2(R_gimbal(2, 1), R_gimbal(2, 2)) * 180.0 / M_PI;
 
         std::string gimbal_info = fmt::format("Gimbal: yaw={:.1f} pitch={:.1f} roll={:.1f}",
                                               yaw_gimbal, pitch_gimbal, roll_gimbal);

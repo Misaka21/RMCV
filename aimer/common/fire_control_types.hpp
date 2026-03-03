@@ -46,13 +46,16 @@ struct GimbalState {
         // Gimbal → Imu 的旋转修正
         const auto& R_g2i = aimer::tf::Transform<
             aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
-        // q_gimbal = R_g2i^T * q_imu (从 Imu 坐标系转到 Gimbal 坐标系)
-        Eigen::Quaterniond q_gimbal(R_g2i.transpose() * q_imu.toRotationMatrix());
+        // R_gimbal->world = R_imu->world * R_gimbal->imu
+        Eigen::Matrix3d R_gimbal_world = q_imu.toRotationMatrix() * R_g2i;
 
-        // 提取 yaw/pitch (ZYX 顺序)
-        Eigen::Vector3d euler = q_gimbal.toRotationMatrix().eulerAngles(2, 1, 0);
-        double new_yaw = euler[0];
-        double new_pitch = euler[1];
+        // 与 xyz_to_ypd 保持一致：前向轴取 gimbal X 轴
+        Eigen::Vector3d forward = R_gimbal_world.col(0);
+        double new_yaw = std::atan2(forward.y(), forward.x());
+        double new_pitch = std::atan2(
+            forward.z(),
+            std::hypot(forward.x(), forward.y())
+        );
 
         // 先缓存旧值，再更新当前角度，避免角速度差分错位一拍
         double prev_yaw = yaw;

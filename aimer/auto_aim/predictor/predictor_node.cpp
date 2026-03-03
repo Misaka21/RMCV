@@ -138,7 +138,7 @@ void start_predictor_node() {
             {
                 const auto& R_g2i = aimer::tf::Transform<
                     aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
-                Eigen::Quaterniond q_gimbal(R_g2i.transpose() * snapshot.self_state.q_imu.toRotationMatrix());
+                Eigen::Quaterniond q_gimbal(snapshot.self_state.q_imu.toRotationMatrix() * R_g2i);
                 auto [yaw, pitch] = aimer::math::quat_to_yaw_pitch(q_gimbal);
                 plotter::begin();
                 plotter::add("/gimbal/yaw", yaw * 57.3);
