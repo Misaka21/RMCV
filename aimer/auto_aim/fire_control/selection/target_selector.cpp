@@ -52,6 +52,11 @@ int pick_fallback_armor_idx(const predictor::VehicleState& vehicle) {
     return 0;
 }
 
+double normalize_score(double raw_score, const predictor::VehicleState& vehicle)
+{
+    return raw_score / std::max(0.1, vehicle.confidence);
+}
+
 }  // namespace
 
 // ============================================================================
@@ -83,7 +88,7 @@ TargetSelection TargetSelector::select(
                 current_target_id_ = forced_target_id_;
                 target_caught_time_ = current_time;
                 if (forced_candidate.valid()) {
-                    current_target_score_ = forced_candidate.score;
+                    current_target_score_ = normalize_score(forced_candidate.score, vehicle);
                 }
 
                 result.has_target = true;
@@ -105,7 +110,7 @@ TargetSelection TargetSelector::select(
         if (!candidate.valid()) return;
 
         // 置信度衰减：同样中心距离下优先更稳定的目标
-        candidate.score /= std::max(0.1, vehicle.confidence);
+        candidate.score = normalize_score(candidate.score, vehicle);
         if (candidate.score < best_candidate.score) {
             best_candidate = candidate;
         }
@@ -119,14 +124,15 @@ TargetSelection TargetSelector::select(
     }
     if (tracked_target >= 0 && snapshot.is_valid(tracked_target)) {
         const auto& tracked_vehicle = snapshot.vehicles[tracked_target];
-        if (has_visible_armor(tracked_vehicle, max_angle, dt, true)) {
-            // 当前目标仍可打，持续“抓取”当前目标，抑制抖动切换
+        if (has_visible_armor(tracked_vehicle, max_angle, dt, false)) {
+            // 仅当仍有 DIRECT 可见装甲板时才刷新抓取时间；
+            // 若只剩 INDIRECT，不刷新，让切换机制接管（与 rm.cv.fans 一致）
             target_caught_time_ = current_time;
             auto tracked_visible = evaluate_visible_candidate(
                 tracked_target, tracked_vehicle, gimbal, max_angle, dt
             );
             if (tracked_visible.valid()) {
-                current_target_score_ = tracked_visible.score;
+                current_target_score_ = normalize_score(tracked_visible.score, tracked_vehicle);
             }
         } else if (best_candidate.valid()) {
             try_catch_target(
@@ -291,7 +297,7 @@ void TargetSelector::try_catch_target(
         current_target_id_, current_vehicle, gimbal, max_angle, dt
     );
     if (current_visible.valid()) {
-        baseline_score = current_visible.score / std::max(0.1, current_vehicle.confidence);
+        baseline_score = normalize_score(current_visible.score, current_vehicle);
     }
 
     // 候选必须明显更好才切换，避免多车并行场景下左右跳
