@@ -222,7 +222,6 @@ void start_hardware_node() {
 
         // Fake serial config
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
-        bool injected_allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
 
         // enemy_color / allow_fire 不在新协议中：统一从配置注入（fake/real 串口都需要）
         // 目前复用 Serial.fake_data.* 字段作为注入源，避免再加一套配置表。
