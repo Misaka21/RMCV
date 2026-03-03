@@ -363,6 +363,14 @@
     #@double 误差容忍比例 (简化模式)，落点偏移 < 装甲板尺寸 * error_rate 时开火
     error_rate = 0.6
 
+[AutoAim.FireControl.AimOffset]
+    #@double yaw 落点偏置 (rad)
+    # @param +: 调大将向左打击
+    yaw = 0.0
+    #@double pitch 落点偏置 (rad)
+    # @param +: 调大将向上打击
+    pitch = 0.0
+
 [AutoAim.FireControl.Latency]
     # 延迟模型 (参考 rm.cv.fans)
     # 时间轴: img → predict → send → control → fire → hit

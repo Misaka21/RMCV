@@ -220,12 +220,20 @@ FireCommand FireController::generate_command(
     FireCommand cmd;
     cmd.control_enabled = true;
 
+    // 落点偏置 (运行时可热更新)
+    const double aim_offset_yaw = runtime_param::get_param<double>(
+        "AutoAim.FireControl.AimOffset.yaw"
+    );
+    const double aim_offset_pitch = runtime_param::get_param<double>(
+        "AutoAim.FireControl.AimOffset.pitch"
+    );
+
     // 云台控制
-    cmd.yaw = static_cast<float>(plan.yaw);
+    cmd.yaw = static_cast<float>(plan.yaw + aim_offset_yaw);
     cmd.yaw_vel = static_cast<float>(plan.yaw_vel);
     cmd.yaw_acc = static_cast<float>(plan.yaw_acc);
 
-    cmd.pitch = static_cast<float>(plan.pitch);
+    cmd.pitch = static_cast<float>(plan.pitch + aim_offset_pitch);
     cmd.pitch_vel = static_cast<float>(plan.pitch_vel);
     cmd.pitch_acc = static_cast<float>(plan.pitch_acc);
 
