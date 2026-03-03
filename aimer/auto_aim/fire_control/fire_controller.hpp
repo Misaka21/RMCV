@@ -108,12 +108,13 @@ private:
     GimbalPlan last_plan_;
     ArmorAimResult last_armor_aim_;
     int last_solution_frame_id_ = -1;
+    int last_no_target_frame_id_ = -1;
     double last_target_confidence_ = 0.0;
     bool has_cached_solution_ = false;
 
-    int lost_count_ = 0;
+    int lost_count_ = 0;  // 按“新图像帧”计数，不按 500Hz 控制周期计数
     int last_fail_stage_ = 0;
-    static constexpr int MAX_LOST_COUNT = 30;  // 300ms 后重置
+    static constexpr int MAX_LOST_COUNT = 60;  // 约 300ms @ 200Hz 新帧率
 };
 
 }  // namespace autoaim::fire_control

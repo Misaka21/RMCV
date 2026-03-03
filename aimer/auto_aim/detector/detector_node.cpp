@@ -134,18 +134,9 @@ void run_sync_loop(detector::DetectorInterface* det) {
                 }
             }
 
-            // 本地调试窗口
-            if (debug_mode) {
-                detector::draw_debug_visualization(frame.image, result, frame);
-            }
-
         } catch (const umt::MessageError_Timeout&) {
             // 超时，继续
         }
-    }
-
-    if (debug_mode) {
-        detector::close_debug_window();
     }
 }
 
@@ -249,16 +240,6 @@ void run_async_loop(detector::DetectorInterface* det) {
                     }
                 }
 
-                // 本地调试窗口
-                if (debug_mode && !async_result.image.empty()) {
-                    hardware::SyncFrame frame;
-                    frame.image = async_result.image;
-                    frame.frame_id = async_result.frame_id;
-                    frame.timestamp_us = async_result.timestamp_us;
-                    frame.serial_data = async_result.serial_data;
-                    frame.serial_valid = true;
-                    detector::draw_debug_visualization(async_result.image, result, frame);
-                }
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "DetectorNode",
                              "Pop loop exception: {}", e.what());
@@ -287,9 +268,6 @@ void run_async_loop(detector::DetectorInterface* det) {
         push_thread.join();
     }
 
-    if (debug_mode) {
-        detector::close_debug_window();
-    }
 }
 
 // ============================================================================

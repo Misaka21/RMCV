@@ -363,13 +363,6 @@ struct BattlefieldSnapshot {
     double predict_timestamp = 0;  // 预测完成时间戳 (predict_t)
     int frame_id = 0;
 
-    // 延迟信息 (供 visualizer 显示)
-    float detect_latency_ms = 0;   // 检测耗时 (ms)
-    float predict_latency_ms = 0;  // 预测耗时 (ms)
-
-    // 原图像 (供火控调试绘制用)
-    cv::Mat debug_img;
-
     // ==================== 辅助方法 ====================
 
     bool is_valid(int id) const {
@@ -414,6 +407,20 @@ struct BattlefieldSnapshot {
         primary_target_id = -1;
         for (auto& v : vehicles) v.valid = false;
     }
+};
+
+/**
+ * @brief Predictor 可视化帧 (Predictor → Visualizer)
+ *
+ * 与 BattlefieldSnapshot 解耦，避免控制链路携带调试图像。
+ */
+struct PredictorDebugFrame {
+    cv::Mat image;                 // 可视化原图/叠加图
+    Eigen::Quaterniond q_imu = Eigen::Quaterniond::Identity();
+    int frame_id = -1;
+    double timestamp = 0;
+    float detect_latency_ms = 0;
+    float predict_latency_ms = 0;
 };
 
 // ==================== 辅助函数 ====================

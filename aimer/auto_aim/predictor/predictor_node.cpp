@@ -59,6 +59,8 @@ void start_predictor_node() {
     // 设置 UMT
     umt::Subscriber<DetectionResult> sub("detections");
     auto battlefield = umt::BasicObjManager<BattlefieldSnapshot>::find_or_create("battlefield");
+    auto predictor_debug =
+        umt::BasicObjManager<PredictorDebugFrame>::find_or_create("predictor_debug");
     umt::Publisher<cv::Mat> pub_debug("/predictor/debug");  // Web 调试图像
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
@@ -102,28 +104,34 @@ void start_predictor_node() {
             bool need_predictor_view = show_window && view != "detector";
             bool need_vis = need_predictor_view || pub_debug.has_subscriber();
 
+            PredictorDebugFrame debug_frame;
+            debug_frame.frame_id = snapshot.frame_id;
+            debug_frame.timestamp = snapshot.timestamp;
+            debug_frame.q_imu = snapshot.self_state.q_imu;
+            debug_frame.detect_latency_ms = detection.latency_ms;
+            debug_frame.predict_latency_ms = latency;
+
             if (need_vis && !detection.img.empty()) {
                 // 轻量路径: 共享原图 (cv::Mat 引用计数)，不 clone 不重绘
-                snapshot.debug_img = detection.img;
+                debug_frame.image = detection.img;
 
                 // 可选重绘路径: 仅在显式参数开启时执行 predictor.draw
                 bool draw_overlay_in_predictor = get_runtime_bool_or(
                     "AutoAim.Predictor.Visualization.draw_overlay_in_predictor", false);
 
                 if (draw_overlay_in_predictor) {
-                    snapshot.debug_img = detection.img.clone();
-                    predictor.draw(snapshot.debug_img, detection.state.q_imu, timestamp);
+                    debug_frame.image = detection.img.clone();
+                    predictor.draw(debug_frame.image, detection.state.q_imu, timestamp);
                 }
             }
-            snapshot.detect_latency_ms = detection.latency_ms;
-            snapshot.predict_latency_ms = latency;
 
             // [阶段4] 写入共享对象
             battlefield->get() = snapshot;
+            predictor_debug->get() = debug_frame;
 
             // Web 调试图像
-            if (pub_debug.has_subscriber() && !snapshot.debug_img.empty()) {
-                pub_debug.push(snapshot.debug_img);
+            if (pub_debug.has_subscriber() && !debug_frame.image.empty()) {
+                pub_debug.push(debug_frame.image);
             }
 
             // [阶段5] 输出云台状态到 PlotJuggler

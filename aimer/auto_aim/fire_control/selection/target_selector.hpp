@@ -97,11 +97,6 @@ private:
         double dt
     ) const;
 
-    /**
-     * @brief 检查目标是否应该保持 (锁定机制)
-     */
-    bool should_keep_target(int target_id, double current_time) const;
-
     // ==================== 状态 ====================
 
     int current_target_id_ = -1;
