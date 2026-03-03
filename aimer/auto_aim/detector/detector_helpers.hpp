@@ -41,9 +41,8 @@ inline aimer::RobotState build_robot_state(
     state.bullet_speed = s.bullet_speed;
     state.aim_mode = aimer::to_aim_mode(s.aim_mode);  // uint8_t → AimMode
     state.aiming_lock = s.aiming_lock;
-    // enemy_color 和 allow_fire 从配置加载（不在协议中）
     state.enemy_color = s.enemy_color;
-    state.allow_fire = s.allow_fire;
+    state.allow_fire = true;
     state.timestamp_us = timestamp_us;
     return state;
 }

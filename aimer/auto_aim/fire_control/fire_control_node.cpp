@@ -96,6 +96,7 @@ void fire_control_run(const std::string& /* config_path */) {
     auto battlefield = umt::BasicObjManager<predictor::BattlefieldSnapshot>::find_or_create("battlefield");
     auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
     auto fire_debug = umt::BasicObjManager<::fire_control::FireDebugInfo>::find_or_create("fire_debug");
+    auto aim_mode_obj = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
     auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     // 自瞄控制器
@@ -121,8 +122,8 @@ void fire_control_run(const std::string& /* config_path */) {
         const auto& snapshot = battlefield->get();
         double current_time = get_current_time();
 
-        // aim_mode 从 snapshot 的 self_state 读取 (与 predictor 同源)
-        aimer::AimMode mode = snapshot.self_state.aim_mode;
+        // 统一从 hardware 实时共享对象读取 aim_mode，避免 snapshot 停更导致模式滞后
+        aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->get());
         aimer::AimMode prev_mode = last_mode;
 
         // 检测新帧，更新延迟估计

@@ -107,6 +107,8 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
     try {
         // 使用 Message 系统发布接收数据（线程安全）
         umt::Publisher<SerialReceiveData> publisher("serial_receive");
+        // 实时 aim_mode（供火控直接读取）
+        auto current_aim_mode = umt::BasicObjManager<uint8_t>::find_or_create("current_aim_mode", 0);
         auto recv_enabled = umt::BasicObjManager<bool>::find_or_create("serial_recv_enabled", true);
         auto app_running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
         auto debug_print = umt::BasicObjManager<bool>::find_or_create("serial_debug_print", false);
@@ -149,12 +151,15 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                     if (SerialUtils::packet_to_receive_data(packet, receive_data)) {
                         // 设置时间戳
                         receive_data.recv_time_us = recv_time_us;
+                        // 更新实时模式源（避免依赖可能停更的上游快照）
+                        current_aim_mode->get() = receive_data.aim_mode;
 
                         // 遥测数据
                         dashboard::set("serial.yaw", receive_data.yaw);
                         dashboard::set("serial.pitch", receive_data.pitch);
                         dashboard::set("serial.bullet_speed", receive_data.bullet_speed);
                         dashboard::set("serial.aim_mode", (int)receive_data.aim_mode);
+                        dashboard::set("serial.enemy_color", (int)receive_data.enemy_color);
 
                         // 通过 Message 发布（线程安全，Subscriber 自动管理缓冲区）
                         publisher.push(receive_data);
@@ -388,7 +393,7 @@ bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& pac
 // BoardToVision 协议布局 (电控 → 视觉, 32字节):
 //   [0] head=0xff, [1] mode, [2] aiming_lock,
 //   [3-6] bullet_speed, [7-10] yaw, [11-14] pitch, [15-18] roll,
-//   [19-28] reserved, [29-30] crc16, [31] tail=0x0d
+//   [19] enemy_color, [20-28] reserved, [29-30] crc16, [31] tail=0x0d
 // CRC 计算范围: buffer[1..28] (28字节)
 bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceiveData& data) {
     try {
@@ -436,6 +441,15 @@ bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceive
         if (packet.unload_data(roll, 15)) {
             data.roll = roll;
         }
+
+        // [19] enemy_color
+        uint8_t enemy_color = 0;
+        if (packet.unload_data(enemy_color, 19)) {
+            data.enemy_color = enemy_color;
+        }
+
+        // 当前版本不使用 allow_fire 软门控
+        data.allow_fire = true;
 
         return true;
     } catch (const std::exception& e) {

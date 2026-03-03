@@ -32,7 +32,7 @@ using SteadyClock = std::chrono::steady_clock;
 namespace {
 
 // 串口颜色转换为检测器颜色
-// 注: enemy_color 不在协议中，由 hardware 从配置注入到 serial_data
+// 注: enemy_color 由串口协议上报到 serial_data
 EnemyColor serial_to_enemy_color(uint8_t serial_color) {
     switch (serial_color) {
         case 1: return EnemyColor::RED;
@@ -57,9 +57,8 @@ aimer::RobotState build_robot_state(const serial::SerialReceiveData& data, int64
     state.bullet_speed = data.bullet_speed;
     state.aim_mode = aimer::to_aim_mode(data.aim_mode);
     state.aiming_lock = data.aiming_lock;
-    // enemy_color 和 allow_fire 从配置加载（不在协议中）
     state.enemy_color = data.enemy_color;
-    state.allow_fire = data.allow_fire;
+    state.allow_fire = true;
     state.timestamp_us = timestamp_us;
     return state;
 }

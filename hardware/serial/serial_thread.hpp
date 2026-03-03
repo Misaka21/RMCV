@@ -64,7 +64,7 @@ struct VisionData_t {
 // 协议布局:
 //   [0] head=0xff, [1] mode, [2] aiming_lock,
 //   [3-6] bullet_speed, [7-10] yaw, [11-14] pitch, [15-18] roll,
-//   [19-28] reserved, [29-30] crc16, [31] tail=0x0d
+//   [19] enemy_color, [20-28] reserved, [29-30] crc16, [31] tail=0x0d
 struct SerialReceiveData {
     // IMU 姿态数据 (弧度)
     float yaw;            // 偏航角 (rad)
@@ -78,9 +78,12 @@ struct SerialReceiveData {
     uint8_t aim_mode;     // 自瞄模式 (原始字节: 0=关闭, 1=自瞄, 2=小符, 3=大符)
     bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 
-    // 以下字段不在协议中，由配置文件提供
+    // 协议字段
     uint8_t enemy_color;  // 敌方颜色 (0=未知, 1=红, 2=蓝)
-    bool allow_fire;      // 是否允许射击
+
+    // 本地开关（不走串口协议）:
+    // 当前版本固定为 true（不使用 allow_fire 软门控）
+    bool allow_fire;
 
     // 时间戳 (上位机接收时刻，微秒)
     int64_t recv_time_us = 0;
@@ -89,7 +92,7 @@ struct SerialReceiveData {
         : yaw(0.0f), pitch(0.0f), roll(0.0f)
         , bullet_speed(15.0f)
         , aim_mode(0), aiming_lock(false)
-        , enemy_color(0), allow_fire(false)
+        , enemy_color(0), allow_fire(true)
         , recv_time_us(0) {}
 };
 
