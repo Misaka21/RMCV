@@ -356,13 +356,9 @@
 # ==================== 火控配置 ====================
 
 [AutoAim.FireControl]
-    #@bool 是否使用MPC模式，false则使用简化模式 (仅位置跟踪)
-    use_mpc = false
-    #@double 射击误差阈值 (rad)，MPC规划误差小于此值才开火
-    fire_threshold = 0.02
     #@double 最小置信度，目标置信度低于此值不开火
     min_confidence = 0.3
-    #@double 误差容忍比例 (简化模式)，落点偏移 < 装甲板尺寸 * error_rate 时开火
+    #@double 开火误差容忍比例，落点偏移 < 装甲板尺寸 * error_rate 时开火
     error_rate = 0.6
 
 [AutoAim.FireControl.AimOffset]
@@ -383,14 +379,10 @@
 [AutoAim.FireControl.Latency]
     # 延迟模型 (参考 rm.cv.fans)
     # 时间轴: img → predict → send → control → fire → hit
-    #
-    # 预测时间 = img_to_control + fly_time
-    # 开火时机 = control_to_fire (用于反陀螺打击时机)
+    # 说明:
+    # - img_to_predict / predict_to_send 由系统在线估计，不在这里配置
+    # - 这里只保留需手工标定的静态链路
 
-    #@double 图像传输 + 神经网络推理延迟 (s)
-    img_to_predict = 0.010
-    #@double 预测计算 + 发送准备延迟 (s)
-    predict_to_send = 0.002
     #@double 信号传输延迟 (s)
     # @param +: 调大将使对运动靶的跟踪更超前
     send_to_control = 0.003
@@ -400,37 +392,6 @@
     # @note 不参与预测时间计算，仅用于反陀螺打击时机
     control_to_fire = 0.020
 
-[AutoAim.FireControl.MPC]
-    #@double 控制周期 (s)
-    dt = 0.01
-    #@int 预测时域
-    horizon = 100
-    #@int 取控制量的位置 (对应500ms)
-    half_horizon = 50
-
-    # yaw 轴参数
-    #@double yaw 位置权重
-    q_yaw_pos = 9e6
-    #@double yaw 速度权重
-    q_yaw_vel = 0.0
-    #@double yaw 控制 (加速度) 权重
-    r_yaw_acc = 1.0
-    #@double yaw 最大加速度 (rad/s²)
-    max_yaw_acc = 50.0
-
-    # pitch 轴参数
-    #@double pitch 位置权重
-    q_pitch_pos = 9e6
-    #@double pitch 速度权重
-    q_pitch_vel = 0.0
-    #@double pitch 控制 (加速度) 权重
-    r_pitch_acc = 1.0
-    #@double pitch 最大加速度 (rad/s²)
-    max_pitch_acc = 100.0
-
-    #@int MPC 最大迭代次数
-    max_iter = 10
-
 [AutoAim.FireControl.PID]
     #@double 陀螺可见板朝向窗口 (deg)，用于 soft preference：[-angle, +angle]
     # @note <= 0 时关闭窗口，始终按喵中心最小移动选可见板
@@ -439,8 +400,6 @@
     direct_orientation_weight = 0.15
     #@double DIRECT 选板切换迟滞比例（0.12=新板需至少好12%才切换）
     switch_armor_hysteresis = 0.12
-    #@double [deprecated] 历史参数，INDIRECT 路径已移除，当前不生效
-    fire_advance = 0.03
 
 [AutoAim.FireControl.Trajectory]
     #@string 求解器类型: 
@@ -466,41 +425,24 @@
     rk4_tolerance = 0.001
 
 [AutoAim.FireControl.TargetSelector]
-    # ========== 新策略参数==========
     #@double 目标保持时间 (s)，目标消失后等待此时间再切换
     keep_time = 0.1
+    #@double 哨兵目标保持时间 (s)
+    keep_time_sentry = 0.1
+    #@double 基地目标保持时间 (s)
+    keep_time_base = 0.1
+    #@double 步兵目标保持时间 (s)
+    keep_time_infantry = 0.1
+    #@double 英雄目标保持时间 (s)
+    keep_time_hero = 0.1
+    #@double 工程目标保持时间 (s)
+    keep_time_engineer = 0.1
     #@double 目标记忆时间 (s)，超过后释放锁存目标
     memorizing_time = 5.0
     #@double 前哨站目标保持时间 (s)
     keep_time_outpost = 0.5
-    #@double [deprecated] 历史参数，不再用于可打角判定（统一使用 PID.max_orientation_angle）
-    max_angle = 1.2
-    #@double [deprecated] INDIRECT 兜底已移除，当前不生效
-    indirect_min_omega = 0.5
-
-    # ========== 旧策略参数 (已注释，保留参考) ==========
-    # 权重系数
-    #@double 面积权重 (最重要)
-    w_area = 2.0
-    #@double 静止权重 (速度越小越好)
-    w_still = 1.5
-    #@double 距离权重 (近优先)
-    w_distance = 1.0
-    #@double 类型优先级权重 (英雄>步兵>哨兵)
-    w_priority = 1.0
-    #@double 置信度权重
-    w_confidence = 0.5
-
-    #@double 面积过滤比例，小于最大面积*此比例的装甲板排除
-    area_filter_ratio = 0.4
     #@double 目标切换迟滞，新目标必须好于当前*此比例才切换
     switch_hysteresis = 0.15
-    #@double 同一目标内装甲板切换迟滞
-    switch_armor_hysteresis = 0.10
-    #@double 静止判定速度影响系数
-    still_speed_scale = 2.0
-    #@double 最大有效距离 (m)
-    max_distance = 10.0
 
 # ==================== 可视化配置 ====================
 
