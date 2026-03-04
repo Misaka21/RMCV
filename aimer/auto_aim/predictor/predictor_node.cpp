@@ -112,17 +112,8 @@ void start_predictor_node() {
             debug_frame.predict_latency_ms = latency;
 
             if (need_vis && !detection.img.empty()) {
-                // 轻量路径: 共享原图 (cv::Mat 引用计数)，不 clone 不重绘
-                debug_frame.image = detection.img;
-
-                // 可选重绘路径: 仅在显式参数开启时执行 predictor.draw
-                bool draw_overlay_in_predictor = get_runtime_bool_or(
-                    "AutoAim.Predictor.Visualization.draw_overlay_in_predictor", false);
-
-                if (draw_overlay_in_predictor) {
-                    debug_frame.image = detection.img.clone();
-                    predictor.draw(debug_frame.image, detection.state.q_imu, timestamp);
-                }
+                debug_frame.image = detection.img.clone();
+                predictor.draw(debug_frame.image, detection.state.q_imu, timestamp);
             }
 
             // [阶段4] 写入共享对象

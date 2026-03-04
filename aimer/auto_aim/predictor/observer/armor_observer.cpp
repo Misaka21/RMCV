@@ -13,7 +13,8 @@
 
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
-#include "plugin/debug/logger.hpp"
+#include <fmt/format.h>
+#include <fmt/color.h>
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
@@ -118,8 +119,8 @@ void ArmorObserver::merge_same_vehicle_ids(std::vector<ArmorObservation>& observ
             // 通过所有几何检查 → 同一辆车，选择更可靠的 ID
             int merged_id = pick_reliable_id(obs_i, obs_j);
 
-            debug::print(debug::PrintMode::DEBUG, "ArmorObserver",
-                "同车ID纠正: T{} + T{} -> T{} (dist={:.2f}m, yaw_diff={:.1f}deg, center_dist={:.2f}m)",
+            fmt::print(fmt::fg(fmt::color::yellow),
+                "[ArmorObserver] 同车ID纠正: T{} + T{} -> T{} (dist={:.2f}m, yaw_diff={:.1f}deg, center_dist={:.2f}m)\n",
                 obs_i.target_id, obs_j.target_id, merged_id,
                 dist, yaw_diff * 180.0 / M_PI, center_dist);
 
@@ -168,8 +169,8 @@ void ArmorObserver::merge_same_vehicle_ids(std::vector<ArmorObservation>& observ
         }
 
         if (best_id > 0) {
-            debug::print(debug::PrintMode::DEBUG, "ArmorObserver",
-                "单板ID纠正: T{} -> T{} (pos_dist={:.3f}m)",
+            fmt::print(fmt::fg(fmt::color::yellow),
+                "[ArmorObserver] 单板ID纠正: T{} -> T{} (pos_dist={:.3f}m)\n",
                 obs.target_id, best_id, best_dist);
 
             obs.target_id = best_id;

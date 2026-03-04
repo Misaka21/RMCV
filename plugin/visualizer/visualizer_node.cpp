@@ -494,59 +494,67 @@ static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot
 }
 
 /**
- * @brief 像素标记 (枪管、瞄准点、目标位置等)
+ * @brief 像素标记 (与 rm.cv.fans 风格一致)
+ *
+ * 白色空心圆: 图像中心 (cols/2, rows/2)
+ * 绿色空心圆: 相机光轴 (内参主点 cx, cy)
+ * 橙色空心圆: 预测瞄准点 (子弹应该命中的位置)
+ * 黄色空心圆: 实际发送角 (含云台延迟补偿)
+ * 红色箭头:   目标速度方向 (从瞄准点出发)
+ * 红色文字:   FIRE 状态
  */
 static void draw_pixel_markers(cv::Mat& vis, const FireDebugInfo& dbg,
                                 const Eigen::Quaterniond& q_imu) {
     int cx = vis.cols / 2;
     int cy = vis.rows / 2;
 
-    // 白色十字: 图像中心
-    cv::drawMarker(vis, cv::Point(cx, cy), cv::Scalar(255, 255, 255),
-        cv::MARKER_CROSS, 20, 1, cv::LINE_AA);
+    // 白色空心圆: 图像中心
+    cv::circle(vis, cv::Point(cx, cy), 6, cv::Scalar(220, 220, 220), 3, cv::LINE_AA);
 
-    // 绿色实心圆: 枪管当前指向 (gimbal_yaw/pitch)
-    bool gimbal_valid = false;
-    cv::Point2f gimbal_px = angle_to_pixel(dbg.gimbal_yaw, dbg.gimbal_pitch,
-        q_imu, gimbal_valid);
-    if (gimbal_valid) {
-        cv::circle(vis, gimbal_px, 5, cv::Scalar(0, 255, 0), -1, cv::LINE_AA);
+    // 绿色空心圆: 相机光轴 (内参主点, 固定位置)
+    const cv::Mat& K = aimer::tf::get_camera_matrix();
+    if (!K.empty()) {
+        int opt_cx = static_cast<int>(K.at<double>(0, 2));
+        int opt_cy = static_cast<int>(K.at<double>(1, 2));
+        cv::circle(vis, cv::Point(opt_cx, opt_cy), 6, cv::Scalar(0, 180, 0), 3, cv::LINE_AA);
     }
 
     if (dbg.fail_stage != 9) return;  // 以下仅在瞄准有效时绘制
 
-    // 红色圆环: 目标装甲板位置
-    bool target_valid = false;
-    cv::Point2f target_px = aimer::tf::world_to_pixel(dbg.target_pos, q_imu, target_valid);
-    if (target_valid) {
-        cv::circle(vis, target_px, 12, cv::Scalar(0, 0, 255), 2, cv::LINE_AA);
-    }
+    double ref_dist = dbg.distance > 0 ? dbg.distance : 5.0;
 
-    // 橙色实心圆: 期望瞄准 (aim_yaw/pitch)
+    // 橙色空心圆: 预测瞄准点 (aim_yaw/pitch)
     bool aim_valid = false;
     cv::Point2f aim_px = angle_to_pixel(dbg.aim_yaw, dbg.aim_pitch,
-        q_imu, aim_valid, dbg.distance > 0 ? dbg.distance : 5.0);
+        q_imu, aim_valid, ref_dist);
     if (aim_valid) {
-        cv::circle(vis, aim_px, 5, cv::Scalar(0, 165, 255), -1, cv::LINE_AA);
+        cv::circle(vis, aim_px, 10, cv::Scalar(0, 105, 255), 4, cv::LINE_AA);
     }
 
-    // 黄色实心圆: 发送角 (cmd_yaw/pitch)
+    // 黄色空心圆: 实际发送角 (cmd_yaw/pitch, 含延迟补偿)
     bool cmd_valid = false;
     cv::Point2f cmd_px = angle_to_pixel(dbg.cmd_yaw, dbg.cmd_pitch,
-        q_imu, cmd_valid, dbg.distance > 0 ? dbg.distance : 5.0);
+        q_imu, cmd_valid, ref_dist);
     if (cmd_valid) {
-        cv::circle(vis, cmd_px, 5, cv::Scalar(0, 255, 255), -1, cv::LINE_AA);
+        cv::circle(vis, cmd_px, 10, cv::Scalar(0, 255, 255), 4, cv::LINE_AA);
     }
 
-    // 红色箭头: aim → cmd 补偿方向
+    // 红色箭头: 从瞄准点出发的目标速度方向
     if (aim_valid && cmd_valid) {
-        double dx = cmd_px.x - aim_px.x;
-        double dy = cmd_px.y - aim_px.y;
-        double len = std::sqrt(dx * dx + dy * dy);
-        if (len > 3.0) {
+        // aim → cmd 方向即为速度补偿方向
+        float dx = cmd_px.x - aim_px.x;
+        float dy = cmd_px.y - aim_px.y;
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len > 3.0f) {
             cv::arrowedLine(vis, aim_px, cmd_px,
-                cv::Scalar(0, 0, 255), 1, cv::LINE_AA, 0, 0.3);
+                cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.15);
         }
+    }
+
+    // FIRE 状态文字
+    if (dbg.fire_now) {
+        cv::putText(vis, "FIRE", cv::Point(vis.cols - 200, 50),
+            cv::FONT_HERSHEY_TRIPLEX, 1.5, cv::Scalar(0, 0, 255), 3, cv::LINE_AA);
     }
 }
 
@@ -618,7 +626,6 @@ void start_visualizer_node() {
     auto running = umt::BasicObjManager<bool>::find_or_create("app_running", true);
 
     int last_frame_id = -1;
-    double last_dbg_heartbeat = -1.0;
     auto last_render_time = SteadyClock::now();
     bool window_created = false;
     bool window_backend_available = true;
@@ -674,37 +681,18 @@ void start_visualizer_node() {
                 vis = copy_to_reused_buffer(det_img, vis_buffer);
 
             } else {
-                // 默认: predictor 视图
+                // 默认: predictor / firecontrol 视图
                 const auto& snapshot = battlefield->get();
                 const auto& predictor_dbg = predictor_debug->get();
                 const auto& dbg = fire_debug->get();
 
-                // 去重策略:
-                // - 新图像帧总是重绘
-                // - firecontrol 视图下，同一图像帧若 fire_debug 心跳有更新也允许重绘
-                bool same_frame = (predictor_dbg.frame_id == last_frame_id);
-                bool autoaim_mode = aimer::to_aim_mode(dbg.fc_mode) == aimer::AimMode::AUTOAIM;
-                bool fc_updated = is_firecontrol_view
-                    && autoaim_mode
-                    && (dbg.fc_heartbeat > 0.0)
-                    && std::abs(dbg.fc_heartbeat - last_dbg_heartbeat) > 1e-9;
-
-                if ((same_frame && !fc_updated) || predictor_dbg.image.empty()) {
+                // 只在新帧到来时重绘，避免同帧高频刷新导致抖动
+                if (predictor_dbg.frame_id == last_frame_id || predictor_dbg.image.empty()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     continue;
                 }
 
-                // 同帧刷新限频，避免在 500Hz 下占满 CPU
-                if (same_frame && fc_updated) {
-                    auto now = SteadyClock::now();
-                    if (now - last_render_time < std::chrono::milliseconds(8)) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                        continue;
-                    }
-                }
-
                 last_frame_id = predictor_dbg.frame_id;
-                last_dbg_heartbeat = dbg.fc_heartbeat;
                 last_render_time = SteadyClock::now();
 
                 // 拷贝到复用缓冲区再叠加 OSD，减少重复分配抖动
