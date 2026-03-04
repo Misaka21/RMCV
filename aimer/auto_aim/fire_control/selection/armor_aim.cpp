@@ -81,18 +81,18 @@ TopAimProfile get_top_aim_profile(const predictor::VehicleState& vehicle) {
     TopAimProfile profile;
     switch (vehicle.spin.level) {
         case predictor::SpinLevel::HIGH:
-            profile.max_orientation_angle = aimer::math::deg_to_rad(top2_deg);
+            profile.max_orientation_angle = aimer::math::deg2rad(top2_deg);
             profile.max_out_error = std::max(0.0, top2_out);
             profile.allow_indirect = true;
             break;
         case predictor::SpinLevel::LOW:
-            profile.max_orientation_angle = aimer::math::deg_to_rad(top1_deg);
+            profile.max_orientation_angle = aimer::math::deg2rad(top1_deg);
             profile.max_out_error = std::max(0.0, top1_out);
             profile.allow_indirect = true;
             break;
         case predictor::SpinLevel::NONE:
         default:
-            profile.max_orientation_angle = aimer::math::deg_to_rad(top0_deg);
+            profile.max_orientation_angle = aimer::math::deg2rad(top0_deg);
             profile.max_out_error = std::max(0.0, top0_out);
             profile.allow_indirect = false;
             break;

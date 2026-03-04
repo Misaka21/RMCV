@@ -385,7 +385,7 @@ void fire_control_run(const std::string& /* config_path */) {
             dbg.latency_fire_to_hit = latency.fire_to_hit * 1000;
             dbg.latency_total = latency.prediction_latency() * 1000;
             dbg.latency_hit_total = latency.hit_latency() * 1000;
-            dbg.prediction_dt = latency.prediction_latency();
+            dbg.prediction_dt = controller.last_prediction_dt();
             dbg.cmd_additional_predict_time = runtime_param::get_param<double>(
                 "AutoAim.FireControl.Cmd.additional_predict_time"
             );

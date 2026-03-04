@@ -65,6 +65,7 @@ void FireController::reset()
     has_cached_solution_ = false;
     lost_count_ = 0;
     last_fail_stage_ = 0;
+    last_prediction_dt_ = 0.0;
     last_time_ = 0.0;
 }
 
@@ -130,6 +131,7 @@ FireCommand FireController::control(
     // 注意: 这里不应重复叠加 img_to_predict/predict_to_send。
     const double img_age = std::max(0.0, current_time - snapshot.timestamp);
     const double prediction_dt = img_age + latency.send_to_control + latency.fire_to_hit;
+    last_prediction_dt_ = prediction_dt;
 
     const int prev_target_id = last_selection_.has_target ? last_selection_.target_id : -1;
     const int prev_armor_idx = last_armor_aim_.valid ? last_armor_aim_.armor_idx : -1;

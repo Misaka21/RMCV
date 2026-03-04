@@ -13,10 +13,12 @@
 #include <fmt/color.h>
 #include <opencv2/imgproc.hpp>
 
+#include "aimer/common/fire_control_types.hpp"
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/plotter/plotter.hpp"
+#include "umt/BasicObjManager.hpp"
 
 namespace autoaim::predictor {
 
@@ -74,6 +76,15 @@ double get_armor_credit_time() {
 }
 
 double get_draw_predict_dt() {
+    // 优先使用火控实际的 prediction_dt (img→hit 击打时间)
+    auto fd = umt::BasicObjManager<::fire_control::FireDebugInfo>::find("fire_debug");
+    if (fd) {
+        const auto& dbg = fd->get();
+        if (dbg.fc_heartbeat > 0 && dbg.prediction_dt > 0.001) {
+            return dbg.prediction_dt;
+        }
+    }
+    // 火控未启动时 fallback
     return get_double_param("AutoAim.Predictor.EKF.draw_predict_dt", 0.020);
 }
 

@@ -65,6 +65,7 @@ public:
     const GimbalPlan& last_plan() const { return last_plan_; }
     const GimbalState& gimbal_state() const { return gimbal_state_; }
     int last_fail_stage() const { return last_fail_stage_; }
+    double last_prediction_dt() const { return last_prediction_dt_; }
 
 private:
     // ==================== 辅助方法 ====================
@@ -109,6 +110,7 @@ private:
 
     int lost_count_ = 0;  // 按“新图像帧”计数，不按 500Hz 控制周期计数
     int last_fail_stage_ = 0;
+    double last_prediction_dt_ = 0.0;
     static constexpr int MAX_LOST_COUNT = 60;  // 约 300ms @ 200Hz 新帧率
 };
 
