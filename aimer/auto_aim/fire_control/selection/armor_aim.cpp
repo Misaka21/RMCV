@@ -191,7 +191,7 @@ ArmorAimResult ArmorAim::compute_direct(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
-    int /* preferred_armor_idx */,
+    int preferred_armor_idx,
     bool use_orientation_window,
     double max_orientation_angle,
     bool visible_only,
@@ -233,7 +233,8 @@ ArmorAimResult ArmorAim::compute_direct(
         vehicle,
         candidate_indices,
         predict_dt,
-        gimbal
+        gimbal,
+        preferred_armor_idx
     );
     if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
         return result;
@@ -354,11 +355,22 @@ int ArmorAim::choose_best_direct(
     const predictor::VehicleState& vehicle,
     const std::vector<int>& direct_indices,
     double predict_dt,
-    const ::fire_control::GimbalState* gimbal
+    const ::fire_control::GimbalState* gimbal,
+    int preferred_armor_idx
 ) const
 {
     if (direct_indices.empty()) {
         return -1;
+    }
+
+    // 对齐 rm.cv.fans “尽量保持同一追踪板”的语义：
+    // 若上一次板仍在候选集合，优先保持，避免高频切板抖动。
+    if (preferred_armor_idx >= 0) {
+        for (int idx : direct_indices) {
+            if (idx == preferred_armor_idx) {
+                return idx;
+            }
+        }
     }
 
     auto score_idx = [&](int idx) {

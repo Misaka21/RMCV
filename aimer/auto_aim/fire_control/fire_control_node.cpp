@@ -167,8 +167,13 @@ void finalize_latency(
             continue;
         }
 
+        const Eigen::Vector3d self_velocity(
+            snapshot.self_state.velocity.x(),
+            snapshot.self_state.velocity.y(),
+            0.0
+        );
         ::fire_control::AimResult aim = ::fire_control::trajectory::solve(
-            pos, snapshot.self_state.bullet_speed
+            pos, snapshot.self_state.bullet_speed, self_velocity
         );
 
         if (aim.valid) {

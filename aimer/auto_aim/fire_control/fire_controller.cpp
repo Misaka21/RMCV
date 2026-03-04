@@ -50,31 +50,11 @@ double get_spin_window_rad(const predictor::VehicleState& vehicle)
     }
 }
 
-double predicted_z_to_v(
-    const predictor::VehicleState& vehicle,
-    int armor_idx,
-    double predict_dt
-)
-{
-    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
-        return 0.0;
-    }
-
-    const auto& armor = vehicle.armors[armor_idx];
-    if (!vehicle.spin.active || std::abs(vehicle.spin.omega) < 1e-4) {
-        return armor.z_to_v;
-    }
-
-    const Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, predict_dt);
-    const double armor_yaw = armor.yaw + vehicle.spin.omega * predict_dt;
-    const double view_yaw = std::atan2(pos.y(), pos.x());
-    return aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI);
-}
-
 bool estimate_aim_rate_from_target_vel(
     const AimResult& aim_now,
     const ArmorAimResult& armor,
     double bullet_speed,
+    const Eigen::Vector3d& self_velocity,
     double& yaw_rate,
     double& pitch_rate
 ) {
@@ -92,7 +72,9 @@ bool estimate_aim_rate_from_target_vel(
         return false;
     }
 
-    const AimResult aim_next = ::fire_control::trajectory::solve(target_pos_next, bullet_speed);
+    const AimResult aim_next = ::fire_control::trajectory::solve(
+        target_pos_next, bullet_speed, self_velocity
+    );
     if (!aim_next.valid) {
         return false;
     }
@@ -155,7 +137,8 @@ bool FireController::evaluate_rotate_back_gate(
     const predictor::VehicleState& vehicle,
     double prediction_dt,
     const LatencyInfo& latency,
-    double bullet_speed
+    double bullet_speed,
+    const Eigen::Vector3d& self_velocity
 )
 {
     // 默认通过，只有进入“回转禁发窗口”才阻塞
@@ -174,26 +157,39 @@ bool FireController::evaluate_rotate_back_gate(
     if (std::abs(vehicle.spin.omega) < 1e-4 || bullet_speed <= 1e-3) {
         return true;
     }
-
-    const int armor_idx = last_armor_aim_.armor_idx;
-    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
-        return true;
-    }
-
     const double control_to_fire = std::max(0.0, latency.control_to_fire);
     if (control_to_fire <= 1e-6) {
         return true;
     }
 
-    // 与 rm.cv.fans 同语义:
-    // water_gun_hit = prediction_dt, command_hit = prediction_dt + control_to_fire
+    // 对齐 rm.cv.fans: 回转门控需要比较两个时刻“被选中状态”的角位移方向，
+    // 不是同一块板在短时间内的自旋角位移。
     const double time_water_hit = prediction_dt;
     const double time_command_hit = prediction_dt + control_to_fire;
     last_rotate_back_command_time_ = time_command_hit;
 
+    ArmorAimResult water_aim = last_armor_aim_;
+    if (!water_aim.valid) {
+        water_aim = armor_aim_.compute(vehicle, time_water_hit, &gimbal_state_, -1);
+    }
+    if (!water_aim.valid || water_aim.armor_idx < 0 || water_aim.armor_idx >= vehicle.armor_count) {
+        return true;
+    }
+
+    ArmorAimResult command_aim = armor_aim_.compute(
+        vehicle, time_command_hit, &gimbal_state_, water_aim.armor_idx
+    );
+    if (!command_aim.valid || command_aim.armor_idx < 0 || command_aim.armor_idx >= vehicle.armor_count) {
+        return true;
+    }
+
+    auto armor_yaw_at = [&](int armor_idx, double t) {
+        return vehicle.armors[armor_idx].yaw + vehicle.spin.omega * t;
+    };
+
     const double omega = vehicle.spin.omega;
-    const double armor_yaw_water = vehicle.armors[armor_idx].yaw + omega * time_water_hit;
-    const double armor_yaw_command = vehicle.armors[armor_idx].yaw + omega * time_command_hit;
+    const double armor_yaw_water = armor_yaw_at(water_aim.armor_idx, time_water_hit);
+    const double armor_yaw_command = armor_yaw_at(command_aim.armor_idx, time_command_hit);
     const double armor_rotate_water_to_command = aimer::math::reduced_angle(
         armor_yaw_command - armor_yaw_water
     );
@@ -204,7 +200,7 @@ bool FireController::evaluate_rotate_back_gate(
     }
 
     const double max_orientation_angle = get_spin_window_rad(vehicle);
-    const double zn_to_armor_water = predicted_z_to_v(vehicle, armor_idx, time_water_hit);
+    const double zn_to_armor_water = water_aim.z_to_v;
     const double zn_to_rotate_back = (omega > 0.0)
         ? +max_orientation_angle
         : -max_orientation_angle;
@@ -219,18 +215,20 @@ bool FireController::evaluate_rotate_back_gate(
     }
 
     const Eigen::Vector3d pos_when_start =
-        vehicle.predict_armor_position(armor_idx, time_start_rotating_back);
-    const Eigen::Vector3d pos_when_command =
-        vehicle.predict_armor_position(armor_idx, time_command_hit);
-    if (!pos_when_start.allFinite() || !pos_when_command.allFinite()) {
+        vehicle.predict_armor_position(water_aim.armor_idx, time_start_rotating_back);
+    if (!pos_when_start.allFinite() || !command_aim.target_pos.allFinite()) {
         return true;
     }
-    if (pos_when_start.squaredNorm() < 1e-9 || pos_when_command.squaredNorm() < 1e-9) {
+    if (pos_when_start.squaredNorm() < 1e-9 || command_aim.target_pos.squaredNorm() < 1e-9) {
         return true;
     }
 
-    const AimResult aim_when_start = ::fire_control::trajectory::solve(pos_when_start, bullet_speed);
-    const AimResult aim_when_command = ::fire_control::trajectory::solve(pos_when_command, bullet_speed);
+    const AimResult aim_when_start = ::fire_control::trajectory::solve(
+        pos_when_start, bullet_speed, self_velocity
+    );
+    const AimResult aim_when_command = ::fire_control::trajectory::solve(
+        command_aim.target_pos, bullet_speed, self_velocity
+    );
     if (!aim_when_start.valid || !aim_when_command.valid) {
         return true;
     }
@@ -295,6 +293,11 @@ FireCommand FireController::control(
     const double img_age = std::max(0.0, current_time - snapshot.timestamp);
     const double prediction_dt = img_age + latency.send_to_control + latency.fire_to_hit;
     last_prediction_dt_ = prediction_dt;
+    const Eigen::Vector3d self_velocity(
+        snapshot.self_state.velocity.x(),
+        snapshot.self_state.velocity.y(),
+        0.0
+    );
 
     const int prev_target_id = last_selection_.has_target ? last_selection_.target_id : -1;
     const int prev_armor_idx = last_armor_aim_.valid ? last_armor_aim_.armor_idx : -1;
@@ -368,7 +371,8 @@ FireCommand FireController::control(
     // 6. 弹道解算
     AimResult aim = ::fire_control::trajectory::solve(
         armor_result.target_pos,
-        snapshot.self_state.bullet_speed
+        snapshot.self_state.bullet_speed,
+        self_velocity
     );
 
     if (!aim.valid) {
@@ -385,6 +389,7 @@ FireCommand FireController::control(
         aim,
         armor_result,
         snapshot.self_state.bullet_speed,
+        self_velocity,
         yaw_rate,
         pitch_rate
     );
@@ -407,7 +412,8 @@ FireCommand FireController::control(
         vehicle,
         prediction_dt,
         latency,
-        snapshot.self_state.bullet_speed
+        snapshot.self_state.bullet_speed,
+        self_velocity
     );
 
     last_fail_stage_ = 9;  // 成功

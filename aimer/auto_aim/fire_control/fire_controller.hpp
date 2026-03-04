@@ -93,7 +93,8 @@ private:
         const predictor::VehicleState& vehicle,
         double prediction_dt,
         const LatencyInfo& latency,
-        double bullet_speed
+        double bullet_speed,
+        const Eigen::Vector3d& self_velocity
     );
 
     FireCommand no_target_command();

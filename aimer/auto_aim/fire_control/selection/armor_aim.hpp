@@ -146,7 +146,8 @@ private:
         const predictor::VehicleState& vehicle,
         const std::vector<int>& direct_indices,
         double predict_dt,
-        const ::fire_control::GimbalState* gimbal
+        const ::fire_control::GimbalState* gimbal,
+        int preferred_armor_idx
     ) const;
 
     /**
