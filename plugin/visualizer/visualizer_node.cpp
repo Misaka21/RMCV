@@ -49,33 +49,24 @@ using fire_control::FireDebugInfo;
 // ==================== 像素投影辅助 ====================
 
 /**
- * @brief 将“相对当前云台”的 yaw/pitch 投影到像素
+ * @brief 将世界坐标系角度投影到像素 (用于绘制瞄准标记)
  *
- * 对齐 rm.cv.fans 的 draw_aim 语义：
- * - 输入角为当前枪口坐标系下的相对角（不是世界绝对角）
- * - yaw 左为正、pitch 上为正
+ * @param yaw   世界坐标系 yaw (rad)
+ * @param pitch 世界坐标系 pitch (rad)
+ * @param q_imu IMU 四元数
+ * @param valid 输出: 是否在画面内
+ * @param ref_dist 参考距离 (投影用，不影响像素方向)
  */
-static cv::Point2f relative_angle_to_pixel(
-    double rel_yaw, double rel_pitch, bool& valid
+static cv::Point2f angle_to_pixel(
+    double yaw, double pitch,
+    const Eigen::Quaterniond& q_imu,
+    bool& valid,
+    double ref_dist = 5.0
 ) {
-    const cv::Mat& K = aimer::tf::get_camera_matrix();
-    if (K.empty() || K.rows < 3 || K.cols < 3) {
-        valid = false;
-        return cv::Point2f(-1, -1);
-    }
-
-    const double fx = camera_intrinsic_at(K, 0, 0);
-    const double fy = camera_intrinsic_at(K, 1, 1);
-    const double cx = camera_intrinsic_at(K, 0, 2);
-    const double cy = camera_intrinsic_at(K, 1, 2);
-
-    const double u = cx - fx * std::tan(rel_yaw);    // yaw 左正 => 像素向左
-    const double v = cy - fy * std::tan(rel_pitch);  // pitch 上正 => 像素向上
-    valid = std::isfinite(u) && std::isfinite(v);
-    if (!valid) {
-        return cv::Point2f(-1, -1);
-    }
-    return cv::Point2f(static_cast<float>(u), static_cast<float>(v));
+    Eigen::Vector3d p_world = aimer::math::ypd_to_xyz(
+        aimer::math::YpdCoord{yaw, pitch, ref_dist}
+    );
+    return aimer::tf::world_to_pixel(p_world, q_imu, valid);
 }
 
 static double camera_intrinsic_at(const cv::Mat& K, int r, int c) {
@@ -563,7 +554,6 @@ static void draw_pixel_markers(
     const Eigen::Quaterniond& q_imu,
     bool frame_aligned
 ) {
-    (void)q_imu;
     int cx = vis.cols / 2;
     int cy = vis.rows / 2;
 
@@ -594,38 +584,35 @@ static void draw_pixel_markers(
 
     if (dbg.fail_stage != 9) return;  // 以下仅在瞄准有效时绘制
 
-    const double aim_rel_yaw = ::fire_control::GimbalState::normalize_angle(
-        dbg.aim_yaw - dbg.gimbal_yaw
-    );
-    const double aim_rel_pitch = dbg.aim_pitch - dbg.gimbal_pitch;
-    const double cmd_rel_yaw = ::fire_control::GimbalState::normalize_angle(
-        dbg.cmd_yaw - dbg.gimbal_yaw
-    );
-    const double cmd_rel_pitch = dbg.cmd_pitch - dbg.gimbal_pitch;
+    double ref_dist = dbg.distance > 0 ? dbg.distance : 5.0;
 
-    // 橙色空心圆: 预测瞄准点（相对云台）
+    // 橙色空心圆: 预测瞄准点 (aim_yaw/pitch)
     bool aim_valid = false;
-    cv::Point2f aim_px = relative_angle_to_pixel(aim_rel_yaw, aim_rel_pitch, aim_valid);
+    cv::Point2f aim_px = angle_to_pixel(
+        dbg.aim_yaw, dbg.aim_pitch, q_imu, aim_valid, ref_dist
+    );
     if (aim_valid) {
         cv::circle(vis, aim_px, 10, cv::Scalar(0, 105, 255), 4, cv::LINE_AA);
     }
 
-    // 黄色空心圆: 实际发送角（相对云台，含延迟补偿）
+    // 黄色空心圆: 实际发送角 (cmd_yaw/pitch, 含延迟补偿)
     bool cmd_valid = false;
-    cv::Point2f cmd_px = relative_angle_to_pixel(cmd_rel_yaw, cmd_rel_pitch, cmd_valid);
+    cv::Point2f cmd_px = angle_to_pixel(
+        dbg.cmd_yaw, dbg.cmd_pitch, q_imu, cmd_valid, ref_dist
+    );
     if (cmd_valid) {
         cv::circle(vis, cmd_px, 10, cv::Scalar(0, 255, 255), 4, cv::LINE_AA);
     }
 
-    // 红色箭头: 目标角速度方向（与 rm.cv.fans 一致，来自 aim_yaw_vel/pitch_vel）
-    if (aim_valid) {
-        cv::Point2f arrow_end{
-            aim_px.x - static_cast<float>(dbg.aim_yaw_vel / M_PI * 180.0 * 3.0),
-            aim_px.y - static_cast<float>(dbg.aim_pitch_vel / M_PI * 180.0 * 3.0)
-        };
-        cv::arrowedLine(
-            vis, aim_px, arrow_end, cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.15
-        );
+    // 红色箭头: 从瞄准点出发的目标速度方向
+    if (aim_valid && cmd_valid) {
+        float dx = cmd_px.x - aim_px.x;
+        float dy = cmd_px.y - aim_px.y;
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len > 3.0f) {
+            cv::arrowedLine(vis, aim_px, cmd_px,
+                cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.15);
+        }
     }
 
     // FIRE 状态文字
