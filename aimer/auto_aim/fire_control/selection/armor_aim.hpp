@@ -145,7 +145,8 @@ private:
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
         double max_orientation_angle,
-        double max_out_error
+        double max_out_error,
+        int preferred_armor_idx
     ) const;
 
     /**

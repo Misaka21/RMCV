@@ -6,12 +6,17 @@
 #include "armor_aim.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
+#include <string>
+
+#include <fmt/format.h>
 
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
+#include "plugin/debug/logger.hpp"
 
 namespace autoaim::fire_control {
 
@@ -32,6 +37,23 @@ double get_param_or(const std::string& name, double default_value)
         }
     }
     return default_value;
+}
+
+bool get_param_or(const std::string& name, bool default_value)
+{
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<bool>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
+
+double now_sec()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration<double>(now).count();
 }
 
 double center_cost(
@@ -192,7 +214,8 @@ ArmorAimResult ArmorAim::compute_spin(
             gimbal,
             q_imu,
             profile.max_orientation_angle,
-            profile.max_out_error
+            profile.max_out_error,
+            preferred_armor_idx
         );
         if (indirect.valid) {
             return indirect;
@@ -275,9 +298,13 @@ ArmorAimResult ArmorAim::compute_indirect(
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
     double max_orientation_angle,
-    double max_out_error
+    double max_out_error,
+    int preferred_armor_idx
 ) const
 {
+    (void)gimbal;
+    (void)q_imu;
+
     ArmorAimResult result;
     result.mode = AimMode::INDIRECT;
 
@@ -291,6 +318,7 @@ ArmorAimResult ArmorAim::compute_indirect(
         return result;
     }
 
+    const double sample_armor_width = vehicle.armors[0].width();
     const double zn_to_lim = (omega > 0.0) ? -max_orientation_angle : +max_orientation_angle;
 
     int best_idx = -1;
@@ -298,6 +326,22 @@ ArmorAimResult ArmorAim::compute_indirect(
     double best_armor_to_lim = 0.0;
     double best_radius = 0.0;
     double best_z_plus = 0.0;
+    int best_nonneg_idx = -1;
+    double closest_nonneg_to_lim = std::numeric_limits<double>::infinity();
+    double best_nonneg_armor_to_lim = 0.0;
+    double best_nonneg_radius = 0.0;
+    double best_nonneg_z_plus = 0.0;
+
+    struct CandidateDiag {
+        int idx = -1;
+        bool visible = false;
+        double z_to_v = 0.0;
+        double leave_angle = 0.0;
+        double armor_to_lim = 0.0;
+        double radius = 0.0;
+    };
+    std::vector<CandidateDiag> diags;
+    diags.reserve(armor_count);
 
     const Eigen::Vector3d center_t = vehicle.predict_center(predict_dt);
 
@@ -309,16 +353,21 @@ ArmorAimResult ArmorAim::compute_indirect(
             continue;
         }
 
-        // 与 rm.cv.fans 保持同义：允许“离场角”修正，避免窗口边界误触发
-        const double leave_angle = std::clamp(
-            vehicle.armors[i].width() * 0.5 * max_out_error / radius,
-            0.0,
-            M_PI * 0.45
-        );
+        // 对齐 rm.cv.fans: max_out_angle = sample_width/2 * max_out_error / radius
+        const double leave_angle = sample_armor_width * 0.5 * max_out_error / radius;
         const double z_to_v = predicted_z_to_v(vehicle, i, predict_dt);
         const double armor_to_lim = (omega > 0.0)
             ? (aimer::math::reduced_angle((zn_to_lim - z_to_v) - M_PI + leave_angle) + M_PI - leave_angle)
             : (aimer::math::reduced_angle((z_to_v - zn_to_lim) - M_PI + leave_angle) + M_PI - leave_angle);
+
+        diags.push_back(CandidateDiag{
+            i,
+            vehicle.armors[i].visible,
+            z_to_v,
+            leave_angle,
+            armor_to_lim,
+            radius
+        });
 
         if (armor_to_lim < closest_to_lim) {
             closest_to_lim = armor_to_lim;
@@ -327,61 +376,93 @@ ArmorAimResult ArmorAim::compute_indirect(
             best_radius = radius;
             best_z_plus = offset.z();
         }
+        if (armor_to_lim >= 0.0 && armor_to_lim < closest_nonneg_to_lim) {
+            closest_nonneg_to_lim = armor_to_lim;
+            best_nonneg_idx = i;
+            best_nonneg_armor_to_lim = armor_to_lim;
+            best_nonneg_radius = radius;
+            best_nonneg_z_plus = offset.z();
+        }
+    }
+
+    if (best_nonneg_idx >= 0 && std::isfinite(best_nonneg_armor_to_lim)) {
+        best_idx = best_nonneg_idx;
+        best_armor_to_lim = best_nonneg_armor_to_lim;
+        best_radius = best_nonneg_radius;
+        best_z_plus = best_nonneg_z_plus;
     }
 
     if (best_idx < 0 || !std::isfinite(best_armor_to_lim)) {
         return result;
     }
 
-    // 对齐 rm.cv.fans:
-    // closest_to_lim 允许为负，表示“刚过去窗口”的板；此时回推到窗口边界，
-    // 避免继续追踪当前已离场板导致空窗期抖动。
+    // 对齐 rm.cv.fans lmtd_top_model::choose_indirect_aim:
+    // min_armor_to_wait 允许为负；最终瞄点是同一装甲板在
+    // (predict_dt + time_to_emerge) 的预测位置，而不是强制投影到 lim 方向。
     const double time_to_emerge = best_armor_to_lim / std::abs(omega);
-    const Eigen::Vector3d center_lim = vehicle.predict_center(predict_dt + time_to_emerge);
-
-    Eigen::Vector2d camera_z_i2(1.0, 0.0);
-    if (q_imu != nullptr) {
-        // 与 rm.cv.fans 的 converter->get_camera_z_i2 同义：
-        // 使用相机前向轴在世界 XY 平面的投影作为 z_to_v 的参考方向。
-        const Eigen::Vector3d camera_z_world = aimer::tf::vector<
-            aimer::tf::Frame::Camera, aimer::tf::Frame::World
-        >(Eigen::Vector3d(0.0, 0.0, 1.0), *q_imu);
-        camera_z_i2 = Eigen::Vector2d(camera_z_world.x(), camera_z_world.y());
-    } else if (gimbal != nullptr && std::isfinite(gimbal->yaw)) {
-        // 回退路径：无 q_imu 时退化到云台 yaw 近似。
-        camera_z_i2 = Eigen::Vector2d(std::cos(gimbal->yaw), std::sin(gimbal->yaw));
+    const Eigen::Vector3d emerge_pos =
+        vehicle.predict_armor_position(best_idx, predict_dt + time_to_emerge);
+    if (!emerge_pos.allFinite() || emerge_pos.squaredNorm() < 1e-9) {
+        return ArmorAimResult{};
     }
-    const double n = camera_z_i2.norm();
-    if (n > 1e-6) {
-        camera_z_i2 /= n;
-    } else {
-        camera_z_i2 = Eigen::Vector2d(1.0, 0.0);
-    }
-
-    // lim 方向由“相机前向 + 窗口边界角”决定，而不是绑定某块当前板位置。
-    const Eigen::Vector2d lim_norm2 = aimer::math::rotate(camera_z_i2, M_PI + zn_to_lim);
-    const Eigen::Vector3d offset_lim(
-        lim_norm2.x() * best_radius,
-        lim_norm2.y() * best_radius,
-        best_z_plus
-    );
-    const Eigen::Vector3d emerge_pos = center_lim + offset_lim;
 
     result.valid = true;
     result.armor_idx = best_idx;
     result.target_pos = emerge_pos;
-    result.z_to_v = zn_to_lim;
+    // 与 rm.cv.fans 一致：返回被选中装甲板在当前时刻的 z_to_v，
+    // 后续开火门控会基于各自时刻再次计算。
+    result.z_to_v = predicted_z_to_v(vehicle, best_idx, predict_dt);
     result.time_to_fire = time_to_emerge;
     result.armor_width = vehicle.armors[best_idx].width();
     result.armor_height = vehicle.armors[best_idx].height();
 
-    // 速度用于前馈：中心速度 + 切向速度
-    Eigen::Vector3d tangent_vel(
-        -omega * offset_lim.y(),
-        +omega * offset_lim.x(),
-        0.0
-    );
-    result.target_vel = vehicle.velocity + tangent_vel;
+    // 对齐 rm.cv.fans: indirect 的 ypd_v 仅使用 center_v。
+    result.target_vel = vehicle.velocity;
+
+    if (get_param_or("AutoAim.FireControl.Debug.indirect_detail", false)) {
+        static double last_diag_log_sec = 0.0;
+        static int last_diag_best_idx = -1;
+        const double period_s = std::max(
+            0.05, get_param_or("AutoAim.FireControl.Debug.indirect_period_s", 0.2)
+        );
+        const double now = now_sec();
+        const bool best_switched = (best_idx != last_diag_best_idx);
+        if (best_switched || (now - last_diag_log_sec) >= period_s) {
+            debug::print(
+                best_switched ? debug::PrintMode::INFO : debug::PrintMode::DEBUG,
+                "ArmorAim",
+                "[INDIRECT] best={} pref={} omega={:.2f}rad/s lim={:.1f}deg "
+                "ttf={:.1f}ms pred_dt={:.1f}ms r={:.3f}m z+={:.3f} z2v_now={:.1f}deg",
+                best_idx,
+                preferred_armor_idx,
+                omega,
+                aimer::math::rad2deg(zn_to_lim),
+                time_to_emerge * 1000.0,
+                predict_dt * 1000.0,
+                best_radius,
+                best_z_plus,
+                aimer::math::rad2deg(result.z_to_v)
+            );
+
+            std::string line;
+            for (const auto& d : diags) {
+                line += fmt::format(
+                    " i{}(vis={},z2v={:.1f},leave={:.1f},alim={:.1f},t={:.1f}ms,r={:.3f})",
+                    d.idx,
+                    d.visible ? "Y" : "N",
+                    aimer::math::rad2deg(d.z_to_v),
+                    aimer::math::rad2deg(d.leave_angle),
+                    aimer::math::rad2deg(d.armor_to_lim),
+                    d.armor_to_lim / std::abs(omega) * 1000.0,
+                    d.radius
+                );
+            }
+            debug::print(debug::PrintMode::DEBUG, "ArmorAim", "[INDIRECT-CANDS]{}", line);
+
+            last_diag_log_sec = now;
+            last_diag_best_idx = best_idx;
+        }
+    }
 
     return result;
 }
@@ -397,16 +478,7 @@ int ArmorAim::choose_best_direct(
     if (direct_indices.empty()) {
         return -1;
     }
-
-    // 对齐 rm.cv.fans “尽量保持同一追踪板”的语义：
-    // 若上一次板仍在候选集合，优先保持，避免高频切板抖动。
-    if (preferred_armor_idx >= 0) {
-        for (int idx : direct_indices) {
-            if (idx == preferred_armor_idx) {
-                return idx;
-            }
-        }
-    }
+    (void)preferred_armor_idx;
 
     auto score_idx = [&](int idx) {
         if (gimbal != nullptr) {

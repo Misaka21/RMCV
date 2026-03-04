@@ -5,13 +5,16 @@
 
 #include "fire_control_node.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <limits>
+#include <string>
 #include <thread>
 #include <variant>
 
 #include "aimer/common/robot_state.hpp"
+#include "aimer/common/math/math.hpp"
 #include "aimer/common/latency/latency_estimator.hpp"
 #include "aimer/common/trajectory/solver_factory.hpp"
 #include "fire_controller.hpp"
@@ -48,6 +51,16 @@ double get_param_or(const std::string& name, double default_value) {
     auto ptr = runtime_param::find_param(name);
     if (ptr != nullptr) {
         if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
+
+bool get_param_or(const std::string& name, bool default_value) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<bool>(&*ptr)) {
             return *val;
         }
     }
@@ -91,6 +104,21 @@ int choose_latency_armor_idx(
     return best_idx;
 }
 
+int find_armor_idx_by_id(
+    const predictor::VehicleState& vehicle,
+    int armor_id
+) {
+    if (armor_id < 0) {
+        return -1;
+    }
+    for (int i = 0; i < vehicle.armor_count; ++i) {
+        if (vehicle.armors[i].id == armor_id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 // 从 snapshot 提取延迟构建所需参数
 ::fire_control::LatencyInfo build_latency(
     const aimer::LatencyEstimator& estimator,
@@ -132,6 +160,7 @@ int choose_latency_armor_idx(
 void finalize_latency(
     ::fire_control::LatencyInfo& latency,
     const predictor::BattlefieldSnapshot& snapshot,
+    double current_time,
     int preferred_target_id,
     int preferred_armor_idx,
     const ::fire_control::GimbalState* gimbal
@@ -141,10 +170,13 @@ void finalize_latency(
 
     ArmorAim armor_aim;
     int iter_preferred_armor_idx = preferred_armor_idx;
+    const double img_age = std::max(0.0, current_time - snapshot.timestamp);
 
     constexpr int NUM_ITERATIONS = 2;
     for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
-        double dt = latency.prediction_latency();
+        // 与 FireController::control() 使用同一预测时间轴:
+        // prediction_dt = img_age + send_to_control + fire_to_hit
+        double dt = img_age + latency.send_to_control + latency.fire_to_hit;
 
         // 与 FireController 使用同一套选板输入（云台状态 + 切板迟滞），
         // 避免 fly_time 基于不同装甲板估计。
@@ -213,6 +245,15 @@ void fire_control_run(const std::string& /* config_path */) {
     double cached_latency_predict_ts = -1.0;
     LatencyInfo cached_latency{};
     bool has_cached_latency = false;
+    double last_fc_log_ts = 0.0;
+    bool has_last_cmd = false;
+    int last_log_target_id = -1;
+    int last_log_armor_idx = -1;
+    double last_cmd_yaw = 0.0;
+    double last_cmd_pitch = 0.0;
+    double last_aim_yaw = 0.0;
+    double last_aim_pitch = 0.0;
+    int last_fail_stage = -1;
 
     debug::print(debug::PrintMode::INFO, "AutoAimFireControl", "Running at 500Hz");
 
@@ -282,22 +323,68 @@ void fire_control_run(const std::string& /* config_path */) {
         int latency_armor_idx = -1;
         const auto& last_sel = controller.last_selection();
         const auto& last_armor = controller.last_armor_aim();
+        const int last_armor_id = controller.last_armor_id();
         if (last_sel.has_target && snapshot.is_valid(last_sel.target_id)) {
             latency_target_id = last_sel.target_id;
-            if (last_armor.valid) {
-                latency_armor_idx = last_armor.armor_idx;
+            const auto& latency_vehicle = snapshot.vehicles[latency_target_id];
+            if (last_armor_id >= 0) {
+                latency_armor_idx = find_armor_idx_by_id(latency_vehicle, last_armor_id);
+            }
+            if (latency_armor_idx < 0 && last_armor.valid) {
+                if (last_armor.armor_idx >= 0 && last_armor.armor_idx < latency_vehicle.armor_count) {
+                    latency_armor_idx = last_armor.armor_idx;
+                }
             }
         }
 
         LatencyInfo latency{};
         if (mode == aimer::AimMode::AUTOAIM && !snapshot_stale) {
-            bool need_rebuild_latency = !has_cached_latency
-                || snapshot.frame_id != cached_latency_frame_id
-                || latency_target_id != cached_latency_target_id
-                || latency_armor_idx != cached_latency_armor_idx
-                || std::abs(snapshot.predict_timestamp - cached_latency_predict_ts) > 1e-9;
+            const bool reason_no_cache = !has_cached_latency;
+            const bool reason_new_frame = snapshot.frame_id != cached_latency_frame_id;
+            // 只在新图像帧到达时依据 target/armor 重建，避免同帧 500Hz 循环里的抖动正反馈
+            const bool reason_target = reason_new_frame
+                && (latency_target_id != cached_latency_target_id);
+            const bool reason_armor = reason_new_frame
+                && (latency_armor_idx != cached_latency_armor_idx);
+            const bool reason_predict_ts =
+                std::abs(snapshot.predict_timestamp - cached_latency_predict_ts) > 1e-9;
+
+            bool need_rebuild_latency = reason_no_cache
+                || reason_new_frame
+                || reason_target
+                || reason_armor
+                || reason_predict_ts;
 
             if (need_rebuild_latency) {
+                if (get_param_or("AutoAim.FireControl.Debug.latency_detail", false)) {
+                    static double last_latency_log_ts = 0.0;
+                    const bool same_frame_rebuild = !reason_new_frame;
+                    if (same_frame_rebuild || (current_time - last_latency_log_ts) > 0.5) {
+                        debug::print(
+                            same_frame_rebuild ? debug::PrintMode::INFO : debug::PrintMode::DEBUG,
+                            "AutoAimFireControl",
+                            "[LAT-REBUILD] frame={} cached_frame={} same_frame={} "
+                            "reasons[nc={} nf={} tid={} aid={} pts={}] "
+                            "target {}->{} armor {}->{} pred_ts {:.6f}->{:.6f}",
+                            snapshot.frame_id,
+                            cached_latency_frame_id,
+                            same_frame_rebuild ? 1 : 0,
+                            reason_no_cache ? 1 : 0,
+                            reason_new_frame ? 1 : 0,
+                            reason_target ? 1 : 0,
+                            reason_armor ? 1 : 0,
+                            reason_predict_ts ? 1 : 0,
+                            cached_latency_target_id,
+                            latency_target_id,
+                            cached_latency_armor_idx,
+                            latency_armor_idx,
+                            cached_latency_predict_ts,
+                            snapshot.predict_timestamp
+                        );
+                        last_latency_log_ts = current_time;
+                    }
+                }
+
                 latency = build_latency(
                     latency_estimator, snapshot, latency_target_id, latency_armor_idx
                 );
@@ -305,6 +392,7 @@ void fire_control_run(const std::string& /* config_path */) {
                 finalize_latency(
                     latency,
                     snapshot,
+                    current_time,
                     latency_target_id,
                     latency_armor_idx,
                     &controller.gimbal_state()
@@ -509,6 +597,122 @@ void fire_control_run(const std::string& /* config_path */) {
                 }
             }
             fire_debug->get() = dbg;
+        }
+
+        // 轻量调试日志:
+        // - 周期性快照（低频）
+        // - 选板切换/失败阶段切换
+        // - 橙黄点角度突变（对应可视化“乱飘”）
+        if (get_param_or("AutoAim.FireControl.Debug.enable", false)
+            && mode == aimer::AimMode::AUTOAIM) {
+            const auto& aim = controller.last_aim();
+            const auto& armor_aim = controller.last_armor_aim();
+            const auto& gate = controller.last_gate_debug();
+            const auto fail_stage = controller.last_fail_stage();
+            const double log_period = std::max(
+                0.1, get_param_or("AutoAim.FireControl.Debug.period_s", 0.5)
+            );
+            const double jump_thresh = aimer::math::deg2rad(
+                get_param_or("AutoAim.FireControl.Debug.jump_deg", 8.0)
+            );
+
+            bool target_switch = has_last_cmd
+                && ((cmd.target_id != last_log_target_id)
+                    || (armor_aim.armor_idx != last_log_armor_idx));
+            bool fail_stage_switch = (fail_stage != last_fail_stage);
+            bool periodic = (current_time - last_fc_log_ts) >= log_period;
+
+            double cmd_jump_yaw = 0.0;
+            double cmd_jump_pitch = 0.0;
+            double aim_jump_yaw = 0.0;
+            double aim_jump_pitch = 0.0;
+            if (has_last_cmd) {
+                cmd_jump_yaw = std::abs(aimer::math::angle_diff(cmd.yaw, last_cmd_yaw));
+                cmd_jump_pitch = std::abs(cmd.pitch - last_cmd_pitch);
+                aim_jump_yaw = std::abs(aimer::math::angle_diff(aim.yaw, last_aim_yaw));
+                aim_jump_pitch = std::abs(aim.pitch - last_aim_pitch);
+            }
+
+            const bool jump_event = has_last_cmd
+                && (cmd_jump_yaw > jump_thresh
+                    || cmd_jump_pitch > jump_thresh
+                    || aim_jump_yaw > jump_thresh
+                    || aim_jump_pitch > jump_thresh);
+
+            if (periodic || target_switch || fail_stage_switch || jump_event) {
+                std::string visible = "N/A";
+                if (snapshot.is_valid(cmd.target_id)
+                    && armor_aim.armor_idx >= 0
+                    && armor_aim.armor_idx < snapshot.vehicles[cmd.target_id].armor_count) {
+                    visible = snapshot.vehicles[cmd.target_id].armors[armor_aim.armor_idx].visible
+                        ? "Y" : "N";
+                }
+
+                const auto pmode = [](autoaim::fire_control::AimMode m) {
+                    switch (m) {
+                        case autoaim::fire_control::AimMode::DIRECT: return "DIR";
+                        case autoaim::fire_control::AimMode::INDIRECT: return "IND";
+                        default: return "UNK";
+                    }
+                };
+
+                const auto marker = jump_event ? "JUMP" :
+                    (target_switch ? "SWITCH" :
+                    (fail_stage_switch ? "FAIL" : "PERIOD"));
+                const auto level = jump_event
+                    ? debug::PrintMode::WARNING
+                    : (target_switch || fail_stage_switch
+                        ? debug::PrintMode::INFO
+                        : debug::PrintMode::DEBUG);
+
+                debug::print(
+                    level,
+                    "AutoAimFireControl",
+                    "[{}] frame={} tid={} aid={} mode={} vis={} "
+                    "aim=({:.2f},{:.2f}) cmd=({:.2f},{:.2f}) "
+                    "dA=({:.2f},{:.2f}) dC=({:.2f},{:.2f}) "
+                    "pred_dt={:.1f}ms lat={:.1f}ms fail={} fire={} "
+                    "gate=[{}{}{}{}{}{}{}{}] z2v={:.1f}deg ttf={:.1f}ms",
+                    marker,
+                    snapshot.frame_id,
+                    cmd.target_id,
+                    armor_aim.armor_idx,
+                    pmode(armor_aim.mode),
+                    visible,
+                    aimer::math::rad2deg(aim.yaw),
+                    aimer::math::rad2deg(aim.pitch),
+                    aimer::math::rad2deg(cmd.yaw),
+                    aimer::math::rad2deg(cmd.pitch),
+                    aimer::math::rad2deg(aim_jump_yaw),
+                    aimer::math::rad2deg(aim_jump_pitch),
+                    aimer::math::rad2deg(cmd_jump_yaw),
+                    aimer::math::rad2deg(cmd_jump_pitch),
+                    controller.last_prediction_dt() * 1000.0,
+                    latency.prediction_latency() * 1000.0,
+                    ::fire_control::FireDebugInfo::fail_stage_name(fail_stage),
+                    cmd.fire_now ? 1 : 0,
+                    gate.tracking.conf_ok ? "+" : "-",
+                    gate.tracking.angle_ok ? "+" : "-",
+                    gate.tracking.yaw_ok ? "+" : "-",
+                    gate.tracking.pitch_ok ? "+" : "-",
+                    gate.swing_ok ? "+" : "-",
+                    gate.out_ok ? "+" : "-",
+                    gate.allow_fire_ok ? "+" : "-",
+                    controller.last_rotate_back_ok() ? "+" : "-",
+                    aimer::math::rad2deg(armor_aim.z_to_v),
+                    armor_aim.time_to_fire * 1000.0
+                );
+                last_fc_log_ts = current_time;
+            }
+
+            has_last_cmd = true;
+            last_log_target_id = cmd.target_id;
+            last_log_armor_idx = armor_aim.armor_idx;
+            last_cmd_yaw = cmd.yaw;
+            last_cmd_pitch = cmd.pitch;
+            last_aim_yaw = aim.yaw;
+            last_aim_pitch = aim.pitch;
+            last_fail_stage = fail_stage;
         }
 
         // 遥测数据

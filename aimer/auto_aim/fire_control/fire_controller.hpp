@@ -88,6 +88,7 @@ public:
     const FireGateDebug& last_gate_debug() const { return last_gate_debug_; }
     int last_fail_stage() const { return last_fail_stage_; }
     double last_prediction_dt() const { return last_prediction_dt_; }
+    int last_armor_id() const { return last_armor_id_; }
     bool last_rotate_back_ok() const { return last_rotate_back_ok_; }
     bool last_rotate_back_active() const { return last_rotate_back_active_; }
     double last_rotate_back_start() const { return last_rotate_back_start_; }
@@ -146,6 +147,7 @@ private:
     int last_no_target_frame_id_ = -1;
     double last_target_confidence_ = 0.0;
     bool has_cached_solution_ = false;
+    int last_armor_id_ = -1;  // 上一次选中装甲板的绝对 id
 
     int lost_count_ = 0;  // 按“新图像帧”计数，不按 500Hz 控制周期计数
     int last_fail_stage_ = 0;

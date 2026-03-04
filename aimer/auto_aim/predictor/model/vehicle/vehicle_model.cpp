@@ -437,12 +437,18 @@ VehicleState VehicleModel::predict(double timestamp) const {
         double theta = motion_->get_theta();
         double omega = spin_.omega;
         int tracked_id = motion_->get_tracked_id();
+        if (armor_num > 0) {
+            tracked_id = ((tracked_id % armor_num) + armor_num) % armor_num;
+        }
         const bool fresh_visible = dt <= get_armor_credit_time();
 
         for (int i = 0; i < armor_num; ++i) {
             auto& as = vs.armors[i];
-            // 统一语义: ArmorState.id 表示当前数组中的装甲板索引
-            as.id = i;
+            // MotionInterface 约定: i 是“相对 tracked 的索引”。
+            // 输出到 VehicleState 时改成“绝对装甲板 id”，避免跨帧 tracked_id 修正后
+            // i 语义漂移导致 fire-control 的跨帧偏好失效。
+            int abs_id = (tracked_id + i) % armor_num;
+            as.id = abs_id;
 
             as.position = motion_->predict_armor_pos(i, dt);
             Eigen::Vector3d offset = as.position - vs.center;
@@ -468,7 +474,7 @@ VehicleState VehicleModel::predict(double timestamp) const {
 
             // 可见性: 必须在“新鲜观测窗口”内，防止纯预测板长期被当作可见
             as.visible = fresh_visible &&
-                         ((i == tracked_id) ||
+                         ((i == 0) ||
                           (prev_armors_.size() >= 2 && as.score > 0.5));
 
             if (as.score > local_best_score) {
