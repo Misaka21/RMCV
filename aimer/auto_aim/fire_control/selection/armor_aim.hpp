@@ -6,7 +6,8 @@
  * - 非陀螺: direct-center（可见板）
  * - 陀螺:
  *   top0: direct(窗口内)；无 direct 则 idle
- *   top1/top2: direct(窗口内) -> indirect(等待板进入窗口)
+ *   top1: direct(窗口内，且仅可见)；无 direct 则 idle
+ *   top2: direct(窗口内，且仅可见) -> indirect(等待板进入窗口)
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__
@@ -38,6 +39,7 @@ struct ArmorAimResult {
 
     AimMode mode = AimMode::DIRECT;
     int armor_idx = -1;                 // 目标装甲板索引
+    int armor_id = -1;                  // 目标装甲板绝对 id（跨帧稳定语义）
 
     Eigen::Vector3d target_pos = Eigen::Vector3d::Zero();  // 瞄准位置
     Eigen::Vector3d target_vel = Eigen::Vector3d::Zero();  // 目标速度 (用于速度前馈)
@@ -79,7 +81,7 @@ public:
      * @param vehicle 目标车辆状态
      * @param predict_dt 预测时间
      * @param gimbal 当前云台状态（用于最小转动代价）
-     * @param preferred_armor_idx 兼容入参（当前不作为直接决策因子）
+     * @param preferred_armor_idx 上一帧偏好索引（用于切板迟滞）
      */
     ArmorAimResult compute(
         const predictor::VehicleState& vehicle,

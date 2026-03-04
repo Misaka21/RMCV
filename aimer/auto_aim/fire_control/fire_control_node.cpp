@@ -507,6 +507,7 @@ void fire_control_run(const std::string& /* config_path */) {
                 dbg.fire_now = cmd.fire_now;
                 dbg.target_id = cmd.target_id;
                 dbg.armor_idx = armor_aim.armor_idx;
+                dbg.armor_id = armor_aim.armor_id;
                 dbg.target_pos = armor_aim.target_pos;
                 dbg.armor_aim_mode = static_cast<int>(armor_aim.mode);
                 dbg.armor_time_to_fire = armor_aim.time_to_fire;
@@ -584,9 +585,10 @@ void fire_control_run(const std::string& /* config_path */) {
                             dbg.orientation_window_deg = top0_window_deg;
                             break;
                     }
-                    // top1/top2 中窗口角可以为 0（仅正对 direct，主要靠 indirect），
-                    // 因此 "window_on" 语义为“窗口判定参与决策”，不要求角度>0。
-                    dbg.orientation_window_on = v.spin.active;
+                    // 与 ArmorAim::compute_spin 对齐:
+                    // max_orientation_angle<=0 时表示“只喵中心，不做窗口判定”。
+                    dbg.orientation_window_on =
+                        v.spin.active && std::abs(dbg.orientation_window_deg) > 1e-6;
 
                     if (armor_aim.armor_idx >= 0 && armor_aim.armor_idx < v.armor_count) {
                         const auto& armor = v.armors[armor_aim.armor_idx];
@@ -668,7 +670,7 @@ void fire_control_run(const std::string& /* config_path */) {
                 debug::print(
                     level,
                     "AutoAimFireControl",
-                    "[{}] frame={} tid={} aid={} mode={} vis={} "
+                    "[{}] frame={} tid={} aid={}/id:{} mode={} vis={} "
                     "aim=({:.2f},{:.2f}) cmd=({:.2f},{:.2f}) "
                     "dA=({:.2f},{:.2f}) dC=({:.2f},{:.2f}) "
                     "pred_dt={:.1f}ms lat={:.1f}ms fail={} fire={} "
@@ -677,6 +679,7 @@ void fire_control_run(const std::string& /* config_path */) {
                     snapshot.frame_id,
                     cmd.target_id,
                     armor_aim.armor_idx,
+                    armor_aim.armor_id,
                     pmode(armor_aim.mode),
                     visible,
                     aimer::math::rad2deg(aim.yaw),

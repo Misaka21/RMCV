@@ -182,11 +182,11 @@ static void draw_fire_debug_panel(
     cv::Scalar stage_color = (dbg.fail_stage == 9) ? cv::Scalar(0, 255, 0)
                            : (dbg.fail_stage == 0) ? cv::Scalar(150, 150, 150)
                                                    : cv::Scalar(0, 128, 255);
-    put(fmt::format("Stage: {} | ctrl:{} fire:{} | Tgt:{} Arm:{}",
+    put(fmt::format("Stage: {} | ctrl:{} fire:{} | Tgt:{} Arm:{}(id:{})",
         FireDebugInfo::fail_stage_name(dbg.fail_stage),
         dbg.control_enabled ? "ON" : "OFF",
         dbg.fire_now ? "NOW" : "HOLD",
-        dbg.target_id, dbg.armor_idx), stage_color);
+        dbg.target_id, dbg.armor_idx, dbg.armor_id), stage_color);
 
     // 3. Bullet speed + snapshot info
     put(fmt::format("BS: {:.1f}m/s | valid: 0x{:03x} pri: {} frm: {}",
@@ -447,8 +447,9 @@ static void draw_selected_target_panel(
     const char* spin_label = "NONE";
     if (v.spin.level == SpinLevel::LOW) spin_label = "LOW";
     else if (v.spin.level == SpinLevel::HIGH) spin_label = "HIGH";
-    put(fmt::format("Selected T{}  pri={}  arm_sel={}  conf={:.2f}",
-        tid, snapshot.primary_target_id, dbg.armor_idx, v.confidence), cv::Scalar(0, 255, 255));
+    put(fmt::format("Selected T{}  pri={}  arm_sel={}(id:{})  conf={:.2f}",
+        tid, snapshot.primary_target_id, dbg.armor_idx, dbg.armor_id, v.confidence),
+        cv::Scalar(0, 255, 255));
     put(fmt::format("AimMode={}  pred_dt={:.1f}ms  t_fire={:.1f}ms",
         armor_aim_mode_name(dbg.armor_aim_mode), pred_dt * 1000.0, dbg.armor_time_to_fire * 1000.0),
         cv::Scalar(100, 220, 255));
@@ -472,8 +473,9 @@ static void draw_selected_target_panel(
         cv::Scalar color = selected ? cv::Scalar(0, 80, 255)
                        : (a.visible ? cv::Scalar(120, 220, 120)
                                     : cv::Scalar(150, 150, 150));
-        put(fmt::format("A{}: {}{}{}  z={:+5.1f}deg  c={:5.1f}deg  s={:.2f}  d={:.2f}m",
+        put(fmt::format("A{}(id={}): {}{}{}  z={:+5.1f}deg  c={:5.1f}deg  s={:.2f}  d={:.2f}m",
             i,
+            a.id,
             selected ? "*" : " ",
             a.visible ? "V" : "-",
             in_window ? "W" : "-",
@@ -681,8 +683,8 @@ static void draw_target_geometry_markers(
         int radius = selected ? 9 : 6;
         cv::circle(vis, px, radius, color, 2, cv::LINE_AA);
         cv::putText(vis,
-            fmt::format("A{}{} z{:+.0f}",
-                i, armor.visible ? "V" : "-",
+            fmt::format("A{}(id={}){} z{:+.0f}",
+                i, armor.id, armor.visible ? "V" : "-",
                 predicted_armor_z_to_v(v, i, pred_dt) * 57.3),
             px + cv::Point2f(8, -6),
             cv::FONT_HERSHEY_SIMPLEX, 0.35, color, 1, cv::LINE_AA);

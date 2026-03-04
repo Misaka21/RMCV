@@ -579,7 +579,9 @@ FireCommand FireController::control(
             preferred_armor_idx
         );
         last_armor_aim_ = armor_result;
-        if (armor_result.armor_idx >= 0 && armor_result.armor_idx < vehicle.armor_count) {
+        if (armor_result.armor_id >= 0) {
+            last_armor_id_ = armor_result.armor_id;
+        } else if (armor_result.armor_idx >= 0 && armor_result.armor_idx < vehicle.armor_count) {
             last_armor_id_ = vehicle.armors[armor_result.armor_idx].id;
         } else {
             last_armor_id_ = -1;
@@ -634,7 +636,9 @@ FireCommand FireController::control(
     last_solution_frame_id_ = snapshot.frame_id;
     last_target_confidence_ = vehicle.confidence;
     has_cached_solution_ = true;
-    if (armor_result.armor_idx >= 0 && armor_result.armor_idx < vehicle.armor_count) {
+    if (armor_result.armor_id >= 0) {
+        last_armor_id_ = armor_result.armor_id;
+    } else if (armor_result.armor_idx >= 0 && armor_result.armor_idx < vehicle.armor_count) {
         last_armor_id_ = vehicle.armors[armor_result.armor_idx].id;
     }
     bool can_fire = evaluate_fire_window(

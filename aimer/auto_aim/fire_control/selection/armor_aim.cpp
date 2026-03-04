@@ -26,6 +26,7 @@ struct TopAimProfile {
     double max_orientation_angle = 0.0;  // rad
     double max_out_error = 0.0;
     bool allow_indirect = false;
+    bool direct_visible_only = true;
 };
 
 double get_param_or(const std::string& name, double default_value)
@@ -107,17 +108,23 @@ TopAimProfile get_top_aim_profile(const predictor::VehicleState& vehicle) {
             profile.max_orientation_angle = aimer::math::deg2rad(top2_deg);
             profile.max_out_error = std::max(0.0, top2_out);
             profile.allow_indirect = true;
+            // 高速陀螺：DIRECT 只在可见板上工作，窗口外靠 INDIRECT 等待。
+            profile.direct_visible_only = true;
             break;
         case predictor::SpinLevel::LOW:
             profile.max_orientation_angle = aimer::math::deg2rad(top1_deg);
             profile.max_out_error = std::max(0.0, top1_out);
-            profile.allow_indirect = true;
+            // 小陀螺：仅在窗口内直接打击，不走 indirect 预等待。
+            // 这样击打区间严格受 [-orientation, +orientation] 约束。
+            profile.allow_indirect = false;
+            profile.direct_visible_only = true;
             break;
         case predictor::SpinLevel::NONE:
         default:
             profile.max_orientation_angle = aimer::math::deg2rad(top0_deg);
             profile.max_out_error = std::max(0.0, top0_out);
             profile.allow_indirect = false;
+            profile.direct_visible_only = true;
             break;
     }
     return profile;
@@ -189,17 +196,29 @@ ArmorAimResult ArmorAim::compute_spin(
     int preferred_armor_idx
 ) const
 {
-    // 对齐 rm.cv.fans lmtd-top-model:
+    // 策略：
     // top0: direct-only
-    // top1/top2: direct -> indirect
+    // top1: direct-only（窗口内，仅可见）
+    // top2: direct -> indirect
     const TopAimProfile profile = get_top_aim_profile(vehicle);
 
-    // 先 direct（窗口内，窗口角可为 0）
+    // 用户策略约束：窗口角为 0 时，无论陀螺等级，直接喵中心，不做窗口/indirect。
+    if (profile.max_orientation_angle <= 1e-6) {
+        return compute_direct(
+            vehicle, predict_dt, gimbal, preferred_armor_idx,
+            /*use_orientation_window=*/false,
+            /*max_orientation_angle=*/0.0,
+            /*visible_only=*/true,
+            /*strict_orientation_window=*/false
+        );
+    }
+
+    // 先 direct（窗口内）
     ArmorAimResult direct = compute_direct(
         vehicle, predict_dt, gimbal, preferred_armor_idx,
         /*use_orientation_window=*/true,
         profile.max_orientation_angle,
-        /*visible_only=*/false,
+        /*visible_only=*/profile.direct_visible_only,
         /*strict_orientation_window=*/true
     );
     if (direct.valid) {
@@ -283,6 +302,7 @@ ArmorAimResult ArmorAim::compute_direct(
     result.valid = true;
     result.mode = AimMode::DIRECT;
     result.armor_idx = armor_idx;
+    result.armor_id = armor.id;
     result.target_pos = vehicle.predict_armor_position(armor_idx, predict_dt);
     result.target_vel = compute_armor_velocity(vehicle, armor_idx, predict_dt);
     result.z_to_v = predicted_z_to_v(vehicle, armor_idx, predict_dt);
@@ -326,11 +346,6 @@ ArmorAimResult ArmorAim::compute_indirect(
     double best_armor_to_lim = 0.0;
     double best_radius = 0.0;
     double best_z_plus = 0.0;
-    int best_nonneg_idx = -1;
-    double closest_nonneg_to_lim = std::numeric_limits<double>::infinity();
-    double best_nonneg_armor_to_lim = 0.0;
-    double best_nonneg_radius = 0.0;
-    double best_nonneg_z_plus = 0.0;
     bool preferred_found = false;
     double preferred_armor_to_lim = std::numeric_limits<double>::infinity();
     double preferred_radius = 0.0;
@@ -373,7 +388,7 @@ ArmorAimResult ArmorAim::compute_indirect(
             radius
         });
 
-        if (i == preferred_armor_idx) {
+        if (i == preferred_armor_idx && std::isfinite(armor_to_lim)) {
             preferred_found = true;
             preferred_armor_to_lim = armor_to_lim;
             preferred_radius = radius;
@@ -387,41 +402,24 @@ ArmorAimResult ArmorAim::compute_indirect(
             best_radius = radius;
             best_z_plus = offset.z();
         }
-        if (armor_to_lim >= 0.0 && armor_to_lim < closest_nonneg_to_lim) {
-            closest_nonneg_to_lim = armor_to_lim;
-            best_nonneg_idx = i;
-            best_nonneg_armor_to_lim = armor_to_lim;
-            best_nonneg_radius = radius;
-            best_nonneg_z_plus = offset.z();
-        }
     }
 
-    if (best_nonneg_idx >= 0 && std::isfinite(best_nonneg_armor_to_lim)) {
-        best_idx = best_nonneg_idx;
-        best_armor_to_lim = best_nonneg_armor_to_lim;
-        best_radius = best_nonneg_radius;
-        best_z_plus = best_nonneg_z_plus;
-    }
-
-    // 切板迟滞: 仅当“新候选显著更早进入窗口”时才切换，
-    // 否则保持 preferred_armor_idx，避免超快小陀螺下 0/1 往返抖动。
+    // 间接模式切板迟滞：当前偏好板也可用时，除非新候选显著更早进入窗口，否则保持。
     if (preferred_found
         && preferred_armor_idx >= 0
         && preferred_armor_idx < armor_count
-        && preferred_armor_to_lim >= 0.0
-        && std::isfinite(preferred_armor_to_lim)
         && best_idx >= 0
-        && best_idx != preferred_armor_idx)
+        && best_idx != preferred_armor_idx
+        && std::isfinite(preferred_armor_to_lim)
+        && std::isfinite(best_armor_to_lim))
     {
-        const double switch_hysteresis_deg = std::max(
-            0.0,
-            get_param_or("AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 25.0)
+        const double switch_hys_deg = get_param_or(
+            "AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 18.0
         );
-        const double switch_hysteresis_rad = aimer::math::deg2rad(switch_hysteresis_deg);
-
-        // 新候选必须比当前候选“至少早 hysteresis 角度”才允许切换
-        const bool allow_switch = (best_armor_to_lim + switch_hysteresis_rad) < preferred_armor_to_lim;
-        if (!allow_switch) {
+        const double switch_hys = std::max(0.0, aimer::math::deg2rad(switch_hys_deg));
+        const bool switch_not_significant =
+            best_armor_to_lim + switch_hys >= preferred_armor_to_lim;
+        if (switch_not_significant) {
             best_idx = preferred_armor_idx;
             best_armor_to_lim = preferred_armor_to_lim;
             best_radius = preferred_radius;
@@ -445,6 +443,7 @@ ArmorAimResult ArmorAim::compute_indirect(
 
     result.valid = true;
     result.armor_idx = best_idx;
+    result.armor_id = vehicle.armors[best_idx].id;
     result.target_pos = emerge_pos;
     // 与 rm.cv.fans 一致：返回被选中装甲板在当前时刻的 z_to_v，
     // 后续开火门控会基于各自时刻再次计算。
@@ -515,7 +514,6 @@ int ArmorAim::choose_best_direct(
     if (direct_indices.empty()) {
         return -1;
     }
-    (void)preferred_armor_idx;
 
     auto score_idx = [&](int idx) {
         if (gimbal != nullptr) {
@@ -534,6 +532,22 @@ int ArmorAim::choose_best_direct(
         if (score < best_score) {
             best_score = score;
             best_idx = idx;
+        }
+    }
+
+    // 切板迟滞：上一帧板子仍在候选内且与当前最优差距不大时，继续保持。
+    // 语义对齐 rm.cv.fans “先保持追踪，再在优势明显时切换”。
+    const double switch_hys_deg = get_param_or(
+        "AutoAim.FireControl.PID.switch_armor_hysteresis_deg", 3.0
+    );
+    const double switch_hys = std::max(0.0, aimer::math::deg2rad(switch_hys_deg));
+    if (preferred_armor_idx >= 0
+        && preferred_armor_idx < vehicle.armor_count
+        && std::find(direct_indices.begin(), direct_indices.end(), preferred_armor_idx) != direct_indices.end())
+    {
+        const double preferred_score = score_idx(preferred_armor_idx);
+        if (preferred_score <= best_score + switch_hys) {
+            return preferred_armor_idx;
         }
     }
 

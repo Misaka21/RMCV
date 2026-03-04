@@ -9,18 +9,28 @@
 #include <cmath>
 #include <map>
 #include <numeric>
+#include <string>
 #include <opencv2/imgproc.hpp>
 
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
-#include <fmt/format.h>
-#include <fmt/color.h>
+#include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
 
 // 重投影误差权重 (z_to_v 越小越相信角度，越大越相信像素距离)
 constexpr double DETECTOR_ERROR_PIXEL_BY_SLOPE = 2.0;
+
+bool get_param_or(const std::string& name, bool default_value) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<bool>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
 
 // 比赛规则: 各车型装甲板俯仰角 (弧度)
 // 索引对应 ArmorNumber 枚举值 (0-8)
@@ -119,10 +129,19 @@ void ArmorObserver::merge_same_vehicle_ids(std::vector<ArmorObservation>& observ
             // 通过所有几何检查 → 同一辆车，选择更可靠的 ID
             int merged_id = pick_reliable_id(obs_i, obs_j);
 
-            fmt::print(fmt::fg(fmt::color::yellow),
-                "[ArmorObserver] 同车ID纠正: T{} + T{} -> T{} (dist={:.2f}m, yaw_diff={:.1f}deg, center_dist={:.2f}m)\n",
-                obs_i.target_id, obs_j.target_id, merged_id,
-                dist, yaw_diff * 180.0 / M_PI, center_dist);
+            if (get_param_or("AutoAim.Predictor.Debug.id_correction", false)) {
+                debug::print(
+                    debug::PrintMode::DEBUG,
+                    "ArmorObserver",
+                    "同车ID纠正: T{} + T{} -> T{} (dist={:.2f}m, yaw_diff={:.1f}deg, center_dist={:.2f}m)",
+                    obs_i.target_id,
+                    obs_j.target_id,
+                    merged_id,
+                    dist,
+                    yaw_diff * 180.0 / M_PI,
+                    center_dist
+                );
+            }
 
             obs_i.target_id = merged_id;
             obs_j.target_id = merged_id;
@@ -169,9 +188,16 @@ void ArmorObserver::merge_same_vehicle_ids(std::vector<ArmorObservation>& observ
         }
 
         if (best_id > 0) {
-            fmt::print(fmt::fg(fmt::color::yellow),
-                "[ArmorObserver] 单板ID纠正: T{} -> T{} (pos_dist={:.3f}m)\n",
-                obs.target_id, best_id, best_dist);
+            if (get_param_or("AutoAim.Predictor.Debug.id_correction", false)) {
+                debug::print(
+                    debug::PrintMode::DEBUG,
+                    "ArmorObserver",
+                    "单板ID纠正: T{} -> T{} (pos_dist={:.3f}m)",
+                    obs.target_id,
+                    best_id,
+                    best_dist
+                );
+            }
 
             obs.target_id = best_id;
             // 该目标已恢复，不再视为缺失

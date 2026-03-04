@@ -224,8 +224,15 @@ bool TargetSelector::can_track_without_visible(
     if (!vehicle.spin.active) {
         return false;
     }
-    // 对齐 rm.cv.fans: top1/top2 允许在“无可见板”时保持追踪，供 indirect 路径工作。
-    return vehicle.spin.level != predictor::SpinLevel::NONE;
+    // 无可见板保持追踪仅在高速陀螺且开启窗口间接路径时启用。
+    // 当窗口角设为 0（直接喵中心）时，不应继续无可见板追踪。
+    if (vehicle.spin.level != predictor::SpinLevel::HIGH) {
+        return false;
+    }
+    const double top2_window_deg = get_param_or(
+        "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
+    );
+    return std::abs(top2_window_deg) > 1e-6;
 }
 
 bool TargetSelector::is_trackable_target(

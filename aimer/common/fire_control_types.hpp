@@ -209,6 +209,7 @@ struct FireDebugInfo {
     bool fire_now = false;
     int target_id = -1;
     int armor_idx = -1;
+    int armor_id = -1;                 // 绝对装甲板 id（跨帧稳定）
 
     Eigen::Vector3d target_pos = Eigen::Vector3d::Zero();  // 装甲板瞄准位置 (世界坐标)
 
