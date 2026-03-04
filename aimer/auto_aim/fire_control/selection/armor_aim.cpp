@@ -108,16 +108,15 @@ TopAimProfile get_top_aim_profile(const predictor::VehicleState& vehicle) {
             profile.max_orientation_angle = aimer::math::deg2rad(top2_deg);
             profile.max_out_error = std::max(0.0, top2_out);
             profile.allow_indirect = true;
-            // 高速陀螺：DIRECT 只在可见板上工作，窗口外靠 INDIRECT 等待。
-            profile.direct_visible_only = true;
+            // 对齐 rm.cv.fans: spin 场景 direct 在预测状态空间选板，不强依赖可见性。
+            profile.direct_visible_only = false;
             break;
         case predictor::SpinLevel::LOW:
             profile.max_orientation_angle = aimer::math::deg2rad(top1_deg);
             profile.max_out_error = std::max(0.0, top1_out);
-            // 小陀螺：仅在窗口内直接打击，不走 indirect 预等待。
-            // 这样击打区间严格受 [-orientation, +orientation] 约束。
-            profile.allow_indirect = false;
-            profile.direct_visible_only = true;
+            // 对齐 rm.cv.fans (top1): direct 失败后允许 indirect 等待进入窗口。
+            profile.allow_indirect = true;
+            profile.direct_visible_only = false;
             break;
         case predictor::SpinLevel::NONE:
         default:
@@ -196,10 +195,9 @@ ArmorAimResult ArmorAim::compute_spin(
     int preferred_armor_idx
 ) const
 {
-    // 策略：
+    // 策略（对齐 rm.cv.fans）：
     // top0: direct-only
-    // top1: direct-only（窗口内，仅可见）
-    // top2: direct -> indirect
+    // top1/top2: direct -> indirect
     const TopAimProfile profile = get_top_aim_profile(vehicle);
 
     // 用户策略约束：窗口角为 0 时，无论陀螺等级，直接喵中心，不做窗口/indirect。

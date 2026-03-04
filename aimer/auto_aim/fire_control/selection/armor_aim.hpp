@@ -6,8 +6,8 @@
  * - 非陀螺: direct-center（可见板）
  * - 陀螺:
  *   top0: direct(窗口内)；无 direct 则 idle
- *   top1: direct(窗口内，且仅可见)；无 direct 则 idle
- *   top2: direct(窗口内，且仅可见) -> indirect(等待板进入窗口)
+ *   top1: direct(窗口内) -> indirect(等待板进入窗口)
+ *   top2: direct(窗口内) -> indirect(等待板进入窗口)
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__
