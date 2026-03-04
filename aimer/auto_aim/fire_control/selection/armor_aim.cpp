@@ -331,6 +331,10 @@ ArmorAimResult ArmorAim::compute_indirect(
     double best_nonneg_armor_to_lim = 0.0;
     double best_nonneg_radius = 0.0;
     double best_nonneg_z_plus = 0.0;
+    bool preferred_found = false;
+    double preferred_armor_to_lim = std::numeric_limits<double>::infinity();
+    double preferred_radius = 0.0;
+    double preferred_z_plus = 0.0;
 
     struct CandidateDiag {
         int idx = -1;
@@ -369,6 +373,13 @@ ArmorAimResult ArmorAim::compute_indirect(
             radius
         });
 
+        if (i == preferred_armor_idx) {
+            preferred_found = true;
+            preferred_armor_to_lim = armor_to_lim;
+            preferred_radius = radius;
+            preferred_z_plus = offset.z();
+        }
+
         if (armor_to_lim < closest_to_lim) {
             closest_to_lim = armor_to_lim;
             best_idx = i;
@@ -390,6 +401,32 @@ ArmorAimResult ArmorAim::compute_indirect(
         best_armor_to_lim = best_nonneg_armor_to_lim;
         best_radius = best_nonneg_radius;
         best_z_plus = best_nonneg_z_plus;
+    }
+
+    // 切板迟滞: 仅当“新候选显著更早进入窗口”时才切换，
+    // 否则保持 preferred_armor_idx，避免超快小陀螺下 0/1 往返抖动。
+    if (preferred_found
+        && preferred_armor_idx >= 0
+        && preferred_armor_idx < armor_count
+        && preferred_armor_to_lim >= 0.0
+        && std::isfinite(preferred_armor_to_lim)
+        && best_idx >= 0
+        && best_idx != preferred_armor_idx)
+    {
+        const double switch_hysteresis_deg = std::max(
+            0.0,
+            get_param_or("AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 25.0)
+        );
+        const double switch_hysteresis_rad = aimer::math::deg2rad(switch_hysteresis_deg);
+
+        // 新候选必须比当前候选“至少早 hysteresis 角度”才允许切换
+        const bool allow_switch = (best_armor_to_lim + switch_hysteresis_rad) < preferred_armor_to_lim;
+        if (!allow_switch) {
+            best_idx = preferred_armor_idx;
+            best_armor_to_lim = preferred_armor_to_lim;
+            best_radius = preferred_radius;
+            best_z_plus = preferred_z_plus;
+        }
     }
 
     if (best_idx < 0 || !std::isfinite(best_armor_to_lim)) {
