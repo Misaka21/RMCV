@@ -68,6 +68,13 @@ static cv::Point2f angle_to_pixel(
     return aimer::tf::world_to_pixel(p_world, q_imu, valid);
 }
 
+static double camera_intrinsic_at(const cv::Mat& K, int r, int c) {
+    if (K.type() == CV_32F || K.type() == CV_32FC1) {
+        return static_cast<double>(K.at<float>(r, c));
+    }
+    return K.at<double>(r, c);
+}
+
 /**
  * @brief 拷贝到可复用缓冲区，避免每帧 clone 触发重复分配
  */
@@ -213,6 +220,8 @@ static void draw_fire_debug_panel(
     // 7. Aim / Cmd 角度
     put(fmt::format("Aim:  y={:+.2f} p={:+.2f} deg",
         dbg.aim_yaw * 57.3, dbg.aim_pitch * 57.3), {0, 165, 255});  // 橙色
+    put(fmt::format("AimV: y={:+.1f} p={:+.1f} deg/s",
+        dbg.aim_yaw_vel * 57.3, dbg.aim_pitch_vel * 57.3), {60, 190, 255});
     put(fmt::format("Cmd:  y={:+.2f} p={:+.2f} deg",
         dbg.cmd_yaw * 57.3, dbg.cmd_pitch * 57.3), {0, 255, 255});  // 黄色
 
@@ -503,8 +512,12 @@ static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot
  * 红色箭头:   目标速度方向 (从瞄准点出发)
  * 红色文字:   FIRE 状态
  */
-static void draw_pixel_markers(cv::Mat& vis, const FireDebugInfo& dbg,
-                                const Eigen::Quaterniond& q_imu) {
+static void draw_pixel_markers(
+    cv::Mat& vis,
+    const FireDebugInfo& dbg,
+    const Eigen::Quaterniond& q_imu,
+    bool frame_aligned
+) {
     int cx = vis.cols / 2;
     int cy = vis.rows / 2;
 
@@ -513,10 +526,24 @@ static void draw_pixel_markers(cv::Mat& vis, const FireDebugInfo& dbg,
 
     // 绿色空心圆: 相机光轴 (内参主点, 固定位置)
     const cv::Mat& K = aimer::tf::get_camera_matrix();
-    if (!K.empty()) {
-        int opt_cx = static_cast<int>(K.at<double>(0, 2));
-        int opt_cy = static_cast<int>(K.at<double>(1, 2));
+    if (!K.empty() && K.rows >= 3 && K.cols >= 3) {
+        int opt_cx = static_cast<int>(camera_intrinsic_at(K, 0, 2));
+        int opt_cy = static_cast<int>(camera_intrinsic_at(K, 1, 2));
         cv::circle(vis, cv::Point(opt_cx, opt_cy), 6, cv::Scalar(0, 180, 0), 3, cv::LINE_AA);
+    }
+
+    if (!frame_aligned) {
+        cv::putText(
+            vis,
+            "WARN: FC/Predictor frame mismatch",
+            {20, std::max(30, vis.rows - 20)},
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.5,
+            cv::Scalar(0, 0, 255),
+            1,
+            cv::LINE_AA
+        );
+        return;
     }
 
     if (dbg.fail_stage != 9) return;  // 以下仅在瞄准有效时绘制
@@ -708,8 +735,12 @@ void start_visualizer_node() {
                     draw_selected_target_panel(vis, snapshot, dbg);
 
                     if (dbg.fc_heartbeat > 0) {
-                        draw_pixel_markers(vis, dbg, predictor_dbg.q_imu);
-                        draw_target_geometry_markers(vis, snapshot, dbg, predictor_dbg.q_imu);
+                        const bool frame_aligned =
+                            (dbg.snapshot_frame_id >= 0 && dbg.snapshot_frame_id == predictor_dbg.frame_id);
+                        draw_pixel_markers(vis, dbg, predictor_dbg.q_imu, frame_aligned);
+                        if (frame_aligned) {
+                            draw_target_geometry_markers(vis, snapshot, dbg, predictor_dbg.q_imu);
+                        }
                     }
                 }
             }

@@ -12,6 +12,45 @@
 
 namespace autoaim::fire_control {
 
+namespace {
+
+// rm.cv.fans 中 additional-predict-time 的速度项使用“同一时刻目标角速度”。
+// 这里用短时外推 + 二次弹道解算得到局部 aim 角速度，避免跨周期差分抖动。
+constexpr double AIM_RATE_DT = 8e-3;  // 8ms
+
+bool estimate_aim_rate_from_target_vel(
+    const AimResult& aim_now,
+    const ArmorAimResult& armor,
+    double bullet_speed,
+    double& yaw_rate,
+    double& pitch_rate
+) {
+    yaw_rate = 0.0;
+    pitch_rate = 0.0;
+    if (!aim_now.valid || bullet_speed <= 1e-3) {
+        return false;
+    }
+    if (!armor.target_vel.allFinite()) {
+        return false;
+    }
+
+    const Eigen::Vector3d target_pos_next = armor.target_pos + armor.target_vel * AIM_RATE_DT;
+    if (!target_pos_next.allFinite() || target_pos_next.squaredNorm() < 1e-9) {
+        return false;
+    }
+
+    const AimResult aim_next = ::fire_control::trajectory::solve(target_pos_next, bullet_speed);
+    if (!aim_next.valid) {
+        return false;
+    }
+
+    yaw_rate = GimbalState::normalize_angle(aim_next.yaw - aim_now.yaw) / AIM_RATE_DT;
+    pitch_rate = (aim_next.pitch - aim_now.pitch) / AIM_RATE_DT;
+    return std::isfinite(yaw_rate) && std::isfinite(pitch_rate);
+}
+
+}  // namespace
+
 void FireController::reset()
 {
     target_selector_.clear_target();
@@ -27,7 +66,6 @@ void FireController::reset()
     lost_count_ = 0;
     last_fail_stage_ = 0;
     last_time_ = 0.0;
-    last_plan_time_ = 0.0;
 }
 
 bool FireController::evaluate_fire_window(
@@ -147,7 +185,7 @@ FireCommand FireController::control(
     const bool same_target_as_last =
         (prev_target_id >= 0 && selection.target_id == prev_target_id);
     const int preferred_armor_idx =
-        (same_target_as_last && last_armor_aim_.valid) ? last_armor_aim_.armor_idx : -1;
+        (same_target_as_last && prev_armor_idx >= 0) ? prev_armor_idx : -1;
     ArmorAimResult armor_result = armor_aim_.compute(
         vehicle,
         prediction_dt,
@@ -175,19 +213,16 @@ FireCommand FireController::control(
     }
 
     // 7. 构造 GimbalPlan
-    const double plan_dt = (last_plan_time_ > 0) ? (current_time - last_plan_time_) : CONTROL_DT;
+    // 使用“同一时刻目标角速度”估计额外预测项，避免跨控制周期差分导致黄圈抖动。
     double yaw_rate = 0.0;
     double pitch_rate = 0.0;
-    if (last_aim_.valid && plan_dt > 1e-4) {
-        yaw_rate = GimbalState::normalize_angle(aim.yaw - last_aim_.yaw) / plan_dt;
-        pitch_rate = (aim.pitch - last_aim_.pitch) / plan_dt;
-    }
-
-    // 目标或装甲板切换时，角速度差分不再连续，避免额外预测出现尖峰
-    if (selection.target_id != prev_target_id || armor_result.armor_idx != prev_armor_idx) {
-        yaw_rate = 0.0;
-        pitch_rate = 0.0;
-    }
+    estimate_aim_rate_from_target_vel(
+        aim,
+        armor_result,
+        snapshot.self_state.bullet_speed,
+        yaw_rate,
+        pitch_rate
+    );
 
     GimbalPlan plan;
     plan.valid = true;
@@ -197,7 +232,6 @@ FireCommand FireController::control(
     plan.pitch_vel = pitch_rate;
     last_plan_ = plan;
     last_aim_ = aim;
-    last_plan_time_ = current_time;
 
     // 8. 开火判断 (使用 ArmorAimResult 中的装甲板信息)
     last_solution_frame_id_ = snapshot.frame_id;

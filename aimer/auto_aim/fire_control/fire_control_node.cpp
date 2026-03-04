@@ -395,6 +395,7 @@ void fire_control_run(const std::string& /* config_path */) {
             if (mode == aimer::AimMode::AUTOAIM) {
                 const auto& aim = controller.last_aim();
                 const auto& armor_aim = controller.last_armor_aim();
+                const auto& plan = controller.last_plan();
                 const auto& gimbal = controller.gimbal_state();
 
                 dbg.valid = aim.valid;
@@ -409,6 +410,8 @@ void fire_control_run(const std::string& /* config_path */) {
 
                 dbg.aim_yaw = aim.yaw;
                 dbg.aim_pitch = aim.pitch;
+                dbg.aim_yaw_vel = plan.yaw_vel;
+                dbg.aim_pitch_vel = plan.pitch_vel;
                 dbg.cmd_yaw = cmd.yaw;
                 dbg.cmd_pitch = cmd.pitch;
 

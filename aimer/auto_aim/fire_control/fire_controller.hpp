@@ -95,7 +95,6 @@ private:
 
     GimbalState gimbal_state_;
     double last_time_ = 0;
-    double last_plan_time_ = 0;
 
     // ==================== 缓存 ====================
 

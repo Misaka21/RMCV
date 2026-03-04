@@ -215,6 +215,8 @@ struct FireDebugInfo {
     // 世界坐标系绝对角度
     double aim_yaw = 0;               // 期望角 (AimResult, 含弹道补偿)
     double aim_pitch = 0;
+    double aim_yaw_vel = 0;           // 期望角速度 (rad/s, additional_predict_time 前馈项)
+    double aim_pitch_vel = 0;
     double cmd_yaw = 0;               // 发送角 (FireCommand)
     double cmd_pitch = 0;
     double gimbal_yaw = 0;            // 当前云台角
