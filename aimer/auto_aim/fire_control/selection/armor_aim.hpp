@@ -2,11 +2,11 @@
  * @file armor_aim.hpp
  * @brief 装甲板瞄准逻辑 (统一处理陀螺/非陀螺)
  *
- * 当前策略（对齐 rm.cv.fans）:
- * - 非陀螺 / 高速陀螺 / max_orientation_angle<=0: direct-center
- * - 普通陀螺:
- *   1) 先在 [-orientation_angle, +orientation_angle] 做 direct
- *   2) 若窗口内无候选，走 INDIRECT（等待目标板进入窗口）
+ * 当前策略（对齐 rm.cv.fans lmtd-top-model）:
+ * - 非陀螺: direct-center（可见板）
+ * - 陀螺:
+ *   top0: direct(窗口内)；无 direct 则 idle
+ *   top1/top2: direct(窗口内) -> indirect(等待板进入窗口)
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__
@@ -55,9 +55,7 @@ struct ArmorAimResult {
  *
  * 根据目标状态选择执行路径:
  * - 非陀螺: direct-center（可见板）
- * - max_orientation_angle<=0: direct-center（可见板）
- * - 高速陀螺: direct-center（可见板）
- * - 普通陀螺: direct(窗口内, 可包含预测板) -> indirect(等待板出现)
+ * - 陀螺: 按 top0/top1/top2 配置做 direct/indirect 选择
  */
 class ArmorAim {
 public:
@@ -135,7 +133,8 @@ private:
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
-        double max_orientation_angle
+        double max_orientation_angle,
+        double max_out_error
     ) const;
 
     /**

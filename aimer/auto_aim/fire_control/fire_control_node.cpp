@@ -9,6 +9,7 @@
 #include <chrono>
 #include <limits>
 #include <thread>
+#include <variant>
 
 #include "aimer/common/robot_state.hpp"
 #include "aimer/common/latency/latency_estimator.hpp"
@@ -41,6 +42,16 @@ int64_t get_current_time_us() {
     auto now = std::chrono::steady_clock::now();
     return std::chrono::duration_cast<std::chrono::microseconds>(
         now.time_since_epoch()).count();
+}
+
+double get_param_or(const std::string& name, double default_value) {
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
 }
 
 const predictor::VehicleState* choose_latency_target(
@@ -429,14 +440,34 @@ void fire_control_run(const std::string& /* config_path */) {
                     dbg.spin_level = static_cast<int>(v.spin.level);
                     dbg.spin_omega = v.spin.omega;
                     dbg.selected_armor_count = v.armor_count;
-                    const double max_orientation_angle_deg = runtime_param::get_param<double>(
-                        "AutoAim.FireControl.PID.max_orientation_angle"
+                    const double top0_window_deg = (v.armor_count == 4)
+                        ? get_param_or(
+                            "AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888
+                        )
+                        : get_param_or(
+                            "AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0
+                        );
+                    const double top1_window_deg = get_param_or(
+                        "AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0
                     );
-                    dbg.orientation_window_deg = max_orientation_angle_deg;
-                    dbg.orientation_window_on =
-                        v.spin.active
-                        && (v.spin.level != predictor::SpinLevel::HIGH)
-                        && (max_orientation_angle_deg > 0.0);
+                    const double top2_window_deg = get_param_or(
+                        "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
+                    );
+                    switch (v.spin.level) {
+                        case predictor::SpinLevel::HIGH:
+                            dbg.orientation_window_deg = top2_window_deg;
+                            break;
+                        case predictor::SpinLevel::LOW:
+                            dbg.orientation_window_deg = top1_window_deg;
+                            break;
+                        case predictor::SpinLevel::NONE:
+                        default:
+                            dbg.orientation_window_deg = top0_window_deg;
+                            break;
+                    }
+                    // top1/top2 中窗口角可以为 0（仅正对 direct，主要靠 indirect），
+                    // 因此 "window_on" 语义为“窗口判定参与决策”，不要求角度>0。
+                    dbg.orientation_window_on = v.spin.active;
 
                     if (armor_aim.armor_idx >= 0 && armor_aim.armor_idx < v.armor_count) {
                         const auto& armor = v.armors[armor_aim.armor_idx];

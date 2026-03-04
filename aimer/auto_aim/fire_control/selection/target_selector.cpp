@@ -10,7 +10,7 @@
  *
  * 锁定机制:
  *   - 当有目标且可见时，保持当前目标
- *   - 普通陀螺在窗口启用时，允许“无可见板继续跟踪”（供 indirect）
+ *   - top1/top2 陀螺允许“无可见板继续跟踪”（供 indirect）
  *   - 当目标丢失超过 keep_time 后才切换
  */
 
@@ -224,13 +224,8 @@ bool TargetSelector::can_track_without_visible(
     if (!vehicle.spin.active) {
         return false;
     }
-    if (vehicle.spin.level == predictor::SpinLevel::HIGH) {
-        return false;
-    }
-    const double max_orientation_angle_deg = get_param_or(
-        "AutoAim.FireControl.PID.max_orientation_angle", 60.0
-    );
-    return max_orientation_angle_deg > 0.0;
+    // 对齐 rm.cv.fans: top1/top2 允许在“无可见板”时保持追踪，供 indirect 路径工作。
+    return vehicle.spin.level != predictor::SpinLevel::NONE;
 }
 
 bool TargetSelector::is_trackable_target(

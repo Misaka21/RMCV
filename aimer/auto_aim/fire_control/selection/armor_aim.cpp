@@ -16,6 +16,12 @@ namespace autoaim::fire_control {
 
 namespace {
 
+struct TopAimProfile {
+    double max_orientation_angle = 0.0;  // rad
+    double max_out_error = 0.0;
+    bool allow_indirect = false;
+};
+
 double get_param_or(const std::string& name, double default_value)
 {
     auto ptr = runtime_param::find_param(name);
@@ -58,6 +64,40 @@ double predicted_z_to_v(
     const double armor_yaw = armor.yaw + vehicle.spin.omega * predict_dt;
     const double view_yaw = std::atan2(pos.y(), pos.x());
     return aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI);
+}
+
+TopAimProfile get_top_aim_profile(const predictor::VehicleState& vehicle) {
+    const double top0_deg = (vehicle.armor_count == 4)
+        ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
+        : get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0);
+    const double top0_out = get_param_or("AutoAim.FireControl.PID.top0_max_out_error", 1.8);
+
+    const double top1_deg = get_param_or("AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0);
+    const double top1_out = get_param_or("AutoAim.FireControl.PID.top1_max_out_error", 0.6);
+
+    const double top2_deg = get_param_or("AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0);
+    const double top2_out = get_param_or("AutoAim.FireControl.PID.top2_max_out_error", 1.8);
+
+    TopAimProfile profile;
+    switch (vehicle.spin.level) {
+        case predictor::SpinLevel::HIGH:
+            profile.max_orientation_angle = aimer::math::deg_to_rad(top2_deg);
+            profile.max_out_error = std::max(0.0, top2_out);
+            profile.allow_indirect = true;
+            break;
+        case predictor::SpinLevel::LOW:
+            profile.max_orientation_angle = aimer::math::deg_to_rad(top1_deg);
+            profile.max_out_error = std::max(0.0, top1_out);
+            profile.allow_indirect = true;
+            break;
+        case predictor::SpinLevel::NONE:
+        default:
+            profile.max_orientation_angle = aimer::math::deg_to_rad(top0_deg);
+            profile.max_out_error = std::max(0.0, top0_out);
+            profile.allow_indirect = false;
+            break;
+    }
+    return profile;
 }
 
 }  // namespace
@@ -112,32 +152,16 @@ ArmorAimResult ArmorAim::compute_spin(
     int preferred_armor_idx
 ) const
 {
-    // 陀螺:
-    // - max_orientation_angle <= 0: 强制 direct-center
-    // - 高速陀螺: 强制 direct-center
-    // - 普通陀螺: direct(窗口内) -> indirect(待出现点)
-    const double max_orientation_angle = runtime_param::get_param<double>(
-        "AutoAim.FireControl.PID.max_orientation_angle"
-    ) * M_PI / 180.0;
+    // 对齐 rm.cv.fans lmtd-top-model:
+    // top0: direct-only
+    // top1/top2: direct -> indirect
+    const TopAimProfile profile = get_top_aim_profile(vehicle);
 
-    const bool force_direct_center = (max_orientation_angle <= 0.0)
-        || (vehicle.spin.level == predictor::SpinLevel::HIGH);
-
-    if (force_direct_center) {
-        return compute_direct(
-            vehicle, predict_dt, gimbal, preferred_armor_idx,
-            /*use_orientation_window=*/false,
-            /*max_orientation_angle=*/0.0,
-            /*visible_only=*/true,
-            /*strict_orientation_window=*/false
-        );
-    }
-
-    // rm.cv.fans: 先 direct（窗口内）
+    // 先 direct（窗口内，窗口角可为 0）
     ArmorAimResult direct = compute_direct(
         vehicle, predict_dt, gimbal, preferred_armor_idx,
         /*use_orientation_window=*/true,
-        max_orientation_angle,
+        profile.max_orientation_angle,
         /*visible_only=*/false,
         /*strict_orientation_window=*/true
     );
@@ -145,22 +169,22 @@ ArmorAimResult ArmorAim::compute_spin(
         return direct;
     }
 
-    // rm.cv.fans: direct 失败后用 indirect（等待板进入窗口）
-    ArmorAimResult indirect = compute_indirect(
-        vehicle, predict_dt, gimbal, max_orientation_angle
-    );
-    if (indirect.valid) {
-        return indirect;
+    // top1/top2: direct 失败后用 indirect（等待板进入窗口）
+    if (profile.allow_indirect) {
+        ArmorAimResult indirect = compute_indirect(
+            vehicle,
+            predict_dt,
+            gimbal,
+            profile.max_orientation_angle,
+            profile.max_out_error
+        );
+        if (indirect.valid) {
+            return indirect;
+        }
     }
 
-    // 保底：仍无法间接求解时回退到可见 direct-center
-    return compute_direct(
-        vehicle, predict_dt, gimbal, preferred_armor_idx,
-        /*use_orientation_window=*/false,
-        /*max_orientation_angle=*/0.0,
-        /*visible_only=*/true,
-        /*strict_orientation_window=*/false
-    );
+    // 与 rm.cv.fans 对齐：无 direct/indirect 可用时返回无效（上层进入 HOLD）
+    return ArmorAimResult{};
 }
 
 ArmorAimResult ArmorAim::compute_direct(
@@ -189,11 +213,12 @@ ArmorAimResult ArmorAim::compute_direct(
     }
 
     // 窗口过滤：保持与 rm.cv.fans 一致，窗口内无候选时可选择直接失败（用于 indirect 回退）
-    if (use_orientation_window && max_orientation_angle > 0.0) {
+    if (use_orientation_window) {
+        const double window = std::max(0.0, max_orientation_angle);
         std::vector<int> in_window;
         in_window.reserve(candidate_indices.size());
         for (int idx : candidate_indices) {
-            if (std::abs(predicted_z_to_v(vehicle, idx, predict_dt)) <= max_orientation_angle) {
+            if (std::abs(predicted_z_to_v(vehicle, idx, predict_dt)) <= window) {
                 in_window.push_back(idx);
             }
         }
@@ -231,7 +256,8 @@ ArmorAimResult ArmorAim::compute_indirect(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
-    double max_orientation_angle
+    double max_orientation_angle,
+    double max_out_error
 ) const
 {
     ArmorAimResult result;
@@ -247,9 +273,6 @@ ArmorAimResult ArmorAim::compute_indirect(
         return result;
     }
 
-    const double max_out_error = std::max(0.0, get_param_or(
-        "AutoAim.FireControl.PID.max_out_error", 0.2
-    ));
     const double zn_to_lim = (omega > 0.0) ? -max_orientation_angle : +max_orientation_angle;
 
     int best_idx = -1;

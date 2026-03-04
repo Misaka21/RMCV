@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <thread>
+#include <variant>
 
 #include <fmt/format.h>
 #include <opencv2/highgui.hpp>
@@ -368,11 +369,32 @@ static void draw_selected_target_panel(
 
     const auto& v = snapshot.vehicles[tid];
     const double pred_dt = std::max(0.0, dbg.prediction_dt);
-    const double max_angle = runtime_param::get_param<double>(
-        "AutoAim.FireControl.PID.max_orientation_angle"
-    ) * M_PI / 180.0;
-    const bool use_window =
-        v.spin.active && v.spin.level != SpinLevel::HIGH && max_angle > 0.0;
+    auto get_param_or = [](const std::string& name, double default_value) {
+        auto ptr = runtime_param::find_param(name);
+        if (ptr != nullptr) {
+            if (auto* val = std::get_if<double>(&*ptr)) {
+                return *val;
+            }
+        }
+        return default_value;
+    };
+    const double top0_window_deg = (v.armor_count == 4)
+        ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
+        : get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0);
+    const double top1_window_deg = get_param_or(
+        "AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0
+    );
+    const double top2_window_deg = get_param_or(
+        "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
+    );
+    double max_angle_deg = top0_window_deg;
+    if (v.spin.level == SpinLevel::LOW) {
+        max_angle_deg = top1_window_deg;
+    } else if (v.spin.level == SpinLevel::HIGH) {
+        max_angle_deg = top2_window_deg;
+    }
+    const double max_angle = max_angle_deg * M_PI / 180.0;
+    const bool use_window = v.spin.active && max_angle >= 0.0;
 
     const int lh = 15;
     const int rows = 4 + std::max(0, v.armor_count);
