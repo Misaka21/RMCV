@@ -10,6 +10,7 @@
  *
  * 锁定机制:
  *   - 当有目标且可见时，保持当前目标
+ *   - 普通陀螺在窗口启用时，允许“无可见板继续跟踪”（供 indirect）
  *   - 当目标丢失超过 keep_time 后才切换
  */
 
@@ -69,7 +70,7 @@ TargetSelection TargetSelector::select(
     // ========== 1. 预瞄锁定优先 ==========
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
-        if (has_visible_armor(vehicle, dt)) {
+        if (is_trackable_target(vehicle, dt)) {
             const auto forced_candidate = evaluate_visible_candidate(
                 forced_target_id_, vehicle, gimbal, dt
             );
@@ -109,7 +110,7 @@ TargetSelection TargetSelector::select(
     }
     if (tracked_target >= 0 && snapshot.is_valid(tracked_target)) {
         const auto& tracked_vehicle = snapshot.vehicles[tracked_target];
-        if (has_visible_armor(tracked_vehicle, dt)) {
+        if (is_trackable_target(tracked_vehicle, dt)) {
             target_caught_time_ = current_time;
         } else if (best_candidate.valid()) {
             try_catch_target(
@@ -129,7 +130,7 @@ TargetSelection TargetSelector::select(
     }
 
     const auto& selected_vehicle = snapshot.vehicles[selected_target];
-    if (!has_visible_armor(selected_vehicle, dt)) {
+    if (!is_trackable_target(selected_vehicle, dt)) {
         return result;
     }
 
@@ -214,6 +215,30 @@ bool TargetSelector::has_visible_armor(
         if (armor.visible) return true;
     }
     return false;
+}
+
+bool TargetSelector::can_track_without_visible(
+    const predictor::VehicleState& vehicle
+) const
+{
+    if (!vehicle.spin.active) {
+        return false;
+    }
+    if (vehicle.spin.level == predictor::SpinLevel::HIGH) {
+        return false;
+    }
+    const double max_orientation_angle_deg = get_param_or(
+        "AutoAim.FireControl.PID.max_orientation_angle", 60.0
+    );
+    return max_orientation_angle_deg > 0.0;
+}
+
+bool TargetSelector::is_trackable_target(
+    const predictor::VehicleState& vehicle,
+    double dt
+) const
+{
+    return has_visible_armor(vehicle, dt) || can_track_without_visible(vehicle);
 }
 
 void TargetSelector::try_catch_target(

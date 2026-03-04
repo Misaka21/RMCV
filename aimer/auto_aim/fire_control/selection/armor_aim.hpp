@@ -2,12 +2,11 @@
  * @file armor_aim.hpp
  * @brief 装甲板瞄准逻辑 (统一处理陀螺/非陀螺)
  *
- * 当前策略:
- * - 仅在可见装甲板中选择执行板（始终 direct-center）
- * - 低速陀螺可启用 orientation 窗口硬筛选（无候选时回退到 direct-center）
- * - max_orientation_angle <= 0 或高速陀螺时，强制 direct-center
- * - 切板保持规则采用 keep_tracking_area_ratio（rm.cv.fans 风格）
- * - 不再使用 INDIRECT emerging 瞄准路径
+ * 当前策略（对齐 rm.cv.fans）:
+ * - 非陀螺 / 高速陀螺 / max_orientation_angle<=0: direct-center
+ * - 普通陀螺:
+ *   1) 先在 [-orientation_angle, +orientation_angle] 做 direct
+ *   2) 若窗口内无候选，走 INDIRECT（等待目标板进入窗口）
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__
@@ -27,8 +26,8 @@ namespace autoaim::fire_control {
  * @brief 瞄准模式
  */
 enum class AimMode {
-    DIRECT,     // 直接跟踪当前可见装甲板
-    INDIRECT    // 保留枚举值兼容旧调试字段（当前不会输出该模式）
+    DIRECT,     // direct-center
+    INDIRECT    // emerging 等待板路径
 };
 
 /**
@@ -44,7 +43,7 @@ struct ArmorAimResult {
     Eigen::Vector3d target_vel = Eigen::Vector3d::Zero();  // 目标速度 (用于速度前馈)
 
     double z_to_v = 0;                  // 装甲板朝向角 (用于开火判断)
-    double time_to_fire = 0;            // 兼容字段，当前 direct-center 路径恒为 0
+    double time_to_fire = 0;            // INDIRECT 路径用于记录等待时长
 
     // 装甲板信息 (用于 FireDecision，避免传递 ArmorState* 指针)
     double armor_width = 0;
@@ -54,10 +53,11 @@ struct ArmorAimResult {
 /**
  * @brief 装甲板瞄准器
  *
- * 根据目标状态选择可见执行板:
- * - 非陀螺: 可见板喵中心最小移动
- * - 低速陀螺: 先在 orientation 窗口内选可见板；若窗口内无可见板，回退可见板喵中心
- * - 高速陀螺: 直接可见板喵中心
+ * 根据目标状态选择执行路径:
+ * - 非陀螺: direct-center（可见板）
+ * - max_orientation_angle<=0: direct-center（可见板）
+ * - 高速陀螺: direct-center（可见板）
+ * - 普通陀螺: direct(窗口内, 可包含预测板) -> indirect(等待板出现)
  */
 class ArmorAim {
 public:
@@ -76,12 +76,12 @@ public:
     ) const;
 
     /**
-     * @brief 计算装甲板瞄准（带云台状态，启用喵中心最小移动策略）
+     * @brief 计算装甲板瞄准（带云台状态）
      *
      * @param vehicle 目标车辆状态
      * @param predict_dt 预测时间
      * @param gimbal 当前云台状态（用于最小转动代价）
-     * @param preferred_armor_idx 上一帧装甲板索引（用于迟滞防抖）
+     * @param preferred_armor_idx 兼容入参（当前不作为直接决策因子）
      */
     ArmorAimResult compute(
         const predictor::VehicleState& vehicle,
@@ -92,7 +92,7 @@ public:
 
 private:
     /**
-     * @brief 非陀螺瞄准 (直接跟踪推荐装甲板)
+     * @brief 非陀螺瞄准 (direct-center)
      */
     ArmorAimResult compute_non_spin(
         const predictor::VehicleState& vehicle,
@@ -102,7 +102,7 @@ private:
     ) const;
 
     /**
-     * @brief 陀螺瞄准 (direct-center + orientation 窗口软偏好)
+     * @brief 陀螺瞄准 (rm.cv.fans: direct + indirect)
      */
     ArmorAimResult compute_spin(
         const predictor::VehicleState& vehicle,
@@ -112,14 +112,29 @@ private:
     ) const;
 
     /**
-     * @brief 统一 direct-center 执行路径（仅可见板）
+     * @brief direct 执行路径
+     *
+     * @param visible_only true=仅可见板，false=可见+不可见预测板
+     * @param strict_orientation_window true=窗口内无候选则直接失败（供 indirect 回退）
      */
-    ArmorAimResult compute_direct_visible(
+    ArmorAimResult compute_direct(
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         int preferred_armor_idx,
         bool use_orientation_window,
+        double max_orientation_angle,
+        bool visible_only,
+        bool strict_orientation_window
+    ) const;
+
+    /**
+     * @brief indirect 执行路径（rm.cv.fans emerging 思路）
+     */
+    ArmorAimResult compute_indirect(
+        const predictor::VehicleState& vehicle,
+        double predict_dt,
+        const ::fire_control::GimbalState* gimbal,
         double max_orientation_angle
     ) const;
 
@@ -132,8 +147,7 @@ private:
         const predictor::VehicleState& vehicle,
         const std::vector<int>& direct_indices,
         double predict_dt,
-        const ::fire_control::GimbalState* gimbal,
-        int preferred_armor_idx
+        const ::fire_control::GimbalState* gimbal
     ) const;
 
     /**
@@ -143,7 +157,8 @@ private:
      */
     Eigen::Vector3d compute_armor_velocity(
         const predictor::VehicleState& vehicle,
-        int armor_idx
+        int armor_idx,
+        double predict_dt
     ) const;
 };
 

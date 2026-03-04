@@ -396,9 +396,9 @@
     #@double 低速陀螺可见板朝向窗口 (deg)：仅在 [-angle, +angle] 内选可见板
     # @note <= 0 或高速陀螺时关闭窗口，始终按喵中心最小移动选可见板
     max_orientation_angle = 60.0
-    #@double 切板保持面积比例（rm.cv.fans风格）:
-    # 仅当上一板投影面积 >= 当前最大投影面积 * 此比例时保持上一板
-    keep_tracking_area_ratio = 0.9
+    #@double indirect 路径离场误差比例（rm.cv.fans max-out-error 同义）
+    # 用于窗口边界附近的离场修正，减小回转期误发
+    max_out_error = 0.2
 
 [AutoAim.FireControl.Trajectory]
     #@string 求解器类型: 

@@ -10,6 +10,7 @@
  *
  * 锁定机制:
  *   - 当有目标且可见时，保持当前目标
+ *   - 普通陀螺在窗口启用时，允许“无可见板继续跟踪”（供 indirect）
  *   - 当目标丢失超过 keep_time 后才切换
  *   - 支持预瞄锁定 (右键按下时强制锁定)
  *
@@ -103,6 +104,21 @@ private:
      * @brief 检查该敌人是否有可见装甲板
      */
     bool has_visible_armor(
+        const predictor::VehicleState& vehicle,
+        double dt
+    ) const;
+
+    /**
+     * @brief 是否允许在“无可见板”时继续跟踪（供 INDIRECT 使用）
+     */
+    bool can_track_without_visible(
+        const predictor::VehicleState& vehicle
+    ) const;
+
+    /**
+     * @brief 目标是否可用于火控（可见 direct 或无可见但可 indirect）
+     */
+    bool is_trackable_target(
         const predictor::VehicleState& vehicle,
         double dt
     ) const;
