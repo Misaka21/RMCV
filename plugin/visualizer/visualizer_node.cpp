@@ -281,14 +281,28 @@ static void draw_fire_debug_panel(
         put(fmt::format("Gate allow_fire: {}",
             dbg.gate_allow_fire_ok ? "OK" : "BLOCK"),
             dbg.gate_allow_fire_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
-        put(fmt::format("Gate sum: C{} A{} Y{} P{} F{}",
+        if (dbg.rotate_back_active) {
+            put(fmt::format("Gate rotate_back: {} | cmd={:.1f}ms in [{:.1f},{:.1f}]",
+                dbg.gate_rotate_back_ok ? "OK" : "BLOCK",
+                dbg.rotate_back_cmd_ms,
+                dbg.rotate_back_start_ms,
+                dbg.rotate_back_end_ms),
+                dbg.gate_rotate_back_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+        } else {
+            put(fmt::format("Gate rotate_back: {} | inactive",
+                dbg.gate_rotate_back_ok ? "OK" : "BLOCK"),
+                dbg.gate_rotate_back_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+        }
+
+        put(fmt::format("Gate sum: C{} A{} Y{} P{} F{} R{}",
             dbg.gate_conf_ok ? "+" : "-",
             dbg.gate_angle_ok ? "+" : "-",
             dbg.gate_yaw_ok ? "+" : "-",
             dbg.gate_pitch_ok ? "+" : "-",
-            dbg.gate_allow_fire_ok ? "+" : "-"),
+            dbg.gate_allow_fire_ok ? "+" : "-",
+            dbg.gate_rotate_back_ok ? "+" : "-"),
             (dbg.gate_conf_ok && dbg.gate_angle_ok && dbg.gate_yaw_ok
-             && dbg.gate_pitch_ok && dbg.gate_allow_fire_ok)
+             && dbg.gate_pitch_ok && dbg.gate_allow_fire_ok && dbg.gate_rotate_back_ok)
                 ? cv::Scalar(80, 220, 80)
                 : cv::Scalar(0, 0, 255));
     }

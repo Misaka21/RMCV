@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
+#include "aimer/common/math/math.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
@@ -17,6 +19,57 @@ namespace {
 // rm.cv.fans 中 additional-predict-time 的速度项使用“同一时刻目标角速度”。
 // 这里用短时外推 + 二次弹道解算得到局部 aim 角速度，避免跨周期差分抖动。
 constexpr double AIM_RATE_DT = 8e-3;  // 8ms
+
+double get_param_or(const std::string& name, double default_value)
+{
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (const auto* val = std::get_if<double>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
+
+double get_spin_window_rad(const predictor::VehicleState& vehicle)
+{
+    const double top0_deg = (vehicle.armor_count == 4)
+        ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
+        : get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0);
+    const double top1_deg = get_param_or("AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0);
+    const double top2_deg = get_param_or("AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0);
+
+    switch (vehicle.spin.level) {
+        case predictor::SpinLevel::HIGH:
+            return aimer::math::deg_to_rad(top2_deg);
+        case predictor::SpinLevel::LOW:
+            return aimer::math::deg_to_rad(top1_deg);
+        case predictor::SpinLevel::NONE:
+        default:
+            return aimer::math::deg_to_rad(top0_deg);
+    }
+}
+
+double predicted_z_to_v(
+    const predictor::VehicleState& vehicle,
+    int armor_idx,
+    double predict_dt
+)
+{
+    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
+        return 0.0;
+    }
+
+    const auto& armor = vehicle.armors[armor_idx];
+    if (!vehicle.spin.active || std::abs(vehicle.spin.omega) < 1e-4) {
+        return armor.z_to_v;
+    }
+
+    const Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, predict_dt);
+    const double armor_yaw = armor.yaw + vehicle.spin.omega * predict_dt;
+    const double view_yaw = std::atan2(pos.y(), pos.x());
+    return aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI);
+}
 
 bool estimate_aim_rate_from_target_vel(
     const AimResult& aim_now,
@@ -67,6 +120,12 @@ void FireController::reset()
     last_fail_stage_ = 0;
     last_prediction_dt_ = 0.0;
     last_time_ = 0.0;
+
+    last_rotate_back_ok_ = true;
+    last_rotate_back_active_ = false;
+    last_rotate_back_start_ = 0.0;
+    last_rotate_back_end_ = 0.0;
+    last_rotate_back_command_time_ = 0.0;
 }
 
 bool FireController::evaluate_fire_window(
@@ -90,6 +149,110 @@ bool FireController::evaluate_fire_window(
     can_fire = can_fire && snapshot.self_state.allow_fire;
 
     return can_fire;
+}
+
+bool FireController::evaluate_rotate_back_gate(
+    const predictor::VehicleState& vehicle,
+    double prediction_dt,
+    const LatencyInfo& latency,
+    double bullet_speed
+)
+{
+    // 默认通过，只有进入“回转禁发窗口”才阻塞
+    last_rotate_back_ok_ = true;
+    last_rotate_back_active_ = false;
+    last_rotate_back_start_ = 0.0;
+    last_rotate_back_end_ = 0.0;
+    last_rotate_back_command_time_ = prediction_dt + std::max(0.0, latency.control_to_fire);
+
+    if (!last_aim_.valid || !last_armor_aim_.valid) {
+        return true;
+    }
+    if (!vehicle.spin.active || vehicle.spin.level == predictor::SpinLevel::NONE) {
+        return true;
+    }
+    if (std::abs(vehicle.spin.omega) < 1e-4 || bullet_speed <= 1e-3) {
+        return true;
+    }
+
+    const int armor_idx = last_armor_aim_.armor_idx;
+    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
+        return true;
+    }
+
+    const double control_to_fire = std::max(0.0, latency.control_to_fire);
+    if (control_to_fire <= 1e-6) {
+        return true;
+    }
+
+    // 与 rm.cv.fans 同语义:
+    // water_gun_hit = prediction_dt, command_hit = prediction_dt + control_to_fire
+    const double time_water_hit = prediction_dt;
+    const double time_command_hit = prediction_dt + control_to_fire;
+    last_rotate_back_command_time_ = time_command_hit;
+
+    const double omega = vehicle.spin.omega;
+    const double armor_yaw_water = vehicle.armors[armor_idx].yaw + omega * time_water_hit;
+    const double armor_yaw_command = vehicle.armors[armor_idx].yaw + omega * time_command_hit;
+    const double armor_rotate_water_to_command = aimer::math::reduced_angle(
+        armor_yaw_command - armor_yaw_water
+    );
+
+    // 只有“角速度方向”和“水枪->命中角位移方向”相反，才可能进入回转过程
+    if (std::signbit(omega) == std::signbit(armor_rotate_water_to_command)) {
+        return true;
+    }
+
+    const double max_orientation_angle = get_spin_window_rad(vehicle);
+    const double zn_to_armor_water = predicted_z_to_v(vehicle, armor_idx, time_water_hit);
+    const double zn_to_rotate_back = (omega > 0.0)
+        ? +max_orientation_angle
+        : -max_orientation_angle;
+    const double armor_water_to_rotate_back = aimer::math::reduced_angle(
+        zn_to_rotate_back - zn_to_armor_water
+    );
+
+    const double time_start_rotating_back =
+        time_water_hit + armor_water_to_rotate_back / omega;
+    if (!std::isfinite(time_start_rotating_back) || time_start_rotating_back >= time_command_hit) {
+        return true;
+    }
+
+    const Eigen::Vector3d pos_when_start =
+        vehicle.predict_armor_position(armor_idx, time_start_rotating_back);
+    const Eigen::Vector3d pos_when_command =
+        vehicle.predict_armor_position(armor_idx, time_command_hit);
+    if (!pos_when_start.allFinite() || !pos_when_command.allFinite()) {
+        return true;
+    }
+    if (pos_when_start.squaredNorm() < 1e-9 || pos_when_command.squaredNorm() < 1e-9) {
+        return true;
+    }
+
+    const AimResult aim_when_start = ::fire_control::trajectory::solve(pos_when_start, bullet_speed);
+    const AimResult aim_when_command = ::fire_control::trajectory::solve(pos_when_command, bullet_speed);
+    if (!aim_when_start.valid || !aim_when_command.valid) {
+        return true;
+    }
+
+    const double yaw_barrel_rotate_back = GimbalState::normalize_angle(
+        aim_when_command.yaw - aim_when_start.yaw
+    );
+    const double rotate_time_a = get_param_or("AutoAim.FireControl.PID.angle_to_rotate_time_a", 1.79e-3);
+    const double rotate_time_b = get_param_or("AutoAim.FireControl.PID.angle_to_rotate_time_b", 0.093);
+    const double rotate_time = rotate_time_a * std::abs(yaw_barrel_rotate_back) * 180.0 / M_PI
+        + rotate_time_b;
+
+    const double time_end_rotating_back =
+        time_start_rotating_back + std::max(0.0, rotate_time);
+    last_rotate_back_active_ = true;
+    last_rotate_back_start_ = time_start_rotating_back;
+    last_rotate_back_end_ = time_end_rotating_back;
+
+    if (time_start_rotating_back < time_command_hit && time_command_hit < time_end_rotating_back) {
+        last_rotate_back_ok_ = false;
+    }
+    return last_rotate_back_ok_;
 }
 
 FireCommand FireController::control(
@@ -240,6 +403,12 @@ FireCommand FireController::control(
     last_target_confidence_ = vehicle.confidence;
     has_cached_solution_ = true;
     bool can_fire = evaluate_fire_window(snapshot, latency, vehicle.confidence);
+    can_fire = can_fire && evaluate_rotate_back_gate(
+        vehicle,
+        prediction_dt,
+        latency,
+        snapshot.self_state.bullet_speed
+    );
 
     last_fail_stage_ = 9;  // 成功
     return generate_command(selection, plan, aim, can_fire, vehicle.confidence);

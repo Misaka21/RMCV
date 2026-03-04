@@ -271,10 +271,17 @@ struct FireDebugInfo {
     bool gate_yaw_ok = false;
     bool gate_pitch_ok = false;
     bool gate_allow_fire_ok = false;   // self_state.allow_fire
+    bool gate_rotate_back_ok = true;   // 回转禁发门控
     double gate_hit_offset_yaw = 0;    // m
     double gate_hit_offset_pitch = 0;  // m
     double gate_yaw_limit = 0;         // m
     double gate_pitch_limit = 0;       // m
+
+    // 回转禁发窗口（相对 img_t 的时间轴，ms）
+    bool rotate_back_active = false;
+    double rotate_back_start_ms = 0;
+    double rotate_back_end_ms = 0;
+    double rotate_back_cmd_ms = 0;
 
     // 指令注入参数（调参用）
     double cmd_additional_predict_time = 0;

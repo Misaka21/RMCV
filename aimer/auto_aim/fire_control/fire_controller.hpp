@@ -66,6 +66,11 @@ public:
     const GimbalState& gimbal_state() const { return gimbal_state_; }
     int last_fail_stage() const { return last_fail_stage_; }
     double last_prediction_dt() const { return last_prediction_dt_; }
+    bool last_rotate_back_ok() const { return last_rotate_back_ok_; }
+    bool last_rotate_back_active() const { return last_rotate_back_active_; }
+    double last_rotate_back_start() const { return last_rotate_back_start_; }
+    double last_rotate_back_end() const { return last_rotate_back_end_; }
+    double last_rotate_back_command_time() const { return last_rotate_back_command_time_; }
 
 private:
     // ==================== 辅助方法 ====================
@@ -83,6 +88,13 @@ private:
         const LatencyInfo& latency,
         double confidence
     ) const;
+
+    bool evaluate_rotate_back_gate(
+        const predictor::VehicleState& vehicle,
+        double prediction_dt,
+        const LatencyInfo& latency,
+        double bullet_speed
+    );
 
     FireCommand no_target_command();
 
@@ -112,6 +124,13 @@ private:
     int last_fail_stage_ = 0;
     double last_prediction_dt_ = 0.0;
     static constexpr int MAX_LOST_COUNT = 60;  // 约 300ms @ 200Hz 新帧率
+
+    // rm.cv.fans: 回转期禁发门控（仅陀螺场景）
+    bool last_rotate_back_ok_ = true;
+    bool last_rotate_back_active_ = false;
+    double last_rotate_back_start_ = 0.0;        // s, 相对 img_t 的预测时间轴
+    double last_rotate_back_end_ = 0.0;          // s, 相对 img_t 的预测时间轴
+    double last_rotate_back_command_time_ = 0.0; // s, 相对 img_t 的命中时刻
 };
 
 }  // namespace autoaim::fire_control

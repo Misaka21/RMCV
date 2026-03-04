@@ -402,6 +402,7 @@ void fire_control_run(const std::string& /* config_path */) {
                 "AutoAim.FireControl.error_rate"
             );
             dbg.gate_allow_fire_ok = snapshot.self_state.allow_fire;
+            dbg.gate_rotate_back_ok = true;
 
             if (mode == aimer::AimMode::AUTOAIM) {
                 const auto& aim = controller.last_aim();
@@ -431,6 +432,11 @@ void fire_control_run(const std::string& /* config_path */) {
                 dbg.fly_time = aim.fly_time;
                 dbg.timestamp = current_time;
                 dbg.fail_stage = controller.last_fail_stage();
+                dbg.gate_rotate_back_ok = controller.last_rotate_back_ok();
+                dbg.rotate_back_active = controller.last_rotate_back_active();
+                dbg.rotate_back_start_ms = controller.last_rotate_back_start() * 1000.0;
+                dbg.rotate_back_end_ms = controller.last_rotate_back_end() * 1000.0;
+                dbg.rotate_back_cmd_ms = controller.last_rotate_back_command_time() * 1000.0;
 
                 if (snapshot.is_valid(cmd.target_id)) {
                     const auto& v = snapshot.vehicles[cmd.target_id];
