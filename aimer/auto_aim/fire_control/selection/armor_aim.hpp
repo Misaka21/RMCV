@@ -2,11 +2,10 @@
  * @file armor_aim.hpp
  * @brief 装甲板瞄准逻辑 (统一处理陀螺/非陀螺)
  *
- * 两种瞄准模式:
- * - DIRECT: 装甲板可见 (|z_to_v| < max_angle)，直接跟踪
- * - INDIRECT: 装甲板不可见，预判即将出现的位置 (emerging_pos)
- *
- * 适用于 PID 控制模式，不使用 MPC 的情况。
+ * 当前策略:
+ * - 仅在可见装甲板中选择执行板（始终 direct-center）
+ * - 陀螺目标可使用 orientation 窗口作为软偏好
+ * - 不再使用 INDIRECT emerging 瞄准路径
  */
 
 #ifndef __AIMER_AUTO_AIM_FIRE_CONTROL_PID_ARMOR_AIM_HPP__
@@ -27,7 +26,7 @@ namespace autoaim::fire_control {
  */
 enum class AimMode {
     DIRECT,     // 直接跟踪当前可见装甲板
-    INDIRECT    // 预判即将出现的装甲板位置
+    INDIRECT    // 保留枚举值兼容旧调试字段（当前不会输出该模式）
 };
 
 /**
@@ -43,7 +42,7 @@ struct ArmorAimResult {
     Eigen::Vector3d target_vel = Eigen::Vector3d::Zero();  // 目标速度 (用于速度前馈)
 
     double z_to_v = 0;                  // 装甲板朝向角 (用于开火判断)
-    double time_to_fire = 0;            // 到开火时机的时间 (s), INDIRECT 模式用
+    double time_to_fire = 0;            // 兼容字段，当前 direct-center 路径恒为 0
 
     // 装甲板信息 (用于 FireDecision，避免传递 ArmorState* 指针)
     double armor_width = 0;
@@ -53,10 +52,9 @@ struct ArmorAimResult {
 /**
  * @brief 装甲板瞄准器
  *
- * 根据陀螺状态选择瞄准模式:
- * - 非陀螺: 直接跟踪推荐装甲板
- * - 陀螺 + 有可见板: DIRECT 模式
- * - 陀螺 + 无可见板: INDIRECT 模式 (预判)
+ * 根据目标状态选择可见执行板:
+ * - 非陀螺: 可见板喵中心最小移动
+ * - 陀螺: 可见板喵中心最小移动 + orientation 窗口软偏好
  */
 class ArmorAim {
 public:
@@ -101,13 +99,25 @@ private:
     ) const;
 
     /**
-     * @brief 陀螺瞄准 (DIRECT 或 INDIRECT)
+     * @brief 陀螺瞄准 (direct-center + orientation 窗口软偏好)
      */
     ArmorAimResult compute_spin(
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         int preferred_armor_idx
+    ) const;
+
+    /**
+     * @brief 统一 direct-center 执行路径（仅可见板）
+     */
+    ArmorAimResult compute_direct_visible(
+        const predictor::VehicleState& vehicle,
+        double predict_dt,
+        const ::fire_control::GimbalState* gimbal,
+        int preferred_armor_idx,
+        bool use_orientation_window,
+        double max_orientation_angle
     ) const;
 
     /**
@@ -120,17 +130,9 @@ private:
         const std::vector<int>& direct_indices,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
-        int preferred_armor_idx
-    ) const;
-
-    /**
-     * @brief 计算 INDIRECT 模式的瞄准位置
-     *
-     * 找到即将进入视野的装甲板，计算其"出现位置"
-     */
-    ArmorAimResult compute_indirect(
-        const predictor::VehicleState& vehicle,
-        double predict_dt
+        int preferred_armor_idx,
+        bool use_orientation_window,
+        double max_orientation_angle
     ) const;
 
     /**

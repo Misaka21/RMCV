@@ -105,8 +105,7 @@ private:
     bool has_visible_armor(
         const predictor::VehicleState& vehicle,
         double max_angle,
-        double dt,
-        bool allow_indirect
+        double dt
     ) const;
 
     /**

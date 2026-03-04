@@ -50,18 +50,6 @@ bool FireController::evaluate_fire_window(
     // 上层允许开火开关 (来自硬件层注入；不影响瞄准，只影响发射)
     can_fire = can_fire && snapshot.self_state.allow_fire;
 
-    // INDIRECT 模式额外检查开火时机
-    if (can_fire && last_armor_aim_.mode == AimMode::INDIRECT) {
-        double fire_advance = runtime_param::get_param<double>(
-            "AutoAim.FireControl.PID.fire_advance"
-        );
-        // time_to_fire 是基于图像时刻的预测时间，因此应与 img->hit 同轴比较。
-        double img_to_hit = latency.hit_latency();
-        if (last_armor_aim_.time_to_fire > img_to_hit + fire_advance) {
-            can_fire = false;
-        }
-    }
-
     return can_fire;
 }
 

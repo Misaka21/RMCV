@@ -25,8 +25,6 @@ namespace autoaim::fire_control {
 
 namespace {
 
-constexpr double SPIN_MODE_MIN_OMEGA = 0.5;  // 与 ArmorAim::compute() 保持一致
-
 double get_param_or(const std::string& name, double default_value)
 {
     auto ptr = runtime_param::find_param(name);
@@ -59,6 +57,22 @@ double normalize_score(double raw_score, const predictor::VehicleState& vehicle)
     return raw_score / std::max(0.1, vehicle.confidence);
 }
 
+double orientation_window_penalty(
+    double z_to_v,
+    bool use_orientation_window,
+    double max_angle
+)
+{
+    if (!use_orientation_window || max_angle <= 0.0) {
+        return 0.0;
+    }
+    const double abs_z = std::abs(z_to_v);
+    if (abs_z <= max_angle) {
+        return 0.0;
+    }
+    return abs_z - max_angle;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -80,7 +94,7 @@ TargetSelection TargetSelector::select(
     // ========== 1. 预瞄锁定优先 ==========
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
-        if (has_visible_armor(vehicle, max_angle, dt, true)) {
+        if (has_visible_armor(vehicle, max_angle, dt)) {
             const auto forced_candidate = evaluate_visible_candidate(
                 forced_target_id_, vehicle, gimbal, max_angle, dt
             );
@@ -130,9 +144,7 @@ TargetSelection TargetSelector::select(
     }
     if (tracked_target >= 0 && snapshot.is_valid(tracked_target)) {
         const auto& tracked_vehicle = snapshot.vehicles[tracked_target];
-        if (has_visible_armor(tracked_vehicle, max_angle, dt, false)) {
-            // 仅当仍有 DIRECT 可见装甲板时才刷新抓取时间；
-            // 若只剩 INDIRECT，不刷新，让切换机制接管（与 rm.cv.fans 一致）
+        if (has_visible_armor(tracked_vehicle, max_angle, dt)) {
             target_caught_time_ = current_time;
             auto tracked_visible = evaluate_visible_candidate(
                 tracked_target, tracked_vehicle, gimbal, max_angle, dt
@@ -158,7 +170,7 @@ TargetSelection TargetSelector::select(
     }
 
     const auto& selected_vehicle = snapshot.vehicles[selected_target];
-    if (!has_visible_armor(selected_vehicle, max_angle, dt, true)) {
+    if (!has_visible_armor(selected_vehicle, max_angle, dt)) {
         return result;
     }
 
@@ -234,34 +246,16 @@ double TargetSelector::compute_center_distance(
 
 bool TargetSelector::has_visible_armor(
     const predictor::VehicleState& vehicle,
-    double max_angle,
-    double /* dt */,
-    bool allow_indirect
+    double /* max_angle */,
+    double /* dt */
 ) const
 {
-    const bool spin_mode = vehicle.spin.active && std::abs(vehicle.spin.omega) >= SPIN_MODE_MIN_OMEGA;
     for (int i = 0; i < vehicle.armor_count; ++i) {
         const auto& armor = vehicle.armors[i];
 
-        // 非陀螺: 只要可见即可参与；陀螺: 仍按朝向角限制 DIRECT 可打。
-        if (!armor.visible) continue;
-        if (spin_mode && std::abs(armor.z_to_v) > max_angle) continue;
-
-        return true;  // 有可打击的装甲板
+        // 仅要求“有可见板”即可参与选敌，避免窗口硬过滤导致无目标。
+        if (armor.visible) return true;
     }
-
-    // 仅在“保持/锁定已有目标”时允许陀螺 INDIRECT 兜底
-    if (allow_indirect) {
-        const double indirect_min_omega = get_param_or(
-            "AutoAim.FireControl.TargetSelector.indirect_min_omega", 0.5
-        );
-        if (vehicle.spin.active && std::abs(vehicle.spin.omega) >= indirect_min_omega
-            && vehicle.armor_count > 0)
-        {
-            return true;
-        }
-    }
-
     return false;
 }
 
@@ -393,19 +387,24 @@ int TargetSelector::pick_best_visible_armor(
     double dt
 ) const
 {
-    const bool spin_mode = vehicle.spin.active && std::abs(vehicle.spin.omega) >= SPIN_MODE_MIN_OMEGA;
+    const bool use_orientation_window = vehicle.spin.active && max_angle > 0.0;
+    const double orient_weight = get_param_or(
+        "AutoAim.FireControl.PID.direct_orientation_weight", 0.15
+    );
     int best_idx = -1;
-    double best_dist = std::numeric_limits<double>::infinity();
+    double best_score = std::numeric_limits<double>::infinity();
 
     for (int i = 0; i < vehicle.armor_count; ++i) {
         const auto& armor = vehicle.armors[i];
         if (!armor.visible) continue;
-        if (spin_mode && std::abs(armor.z_to_v) > max_angle) continue;
 
         const Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
-        const double dist = compute_center_distance(pos, gimbal);
-        if (dist < best_dist) {
-            best_dist = dist;
+        const double center = compute_center_distance(pos, gimbal);
+        const double score = center + orient_weight * orientation_window_penalty(
+            armor.z_to_v, use_orientation_window, max_angle
+        );
+        if (score < best_score) {
+            best_score = score;
             best_idx = i;
         }
     }
