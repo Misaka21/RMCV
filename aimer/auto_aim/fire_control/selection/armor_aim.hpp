@@ -85,6 +85,14 @@ public:
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
+        const Eigen::Quaterniond* q_imu,
+        int preferred_armor_idx
+    ) const;
+
+    ArmorAimResult compute(
+        const predictor::VehicleState& vehicle,
+        double predict_dt,
+        const ::fire_control::GimbalState* gimbal,
         int preferred_armor_idx
     ) const;
 
@@ -96,6 +104,7 @@ private:
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
+        const Eigen::Quaterniond* q_imu,
         int preferred_armor_idx
     ) const;
 
@@ -106,6 +115,7 @@ private:
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
+        const Eigen::Quaterniond* q_imu,
         int preferred_armor_idx
     ) const;
 
@@ -133,6 +143,7 @@ private:
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
+        const Eigen::Quaterniond* q_imu,
         double max_orientation_angle,
         double max_out_error
     ) const;

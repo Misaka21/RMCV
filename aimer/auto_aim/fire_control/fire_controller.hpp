@@ -31,6 +31,27 @@ namespace autoaim::fire_control {
  */
 class FireController {
 public:
+    struct FireGateDebug {
+        FireDecision::DecisionMetrics tracking;
+
+        bool allow_fire_ok = false;
+        bool swing_ok = false;
+        bool out_ok = false;
+
+        double swing_error_rate = 0.0;
+        double out_error_rate = 0.0;
+
+        double swing_offset_yaw = 0.0;
+        double swing_offset_pitch = 0.0;
+        double swing_yaw_limit = 0.0;
+        double swing_pitch_limit = 0.0;
+
+        double out_offset_yaw = 0.0;
+        double out_offset_pitch = 0.0;
+        double out_yaw_limit = 0.0;
+        double out_pitch_limit = 0.0;
+    };
+
     FireController() = default;
     ~FireController() = default;
 
@@ -64,6 +85,7 @@ public:
     const ArmorAimResult& last_armor_aim() const { return last_armor_aim_; }
     const GimbalPlan& last_plan() const { return last_plan_; }
     const GimbalState& gimbal_state() const { return gimbal_state_; }
+    const FireGateDebug& last_gate_debug() const { return last_gate_debug_; }
     int last_fail_stage() const { return last_fail_stage_; }
     double last_prediction_dt() const { return last_prediction_dt_; }
     bool last_rotate_back_ok() const { return last_rotate_back_ok_; }
@@ -86,15 +108,18 @@ private:
     bool evaluate_fire_window(
         const predictor::BattlefieldSnapshot& snapshot,
         const LatencyInfo& latency,
-        double confidence
-    ) const;
+        const predictor::VehicleState& vehicle,
+        double prediction_dt,
+        const Eigen::Vector3d& self_velocity
+    );
 
     bool evaluate_rotate_back_gate(
         const predictor::VehicleState& vehicle,
         double prediction_dt,
         const LatencyInfo& latency,
         double bullet_speed,
-        const Eigen::Vector3d& self_velocity
+        const Eigen::Vector3d& self_velocity,
+        const Eigen::Quaterniond& q_imu
     );
 
     FireCommand no_target_command();
@@ -116,6 +141,7 @@ private:
     AimResult last_aim_;
     GimbalPlan last_plan_;
     ArmorAimResult last_armor_aim_;
+    FireGateDebug last_gate_debug_;
     int last_solution_frame_id_ = -1;
     int last_no_target_frame_id_ = -1;
     double last_target_confidence_ = 0.0;

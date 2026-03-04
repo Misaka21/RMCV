@@ -413,6 +413,13 @@
     #@double top2 的间接打击离场误差比例
     top2_max_out_error = 1.8
 
+    #@double top0 的 hit-swing 门控误差比例（未配置时回退到 top0_max_out_error）
+    top0_max_swing_error = 1.8
+    #@double top1 的 hit-swing 门控误差比例（未配置时回退到 top1_max_out_error）
+    top1_max_swing_error = 0.6
+    #@double top2 的 hit-swing 门控误差比例（未配置时回退到 top2_max_out_error）
+    top2_max_swing_error = 1.8
+
     #@double 回转耗时线性模型系数 a (s/deg), t = a * |delta_yaw_deg| + b
     angle_to_rotate_time_a = 1.79e-3
     #@double 回转耗时线性模型常数项 b (s)

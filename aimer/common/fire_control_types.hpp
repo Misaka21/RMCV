@@ -272,10 +272,20 @@ struct FireDebugInfo {
     bool gate_pitch_ok = false;
     bool gate_allow_fire_ok = false;   // self_state.allow_fire
     bool gate_rotate_back_ok = true;   // 回转禁发门控
+    bool gate_swing_ok = false;        // hit 时刻 swing 门控
+    bool gate_out_ok = false;          // hit 时刻 out-error 门控
     double gate_hit_offset_yaw = 0;    // m
     double gate_hit_offset_pitch = 0;  // m
     double gate_yaw_limit = 0;         // m
     double gate_pitch_limit = 0;       // m
+    double gate_swing_offset_yaw = 0;  // m
+    double gate_swing_offset_pitch = 0;// m
+    double gate_swing_yaw_limit = 0;   // m
+    double gate_swing_pitch_limit = 0; // m
+    double gate_out_offset_yaw = 0;    // m
+    double gate_out_offset_pitch = 0;  // m
+    double gate_out_yaw_limit = 0;     // m
+    double gate_out_pitch_limit = 0;   // m
 
     // 回转禁发窗口（相对 img_t 的时间轴，ms）
     bool rotate_back_active = false;

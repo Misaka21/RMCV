@@ -23,6 +23,24 @@ namespace autoaim::fire_control {
  */
 class FireDecision {
 public:
+    struct DecisionMetrics {
+        double min_confidence = 0.0;
+        double error_rate = 0.0;
+        double confidence = 0.0;
+
+        bool conf_ok = false;
+        bool angle_ok = false;
+        bool yaw_ok = false;
+        bool pitch_ok = false;
+
+        double hit_offset_yaw = 0.0;
+        double hit_offset_pitch = 0.0;
+        double yaw_limit = 0.0;
+        double pitch_limit = 0.0;
+
+        bool pass() const { return conf_ok && angle_ok && yaw_ok && pitch_ok; }
+    };
+
     /**
      * @brief 判断是否可以开火
      *
@@ -32,6 +50,13 @@ public:
      * @param confidence 目标置信度
      * @return 是否可以开火
      */
+    DecisionMetrics evaluate(
+        const AimResult& aim,
+        const ArmorAimResult& armor_aim,
+        const GimbalState& gimbal,
+        double confidence
+    ) const;
+
     bool decide(
         const AimResult& aim,
         const ArmorAimResult& armor_aim,

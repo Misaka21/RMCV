@@ -50,6 +50,43 @@ double get_spin_window_rad(const predictor::VehicleState& vehicle)
     }
 }
 
+double get_spin_out_error(const predictor::VehicleState& vehicle)
+{
+    const double top0_out = get_param_or("AutoAim.FireControl.PID.top0_max_out_error", 1.8);
+    const double top1_out = get_param_or("AutoAim.FireControl.PID.top1_max_out_error", 0.6);
+    const double top2_out = get_param_or("AutoAim.FireControl.PID.top2_max_out_error", 1.8);
+    switch (vehicle.spin.level) {
+        case predictor::SpinLevel::HIGH:
+            return std::max(0.0, top2_out);
+        case predictor::SpinLevel::LOW:
+            return std::max(0.0, top1_out);
+        case predictor::SpinLevel::NONE:
+        default:
+            return std::max(0.0, top0_out);
+    }
+}
+
+double get_spin_swing_error(const predictor::VehicleState& vehicle)
+{
+    // 报告语义：max-swing-error 与 max-out-error 解耦。
+    // 若未单独配置，回退到同级 max-out-error，保持兼容。
+    const double top0_default = get_param_or("AutoAim.FireControl.PID.top0_max_out_error", 1.8);
+    const double top1_default = get_param_or("AutoAim.FireControl.PID.top1_max_out_error", 0.6);
+    const double top2_default = get_param_or("AutoAim.FireControl.PID.top2_max_out_error", 1.8);
+    const double top0_swing = get_param_or("AutoAim.FireControl.PID.top0_max_swing_error", top0_default);
+    const double top1_swing = get_param_or("AutoAim.FireControl.PID.top1_max_swing_error", top1_default);
+    const double top2_swing = get_param_or("AutoAim.FireControl.PID.top2_max_swing_error", top2_default);
+    switch (vehicle.spin.level) {
+        case predictor::SpinLevel::HIGH:
+            return std::max(0.0, top2_swing);
+        case predictor::SpinLevel::LOW:
+            return std::max(0.0, top1_swing);
+        case predictor::SpinLevel::NONE:
+        default:
+            return std::max(0.0, top0_swing);
+    }
+}
+
 bool estimate_aim_rate_from_target_vel(
     const AimResult& aim_now,
     const ArmorAimResult& armor,
@@ -94,6 +131,7 @@ void FireController::reset()
     last_aim_ = {};
     last_plan_ = {};
     last_armor_aim_ = {};
+    last_gate_debug_ = {};
     last_solution_frame_id_ = -1;
     last_no_target_frame_id_ = -1;
     last_target_confidence_ = 0.0;
@@ -113,22 +151,152 @@ void FireController::reset()
 bool FireController::evaluate_fire_window(
     const predictor::BattlefieldSnapshot& snapshot,
     const LatencyInfo& latency,
-    double confidence
-) const
+    const predictor::VehicleState& vehicle,
+    double prediction_dt,
+    const Eigen::Vector3d& self_velocity
+)
 {
+    last_gate_debug_ = {};
+
     if (!last_aim_.valid || !last_armor_aim_.valid || !last_selection_.has_target) {
         return false;
     }
 
-    bool can_fire = fire_decision_.decide(
+    last_gate_debug_.tracking = fire_decision_.evaluate(
         last_aim_,
         last_armor_aim_,
         gimbal_state_,
-        confidence
+        vehicle.confidence
     );
 
-    // 上层允许开火开关 (来自硬件层注入；不影响瞄准，只影响发射)
-    can_fire = can_fire && snapshot.self_state.allow_fire;
+    bool can_fire = last_gate_debug_.tracking.pass();
+    last_gate_debug_.allow_fire_ok = snapshot.self_state.allow_fire;
+    can_fire = can_fire && last_gate_debug_.allow_fire_ok;
+
+    // 反陀螺对齐 antitop/rm.cv.fans:
+    // 1) 预测控制命中点 tracking_aim（上面已判）
+    // 2) 再检查实际出弹命中点 hit_aim 的 swing/out 约束
+    if (vehicle.spin.active && std::abs(vehicle.spin.omega) > 1e-4) {
+        const double control_to_fire = std::max(0.0, latency.control_to_fire);
+        const double hit_dt = prediction_dt + control_to_fire;
+
+        ArmorAimResult hit_armor = armor_aim_.compute(
+            vehicle,
+            hit_dt,
+            &gimbal_state_,
+            &snapshot.self_state.q_imu,
+            last_armor_aim_.armor_idx
+        );
+        if (!hit_armor.valid) {
+            last_gate_debug_.swing_ok = false;
+            last_gate_debug_.out_ok = false;
+            return false;
+        }
+
+        const AimResult hit_aim = ::fire_control::trajectory::solve(
+            hit_armor.target_pos,
+            snapshot.self_state.bullet_speed,
+            self_velocity
+        );
+        if (!hit_aim.valid) {
+            last_gate_debug_.swing_ok = false;
+            last_gate_debug_.out_ok = false;
+            return false;
+        }
+
+        const double swing_error = get_spin_swing_error(vehicle);
+        const double out_error = get_spin_out_error(vehicle);
+        last_gate_debug_.swing_error_rate = swing_error;
+        last_gate_debug_.out_error_rate = out_error;
+
+        auto calc_gate = [](
+            const AimResult& aim,
+            const GimbalState& gimbal,
+            double armor_width,
+            double armor_height,
+            double z_to_v,
+            double error_rate,
+            double& out_offset_yaw,
+            double& out_offset_pitch,
+            double& out_limit_yaw,
+            double& out_limit_pitch,
+            bool& out_yaw_ok,
+            bool& out_pitch_ok
+        ) {
+            out_offset_yaw = 0.0;
+            out_offset_pitch = 0.0;
+            out_limit_yaw = 0.0;
+            out_limit_pitch = 0.0;
+            out_yaw_ok = false;
+            out_pitch_ok = false;
+
+            const double yaw_err = GimbalState::normalize_angle(aim.yaw - gimbal.yaw);
+            const double pitch_err = aim.pitch - gimbal.pitch;
+            if (std::abs(yaw_err) >= M_PI_2 || std::abs(pitch_err) >= M_PI_2) {
+                return;
+            }
+
+            out_offset_yaw = aim.distance * std::abs(std::tan(yaw_err));
+            out_offset_pitch = aim.distance * std::abs(std::tan(pitch_err));
+            const double cos_inclined = std::abs(std::cos(z_to_v));
+            out_limit_yaw = (armor_width * 0.5) * cos_inclined * error_rate;
+            out_limit_pitch = (armor_height * 0.5) * error_rate;
+            out_yaw_ok = out_offset_yaw < out_limit_yaw;
+            out_pitch_ok = out_offset_pitch < out_limit_pitch;
+        };
+
+        bool swing_yaw_ok = false;
+        bool swing_pitch_ok = false;
+        calc_gate(
+            hit_aim,
+            gimbal_state_,
+            hit_armor.armor_width,
+            hit_armor.armor_height,
+            hit_armor.z_to_v,
+            swing_error,
+            last_gate_debug_.swing_offset_yaw,
+            last_gate_debug_.swing_offset_pitch,
+            last_gate_debug_.swing_yaw_limit,
+            last_gate_debug_.swing_pitch_limit,
+            swing_yaw_ok,
+            swing_pitch_ok
+        );
+        last_gate_debug_.swing_ok = swing_yaw_ok && swing_pitch_ok;
+
+        // out gate: emerging 瞄点 与 同时刻装甲板中心 的差异不能过大
+        const Eigen::Vector3d hit_center = vehicle.predict_armor_position(hit_armor.armor_idx, hit_dt);
+        const AimResult hit_center_aim = ::fire_control::trajectory::solve(
+            hit_center,
+            snapshot.self_state.bullet_speed,
+            self_velocity
+        );
+        if (!hit_center_aim.valid) {
+            last_gate_debug_.out_ok = false;
+        } else {
+            const double dyaw = GimbalState::normalize_angle(hit_aim.yaw - hit_center_aim.yaw);
+            const double dpitch = hit_aim.pitch - hit_center_aim.pitch;
+            if (std::abs(dyaw) >= M_PI_2 || std::abs(dpitch) >= M_PI_2) {
+                last_gate_debug_.out_ok = false;
+            } else {
+                const double ref_dist = std::max(1e-3, hit_center_aim.distance);
+                last_gate_debug_.out_offset_yaw = ref_dist * std::abs(std::tan(dyaw));
+                last_gate_debug_.out_offset_pitch = ref_dist * std::abs(std::tan(dpitch));
+                const double cos_inclined = std::abs(std::cos(hit_armor.z_to_v));
+                last_gate_debug_.out_yaw_limit =
+                    (hit_armor.armor_width * 0.5) * cos_inclined * out_error;
+                last_gate_debug_.out_pitch_limit =
+                    (hit_armor.armor_height * 0.5) * out_error;
+                const bool out_yaw_ok = last_gate_debug_.out_offset_yaw < last_gate_debug_.out_yaw_limit;
+                const bool out_pitch_ok = last_gate_debug_.out_offset_pitch < last_gate_debug_.out_pitch_limit;
+                last_gate_debug_.out_ok = out_yaw_ok && out_pitch_ok;
+            }
+        }
+
+        can_fire = can_fire && last_gate_debug_.swing_ok && last_gate_debug_.out_ok;
+    } else {
+        last_gate_debug_.swing_ok = true;
+        last_gate_debug_.out_ok = true;
+    }
 
     return can_fire;
 }
@@ -138,7 +306,8 @@ bool FireController::evaluate_rotate_back_gate(
     double prediction_dt,
     const LatencyInfo& latency,
     double bullet_speed,
-    const Eigen::Vector3d& self_velocity
+    const Eigen::Vector3d& self_velocity,
+    const Eigen::Quaterniond& q_imu
 )
 {
     // 默认通过，只有进入“回转禁发窗口”才阻塞
@@ -170,14 +339,14 @@ bool FireController::evaluate_rotate_back_gate(
 
     ArmorAimResult water_aim = last_armor_aim_;
     if (!water_aim.valid) {
-        water_aim = armor_aim_.compute(vehicle, time_water_hit, &gimbal_state_, -1);
+        water_aim = armor_aim_.compute(vehicle, time_water_hit, &gimbal_state_, &q_imu, -1);
     }
     if (!water_aim.valid || water_aim.armor_idx < 0 || water_aim.armor_idx >= vehicle.armor_count) {
         return true;
     }
 
     ArmorAimResult command_aim = armor_aim_.compute(
-        vehicle, time_command_hit, &gimbal_state_, water_aim.armor_idx
+        vehicle, time_command_hit, &gimbal_state_, &q_imu, water_aim.armor_idx
     );
     if (!command_aim.valid || command_aim.armor_idx < 0 || command_aim.armor_idx >= vehicle.armor_count) {
         return true;
@@ -283,6 +452,7 @@ FireCommand FireController::control(
     // 同一帧已经判定无目标，直接返回，避免 500Hz 下重复 select()
     if (!has_cached_solution_ && snapshot.frame_id == last_no_target_frame_id_) {
         last_fail_stage_ = 1;
+        last_gate_debug_ = {};
         return no_target_command();
     }
 
@@ -327,6 +497,7 @@ FireCommand FireController::control(
             reset();
             last_fail_stage_ = 1;
         }
+        last_gate_debug_ = {};
         return no_target_command();
     }
     lost_count_ = 0;
@@ -335,6 +506,7 @@ FireCommand FireController::control(
     if (!snapshot.is_valid(selection.target_id)) {
         last_fail_stage_ = 1;
         has_cached_solution_ = false;
+        last_gate_debug_ = {};
         return no_target_command();
     }
 
@@ -358,6 +530,7 @@ FireCommand FireController::control(
         vehicle,
         prediction_dt,
         &gimbal_state_,
+        &snapshot.self_state.q_imu,
         preferred_armor_idx
     );
     last_armor_aim_ = armor_result;
@@ -365,6 +538,7 @@ FireCommand FireController::control(
     if (!armor_result.valid) {
         last_fail_stage_ = 2;  // 装甲板瞄准失败
         has_cached_solution_ = false;
+        last_gate_debug_ = {};
         return no_target_command();
     }
 
@@ -378,6 +552,7 @@ FireCommand FireController::control(
     if (!aim.valid) {
         last_fail_stage_ = 3;  // 弹道解算失败
         has_cached_solution_ = false;
+        last_gate_debug_ = {};
         return no_target_command();
     }
 
@@ -407,13 +582,16 @@ FireCommand FireController::control(
     last_solution_frame_id_ = snapshot.frame_id;
     last_target_confidence_ = vehicle.confidence;
     has_cached_solution_ = true;
-    bool can_fire = evaluate_fire_window(snapshot, latency, vehicle.confidence);
+    bool can_fire = evaluate_fire_window(
+        snapshot, latency, vehicle, prediction_dt, self_velocity
+    );
     can_fire = can_fire && evaluate_rotate_back_gate(
         vehicle,
         prediction_dt,
         latency,
         snapshot.self_state.bullet_speed,
-        self_velocity
+        self_velocity,
+        snapshot.self_state.q_imu
     );
 
     last_fail_stage_ = 9;  // 成功

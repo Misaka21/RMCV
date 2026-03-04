@@ -10,6 +10,7 @@
 #include <limits>
 
 #include "aimer/common/math/math.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
@@ -107,13 +108,14 @@ ArmorAimResult ArmorAim::compute(
     double predict_dt
 ) const
 {
-    return compute(vehicle, predict_dt, nullptr, -1);
+    return compute(vehicle, predict_dt, nullptr, nullptr, -1);
 }
 
 ArmorAimResult ArmorAim::compute(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
+    const Eigen::Quaterniond* q_imu,
     int preferred_armor_idx
 ) const
 {
@@ -123,18 +125,30 @@ ArmorAimResult ArmorAim::compute(
 
     // 是否陀螺仅信 predictor 输出，避免火控重复阈值判定
     if (!vehicle.spin.active) {
-        return compute_non_spin(vehicle, predict_dt, gimbal, preferred_armor_idx);
+        return compute_non_spin(vehicle, predict_dt, gimbal, q_imu, preferred_armor_idx);
     }
-    return compute_spin(vehicle, predict_dt, gimbal, preferred_armor_idx);
+    return compute_spin(vehicle, predict_dt, gimbal, q_imu, preferred_armor_idx);
+}
+
+ArmorAimResult ArmorAim::compute(
+    const predictor::VehicleState& vehicle,
+    double predict_dt,
+    const ::fire_control::GimbalState* gimbal,
+    int preferred_armor_idx
+) const
+{
+    return compute(vehicle, predict_dt, gimbal, nullptr, preferred_armor_idx);
 }
 
 ArmorAimResult ArmorAim::compute_non_spin(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
+    const Eigen::Quaterniond* q_imu,
     int /* preferred_armor_idx */
 ) const
 {
+    (void)q_imu;
     // 非陀螺: 直接喵中心（仅可见）
     return compute_direct(
         vehicle, predict_dt, gimbal, -1,
@@ -149,6 +163,7 @@ ArmorAimResult ArmorAim::compute_spin(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
+    const Eigen::Quaterniond* q_imu,
     int preferred_armor_idx
 ) const
 {
@@ -175,6 +190,7 @@ ArmorAimResult ArmorAim::compute_spin(
             vehicle,
             predict_dt,
             gimbal,
+            q_imu,
             profile.max_orientation_angle,
             profile.max_out_error
         );
@@ -257,6 +273,7 @@ ArmorAimResult ArmorAim::compute_indirect(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
+    const Eigen::Quaterniond* q_imu,
     double max_orientation_angle,
     double max_out_error
 ) const
@@ -278,9 +295,9 @@ ArmorAimResult ArmorAim::compute_indirect(
 
     int best_idx = -1;
     double closest_to_lim = std::numeric_limits<double>::infinity();
-    Eigen::Vector3d best_center = Eigen::Vector3d::Zero();
-    Eigen::Vector3d best_armor_pos = Eigen::Vector3d::Zero();
     double best_armor_to_lim = 0.0;
+    double best_radius = 0.0;
+    double best_z_plus = 0.0;
 
     const Eigen::Vector3d center_t = vehicle.predict_center(predict_dt);
 
@@ -306,9 +323,9 @@ ArmorAimResult ArmorAim::compute_indirect(
         if (armor_to_lim < closest_to_lim) {
             closest_to_lim = armor_to_lim;
             best_idx = i;
-            best_center = center_t;
-            best_armor_pos = armor_pos;
             best_armor_to_lim = armor_to_lim;
+            best_radius = radius;
+            best_z_plus = offset.z();
         }
     }
 
@@ -316,19 +333,39 @@ ArmorAimResult ArmorAim::compute_indirect(
         return result;
     }
 
-    const double time_to_emerge = std::max(0.0, best_armor_to_lim / std::abs(omega));
-    const Eigen::Vector3d center_future = vehicle.predict_center(predict_dt + time_to_emerge);
-    const Eigen::Vector3d offset_t = best_armor_pos - best_center;
+    // 对齐 rm.cv.fans:
+    // closest_to_lim 允许为负，表示“刚过去窗口”的板；此时回推到窗口边界，
+    // 避免继续追踪当前已离场板导致空窗期抖动。
+    const double time_to_emerge = best_armor_to_lim / std::abs(omega);
+    const Eigen::Vector3d center_lim = vehicle.predict_center(predict_dt + time_to_emerge);
 
-    const double delta = omega * time_to_emerge;
-    const double c = std::cos(delta);
-    const double s = std::sin(delta);
-    Eigen::Vector3d offset_rot(
-        offset_t.x() * c - offset_t.y() * s,
-        offset_t.x() * s + offset_t.y() * c,
-        offset_t.z()
+    Eigen::Vector2d camera_z_i2(1.0, 0.0);
+    if (q_imu != nullptr) {
+        // 与 rm.cv.fans 的 converter->get_camera_z_i2 同义：
+        // 使用相机前向轴在世界 XY 平面的投影作为 z_to_v 的参考方向。
+        const Eigen::Vector3d camera_z_world = aimer::tf::vector<
+            aimer::tf::Frame::Camera, aimer::tf::Frame::World
+        >(Eigen::Vector3d(0.0, 0.0, 1.0), *q_imu);
+        camera_z_i2 = Eigen::Vector2d(camera_z_world.x(), camera_z_world.y());
+    } else if (gimbal != nullptr && std::isfinite(gimbal->yaw)) {
+        // 回退路径：无 q_imu 时退化到云台 yaw 近似。
+        camera_z_i2 = Eigen::Vector2d(std::cos(gimbal->yaw), std::sin(gimbal->yaw));
+    }
+    const double n = camera_z_i2.norm();
+    if (n > 1e-6) {
+        camera_z_i2 /= n;
+    } else {
+        camera_z_i2 = Eigen::Vector2d(1.0, 0.0);
+    }
+
+    // lim 方向由“相机前向 + 窗口边界角”决定，而不是绑定某块当前板位置。
+    const Eigen::Vector2d lim_norm2 = aimer::math::rotate(camera_z_i2, M_PI + zn_to_lim);
+    const Eigen::Vector3d offset_lim(
+        lim_norm2.x() * best_radius,
+        lim_norm2.y() * best_radius,
+        best_z_plus
     );
-    const Eigen::Vector3d emerge_pos = center_future + offset_rot;
+    const Eigen::Vector3d emerge_pos = center_lim + offset_lim;
 
     result.valid = true;
     result.armor_idx = best_idx;
@@ -340,14 +377,12 @@ ArmorAimResult ArmorAim::compute_indirect(
 
     // 速度用于前馈：中心速度 + 切向速度
     Eigen::Vector3d tangent_vel(
-        -omega * offset_rot.y(),
-        +omega * offset_rot.x(),
+        -omega * offset_lim.y(),
+        +omega * offset_lim.x(),
         0.0
     );
     result.target_vel = vehicle.velocity + tangent_vel;
 
-    // gimbal 仅用于 debug 语义，保持参数位兼容，避免未使用告警
-    (void)gimbal;
     return result;
 }
 

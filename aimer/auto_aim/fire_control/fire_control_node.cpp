@@ -150,7 +150,7 @@ void finalize_latency(
         // 避免 fly_time 基于不同装甲板估计。
         Eigen::Vector3d pos = Eigen::Vector3d::Zero();
         ArmorAimResult armor_result = armor_aim.compute(
-            *target, dt, gimbal, iter_preferred_armor_idx
+            *target, dt, gimbal, &snapshot.self_state.q_imu, iter_preferred_armor_idx
         );
         if (armor_result.valid) {
             pos = armor_result.target_pos;
@@ -413,7 +413,6 @@ void fire_control_run(const std::string& /* config_path */) {
                 const auto& aim = controller.last_aim();
                 const auto& armor_aim = controller.last_armor_aim();
                 const auto& plan = controller.last_plan();
-                const auto& gimbal = controller.gimbal_state();
 
                 dbg.valid = aim.valid;
                 dbg.control_enabled = cmd.control_enabled;
@@ -442,11 +441,32 @@ void fire_control_run(const std::string& /* config_path */) {
                 dbg.rotate_back_start_ms = controller.last_rotate_back_start() * 1000.0;
                 dbg.rotate_back_end_ms = controller.last_rotate_back_end() * 1000.0;
                 dbg.rotate_back_cmd_ms = controller.last_rotate_back_command_time() * 1000.0;
+                const auto& gate = controller.last_gate_debug();
+                dbg.gate_min_confidence = gate.tracking.min_confidence;
+                dbg.gate_error_rate = gate.tracking.error_rate;
+                dbg.gate_confidence = gate.tracking.confidence;
+                dbg.gate_conf_ok = gate.tracking.conf_ok;
+                dbg.gate_angle_ok = gate.tracking.angle_ok;
+                dbg.gate_yaw_ok = gate.tracking.yaw_ok;
+                dbg.gate_pitch_ok = gate.tracking.pitch_ok;
+                dbg.gate_allow_fire_ok = gate.allow_fire_ok;
+                dbg.gate_swing_ok = gate.swing_ok;
+                dbg.gate_out_ok = gate.out_ok;
+                dbg.gate_hit_offset_yaw = gate.tracking.hit_offset_yaw;
+                dbg.gate_hit_offset_pitch = gate.tracking.hit_offset_pitch;
+                dbg.gate_yaw_limit = gate.tracking.yaw_limit;
+                dbg.gate_pitch_limit = gate.tracking.pitch_limit;
+                dbg.gate_swing_offset_yaw = gate.swing_offset_yaw;
+                dbg.gate_swing_offset_pitch = gate.swing_offset_pitch;
+                dbg.gate_swing_yaw_limit = gate.swing_yaw_limit;
+                dbg.gate_swing_pitch_limit = gate.swing_pitch_limit;
+                dbg.gate_out_offset_yaw = gate.out_offset_yaw;
+                dbg.gate_out_offset_pitch = gate.out_offset_pitch;
+                dbg.gate_out_yaw_limit = gate.out_yaw_limit;
+                dbg.gate_out_pitch_limit = gate.out_pitch_limit;
 
                 if (snapshot.is_valid(cmd.target_id)) {
                     const auto& v = snapshot.vehicles[cmd.target_id];
-                    dbg.gate_confidence = v.confidence;
-                    dbg.gate_conf_ok = (v.confidence >= dbg.gate_min_confidence);
                     dbg.spin_active = v.spin.active;
                     dbg.spin_level = static_cast<int>(v.spin.level);
                     dbg.spin_omega = v.spin.omega;
@@ -486,31 +506,6 @@ void fire_control_run(const std::string& /* config_path */) {
                     } else {
                         dbg.selected_armor_visible = false;
                     }
-                }
-
-                const double yaw_err = ::fire_control::GimbalState::normalize_angle(
-                    aim.yaw - gimbal.yaw
-                );
-                const double pitch_err = aim.pitch - gimbal.pitch;
-                dbg.gate_angle_ok = (std::abs(yaw_err) < M_PI_2) && (std::abs(pitch_err) < M_PI_2);
-
-                if (dbg.gate_angle_ok && aim.distance > 0.01 && armor_aim.armor_width > 0.0
-                    && armor_aim.armor_height > 0.0)
-                {
-                    dbg.gate_hit_offset_yaw = aim.distance * std::abs(std::tan(yaw_err));
-                    dbg.gate_hit_offset_pitch = aim.distance * std::abs(std::tan(pitch_err));
-                    const double cos_inclined = std::abs(std::cos(armor_aim.z_to_v));
-                    dbg.gate_yaw_limit = (armor_aim.armor_width * 0.5) * cos_inclined * dbg.gate_error_rate;
-                    dbg.gate_pitch_limit = (armor_aim.armor_height * 0.5) * dbg.gate_error_rate;
-                    dbg.gate_yaw_ok = dbg.gate_hit_offset_yaw < dbg.gate_yaw_limit;
-                    dbg.gate_pitch_ok = dbg.gate_hit_offset_pitch < dbg.gate_pitch_limit;
-                } else {
-                    dbg.gate_hit_offset_yaw = 0.0;
-                    dbg.gate_hit_offset_pitch = 0.0;
-                    dbg.gate_yaw_limit = 0.0;
-                    dbg.gate_pitch_limit = 0.0;
-                    dbg.gate_yaw_ok = false;
-                    dbg.gate_pitch_ok = false;
                 }
             }
             fire_debug->get() = dbg;

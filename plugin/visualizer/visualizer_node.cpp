@@ -157,7 +157,7 @@ static void draw_fire_debug_panel(
     };
 
     // 半透明背景
-    int panel_h = 460;
+    int panel_h = 520;
     int panel_w = 560;
     int safe_w = std::min(panel_w, vis.cols);
     int safe_h = std::min(panel_h, vis.rows);
@@ -268,6 +268,14 @@ static void draw_fire_debug_panel(
             dbg.gate_hit_offset_pitch * 100.0, dbg.gate_pitch_limit * 100.0,
             dbg.gate_pitch_ok ? "OK" : "BLOCK"),
             dbg.gate_pitch_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+        put(fmt::format("Gate swing(y): {:.1f}/{:.1f}cm [{}]",
+            dbg.gate_swing_offset_yaw * 100.0, dbg.gate_swing_yaw_limit * 100.0,
+            dbg.gate_swing_ok ? "OK" : "BLOCK"),
+            dbg.gate_swing_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+        put(fmt::format("Gate out(y): {:.1f}/{:.1f}cm [{}]",
+            dbg.gate_out_offset_yaw * 100.0, dbg.gate_out_yaw_limit * 100.0,
+            dbg.gate_out_ok ? "OK" : "BLOCK"),
+            dbg.gate_out_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
 
         put(fmt::format("Gate allow_fire: {}",
             dbg.gate_allow_fire_ok ? "OK" : "BLOCK"),
@@ -285,15 +293,18 @@ static void draw_fire_debug_panel(
                 dbg.gate_rotate_back_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
         }
 
-        put(fmt::format("Gate sum: C{} A{} Y{} P{} F{} R{}",
+        put(fmt::format("Gate sum: C{} A{} Y{} P{} S{} O{} F{} R{}",
             dbg.gate_conf_ok ? "+" : "-",
             dbg.gate_angle_ok ? "+" : "-",
             dbg.gate_yaw_ok ? "+" : "-",
             dbg.gate_pitch_ok ? "+" : "-",
+            dbg.gate_swing_ok ? "+" : "-",
+            dbg.gate_out_ok ? "+" : "-",
             dbg.gate_allow_fire_ok ? "+" : "-",
             dbg.gate_rotate_back_ok ? "+" : "-"),
             (dbg.gate_conf_ok && dbg.gate_angle_ok && dbg.gate_yaw_ok
-             && dbg.gate_pitch_ok && dbg.gate_allow_fire_ok && dbg.gate_rotate_back_ok)
+             && dbg.gate_pitch_ok && dbg.gate_swing_ok && dbg.gate_out_ok
+             && dbg.gate_allow_fire_ok && dbg.gate_rotate_back_ok)
                 ? cv::Scalar(80, 220, 80)
                 : cv::Scalar(0, 0, 255));
     }

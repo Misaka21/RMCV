@@ -12,19 +12,23 @@
 
 namespace autoaim::fire_control {
 
-bool FireDecision::decide(
+FireDecision::DecisionMetrics FireDecision::evaluate(
     const AimResult& aim,
     const ArmorAimResult& armor_aim,
     const GimbalState& gimbal,
     double confidence
 ) const
 {
+    DecisionMetrics metrics;
+
     // 1. 置信度检查
-    double min_confidence = runtime_param::get_param<double>(
+    metrics.min_confidence = runtime_param::get_param<double>(
         "AutoAim.FireControl.min_confidence"
     );
-    if (confidence < min_confidence) {
-        return false;
+    metrics.confidence = confidence;
+    metrics.conf_ok = (confidence >= metrics.min_confidence);
+    if (!metrics.conf_ok) {
+        return metrics;
     }
 
     // 2. 计算角度误差
@@ -34,12 +38,14 @@ bool FireDecision::decide(
 
     // 角误差超过 90° 时，切线函数会翻转符号，直接判定不可开火
     if (std::abs(yaw_err) >= M_PI_2 || std::abs(pitch_err) >= M_PI_2) {
-        return false;
+        metrics.angle_ok = false;
+        return metrics;
     }
+    metrics.angle_ok = true;
 
     // 3. 将角度误差转换为落点偏移距离 (米)
-    double hit_offset_yaw = distance * std::abs(std::tan(yaw_err));
-    double hit_offset_pitch = distance * std::abs(std::tan(pitch_err));
+    metrics.hit_offset_yaw = distance * std::abs(std::tan(yaw_err));
+    metrics.hit_offset_pitch = distance * std::abs(std::tan(pitch_err));
 
     // 4. 获取装甲板尺寸 (从 ArmorAimResult)
     double armor_width = (armor_aim.armor_width > 0)
@@ -51,13 +57,25 @@ bool FireDecision::decide(
     double cos_inclined = std::abs(std::cos(armor_aim.z_to_v));
 
     // 6. 开火判断: 落点偏移 < 装甲板有效区域
-    double error_rate = runtime_param::get_param<double>(
+    metrics.error_rate = runtime_param::get_param<double>(
         "AutoAim.FireControl.error_rate"
     );
-    bool yaw_ok = hit_offset_yaw < (armor_width / 2.0) * cos_inclined * error_rate;
-    bool pitch_ok = hit_offset_pitch < (armor_height / 2.0) * error_rate;
+    metrics.yaw_limit = (armor_width / 2.0) * cos_inclined * metrics.error_rate;
+    metrics.pitch_limit = (armor_height / 2.0) * metrics.error_rate;
+    metrics.yaw_ok = metrics.hit_offset_yaw < metrics.yaw_limit;
+    metrics.pitch_ok = metrics.hit_offset_pitch < metrics.pitch_limit;
 
-    return yaw_ok && pitch_ok;
+    return metrics;
+}
+
+bool FireDecision::decide(
+    const AimResult& aim,
+    const ArmorAimResult& armor_aim,
+    const GimbalState& gimbal,
+    double confidence
+) const
+{
+    return evaluate(aim, armor_aim, gimbal, confidence).pass();
 }
 
 double FireDecision::compute_tracking_error(
