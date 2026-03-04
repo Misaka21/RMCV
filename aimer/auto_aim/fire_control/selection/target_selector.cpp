@@ -25,6 +25,8 @@ namespace autoaim::fire_control {
 
 namespace {
 
+constexpr double SPIN_MODE_MIN_OMEGA = 0.5;  // 与 ArmorAim::compute() 保持一致
+
 double get_param_or(const std::string& name, double default_value)
 {
     auto ptr = runtime_param::find_param(name);
@@ -237,14 +239,13 @@ bool TargetSelector::has_visible_armor(
     bool allow_indirect
 ) const
 {
+    const bool spin_mode = vehicle.spin.active && std::abs(vehicle.spin.omega) >= SPIN_MODE_MIN_OMEGA;
     for (int i = 0; i < vehicle.armor_count; ++i) {
         const auto& armor = vehicle.armors[i];
 
-        // 仅可见装甲板可参与 DIRECT 可打判定
+        // 非陀螺: 只要可见即可参与；陀螺: 仍按朝向角限制 DIRECT 可打。
         if (!armor.visible) continue;
-
-        // 角度过滤 (侧面装甲板不打)
-        if (std::abs(armor.z_to_v) > max_angle) continue;
+        if (spin_mode && std::abs(armor.z_to_v) > max_angle) continue;
 
         return true;  // 有可打击的装甲板
     }
@@ -392,13 +393,14 @@ int TargetSelector::pick_best_visible_armor(
     double dt
 ) const
 {
+    const bool spin_mode = vehicle.spin.active && std::abs(vehicle.spin.omega) >= SPIN_MODE_MIN_OMEGA;
     int best_idx = -1;
     double best_dist = std::numeric_limits<double>::infinity();
 
     for (int i = 0; i < vehicle.armor_count; ++i) {
         const auto& armor = vehicle.armors[i];
         if (!armor.visible) continue;
-        if (std::abs(armor.z_to_v) > max_angle) continue;
+        if (spin_mode && std::abs(armor.z_to_v) > max_angle) continue;
 
         const Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
         const double dist = compute_center_distance(pos, gimbal);

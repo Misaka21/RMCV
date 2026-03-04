@@ -85,14 +85,11 @@ ArmorAimResult ArmorAim::compute_non_spin(
     ArmorAimResult result;
     result.mode = AimMode::DIRECT;
 
-    const double max_orientation_angle = runtime_param::get_param<double>(
-        "AutoAim.FireControl.PID.max_orientation_angle"
-    ) * M_PI / 180.0;
-
     std::vector<int> direct_indices;
     direct_indices.reserve(vehicle.armor_count);
     for (int i = 0; i < vehicle.armor_count; ++i) {
-        if (is_direct_candidate(vehicle.armors[i], max_orientation_angle)) {
+        // 非陀螺路径: 不使用 max_orientation_angle 过滤，避免调反陀螺阈值影响常规跟踪。
+        if (vehicle.armors[i].visible) {
             direct_indices.push_back(i);
         }
     }
