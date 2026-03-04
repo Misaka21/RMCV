@@ -107,6 +107,28 @@ static double center_cost_deg(
     return std::hypot(dyaw, dpitch) * 57.3;
 }
 
+static double predicted_armor_z_to_v(
+    const VehicleState& v,
+    int armor_idx,
+    double predict_dt
+) {
+    if (armor_idx < 0 || armor_idx >= v.armor_count) {
+        return 0.0;
+    }
+    const auto& a = v.armors[armor_idx];
+    if (!v.spin.active || std::abs(v.spin.omega) < 0.1) {
+        return a.z_to_v;
+    }
+    const Eigen::Vector3d pos = v.predict_armor_position(armor_idx, predict_dt);
+    const double armor_yaw = a.yaw + v.spin.omega * predict_dt;
+    const double view_yaw = std::atan2(pos.y(), pos.x());
+    return aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI);
+}
+
+static const char* armor_aim_mode_name(int mode) {
+    return mode == 1 ? "INDIRECT" : "DIRECT";
+}
+
 // ==================== OSD 绘制函数 ====================
 
 /**
@@ -127,8 +149,8 @@ static void draw_fire_debug_panel(
     };
 
     // 半透明背景
-    int panel_h = 250;
-    int panel_w = 460;
+    int panel_h = 460;
+    int panel_w = 560;
     int safe_w = std::min(panel_w, vis.cols);
     int safe_h = std::min(panel_h, vis.rows);
     if (safe_w > 0 && safe_h > 0) {
@@ -162,6 +184,8 @@ static void draw_fire_debug_panel(
     put(fmt::format("BS: {:.1f}m/s | valid: 0x{:03x} pri: {} frm: {}",
         dbg.bullet_speed, dbg.snapshot_valid_mask,
         dbg.snapshot_primary_id, dbg.snapshot_frame_id));
+    put(fmt::format("Snapshot age: {:.1f}ms | pred_dt: {:.1f}ms",
+        dbg.snapshot_age_ms, dbg.prediction_dt * 1000.0), {170, 200, 255});
 
     // 4. Gimbal 角度 + 角速度
     put(fmt::format("Gimbal: yaw={:+.1f} pitch={:+.1f} deg",
@@ -198,50 +222,56 @@ static void draw_fire_debug_panel(
         dbg.tracking_error * 100, dbg.fire_now ? ">>> FIRE <<<" : "HOLD"),
         fire_color);
 
-    // 9. 开火门控分解 (用于定位“瞄到了但不开火/乱开火”问题)
+    // 9. 选板路径与窗口状态
+    put(fmt::format("AimMode: {}  t_fire={:.1f}ms  armor_vis:{}",
+        armor_aim_mode_name(dbg.armor_aim_mode),
+        dbg.armor_time_to_fire * 1000.0,
+        dbg.selected_armor_visible ? "Y" : "N"), cv::Scalar(80, 220, 255));
+    put(fmt::format("Spin: active={} lvl={} w={:+.1f}d/s  win:{}({:.1f}deg)",
+        dbg.spin_active ? 1 : 0, dbg.spin_level, dbg.spin_omega * 57.3,
+        dbg.orientation_window_on ? "ON" : "OFF", dbg.orientation_window_deg),
+        cv::Scalar(180, 210, 255));
+    put(fmt::format("Selected z_to_v={:+.1f}deg  armor_cnt={}",
+        dbg.selected_armor_z_to_v * 57.3, dbg.selected_armor_count), cv::Scalar(170, 210, 255));
+
+    // 10. 指令注入参数
+    put(fmt::format("Cmd inject: add_pred={:.1f}ms  off(y,p)=({:+.2f},{:+.2f})deg",
+        dbg.cmd_additional_predict_time * 1000.0,
+        dbg.aim_offset_yaw * 57.3, dbg.aim_offset_pitch * 57.3),
+        cv::Scalar(140, 220, 220));
+
+    // 11. 开火门控分解（真实火控判定字段）
     const int tid = choose_debug_target_id(snapshot, dbg);
     if (tid >= 0 && snapshot.is_valid(tid)) {
-        const auto& vehicle = snapshot.vehicles[tid];
-        const double min_conf = runtime_param::get_param<double>("AutoAim.FireControl.min_confidence");
-        const double error_rate = runtime_param::get_param<double>("AutoAim.FireControl.error_rate");
-        const bool conf_ok = vehicle.confidence >= min_conf;
+        put(fmt::format("Gate conf: {:.2f}/{:.2f} [{}]",
+            dbg.gate_confidence, dbg.gate_min_confidence, dbg.gate_conf_ok ? "OK" : "BLOCK"),
+            dbg.gate_conf_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
 
-        put(fmt::format("Gate conf: {:.2f} / {:.2f} [{}]",
-            vehicle.confidence, min_conf, conf_ok ? "OK" : "BLOCK"),
-            conf_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+        put(fmt::format("Gate angle: {}", dbg.gate_angle_ok ? "OK" : "BLOCK"),
+            dbg.gate_angle_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
 
-        if (dbg.armor_idx >= 0 && dbg.armor_idx < vehicle.armor_count)
-        {
-            const auto& armor = vehicle.armors[dbg.armor_idx];
-            const double yaw_err = ::fire_control::GimbalState::normalize_angle(
-                dbg.aim_yaw - dbg.gimbal_yaw
-            );
-            const double pitch_err = dbg.aim_pitch - dbg.gimbal_pitch;
-            const bool angle_ok = std::abs(yaw_err) < M_PI_2 && std::abs(pitch_err) < M_PI_2;
+        put(fmt::format("Gate yaw: {:.1f}/{:.1f}cm [{}]",
+            dbg.gate_hit_offset_yaw * 100.0, dbg.gate_yaw_limit * 100.0,
+            dbg.gate_yaw_ok ? "OK" : "BLOCK"),
+            dbg.gate_yaw_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+        put(fmt::format("Gate pit: {:.1f}/{:.1f}cm [{}]",
+            dbg.gate_hit_offset_pitch * 100.0, dbg.gate_pitch_limit * 100.0,
+            dbg.gate_pitch_ok ? "OK" : "BLOCK"),
+            dbg.gate_pitch_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
 
-            if (angle_ok && dbg.distance > 0.01) {
-                const double hit_offset_yaw = dbg.distance * std::abs(std::tan(yaw_err));
-                const double hit_offset_pitch = dbg.distance * std::abs(std::tan(pitch_err));
-                const double cos_inclined = std::abs(std::cos(armor.z_to_v));
-                const double yaw_limit = (armor.width() / 2.0) * cos_inclined * error_rate;
-                const double pitch_limit = (armor.height() / 2.0) * error_rate;
-                const bool yaw_ok = hit_offset_yaw < yaw_limit;
-                const bool pitch_ok = hit_offset_pitch < pitch_limit;
-
-                put(fmt::format("Gate yaw: {:.1f}/{:.1f}cm [{}]",
-                    hit_offset_yaw * 100, yaw_limit * 100, yaw_ok ? "OK" : "BLOCK"),
-                    yaw_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
-                put(fmt::format("Gate pit: {:.1f}/{:.1f}cm [{}]",
-                    hit_offset_pitch * 100, pitch_limit * 100, pitch_ok ? "OK" : "BLOCK"),
-                    pitch_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
-                put(fmt::format("z_to_v:{:+.1f}deg cos:{:.2f} err_rate:{:.2f}",
-                    armor.z_to_v * 57.3, cos_inclined, error_rate), cv::Scalar(170, 210, 255));
-            } else {
-                put("Gate angle: BLOCK (yaw/pitch error >= 90deg)", cv::Scalar(0, 0, 255));
-            }
-        } else {
-            put("Gate armor: N/A (invalid armor idx)", cv::Scalar(120, 120, 255));
-        }
+        put(fmt::format("Gate allow_fire: {}",
+            dbg.gate_allow_fire_ok ? "OK" : "BLOCK"),
+            dbg.gate_allow_fire_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+        put(fmt::format("Gate sum: C{} A{} Y{} P{} F{}",
+            dbg.gate_conf_ok ? "+" : "-",
+            dbg.gate_angle_ok ? "+" : "-",
+            dbg.gate_yaw_ok ? "+" : "-",
+            dbg.gate_pitch_ok ? "+" : "-",
+            dbg.gate_allow_fire_ok ? "+" : "-"),
+            (dbg.gate_conf_ok && dbg.gate_angle_ok && dbg.gate_yaw_ok
+             && dbg.gate_pitch_ok && dbg.gate_allow_fire_ok)
+                ? cv::Scalar(80, 220, 80)
+                : cv::Scalar(0, 0, 255));
     }
 }
 
@@ -328,6 +358,7 @@ static void draw_selected_target_panel(
     }
 
     const auto& v = snapshot.vehicles[tid];
+    const double pred_dt = std::max(0.0, dbg.prediction_dt);
     const double max_angle = runtime_param::get_param<double>(
         "AutoAim.FireControl.PID.max_orientation_angle"
     ) * M_PI / 180.0;
@@ -362,18 +393,22 @@ static void draw_selected_target_panel(
     else if (v.spin.level == SpinLevel::HIGH) spin_label = "HIGH";
     put(fmt::format("Selected T{}  pri={}  arm_sel={}  conf={:.2f}",
         tid, snapshot.primary_target_id, dbg.armor_idx, v.confidence), cv::Scalar(0, 255, 255));
+    put(fmt::format("AimMode={}  pred_dt={:.1f}ms  t_fire={:.1f}ms",
+        armor_aim_mode_name(dbg.armor_aim_mode), pred_dt * 1000.0, dbg.armor_time_to_fire * 1000.0),
+        cv::Scalar(100, 220, 255));
     put(fmt::format("spin:{} active={} w={:+.1f}d/s  center={:.2f}m",
         spin_label, v.spin.active ? 1 : 0, v.spin.omega * 57.3, v.center.norm()), cv::Scalar(180, 180, 255));
     put(fmt::format("ori_window:{}  max={:.1f}deg  frame={} mask=0x{:03x}",
         use_window ? "ON" : "OFF", max_angle * 57.3, snapshot.frame_id, snapshot.valid_mask),
         cv::Scalar(160, 220, 255));
-    put("A#: flags(* selected, V visible, W in-window) | z_to_v | center_cost | score | dist",
+    put("A#: flags(* sel, V vis, W in-win) | z_to_v(pred) | center_cost | score | dist",
         cv::Scalar(140, 140, 140));
 
     for (int i = 0; i < v.armor_count; ++i) {
         const auto& a = v.armors[i];
-        const Eigen::Vector3d pos = v.predict_armor_position(i, 0.0);
-        const bool in_window = (!use_window) || (std::abs(a.z_to_v) <= max_angle);
+        const Eigen::Vector3d pos = v.predict_armor_position(i, pred_dt);
+        const double z_to_v = predicted_armor_z_to_v(v, i, pred_dt);
+        const bool in_window = (!use_window) || (std::abs(z_to_v) <= max_angle);
         const double cc_deg = center_cost_deg(pos, dbg);
         const double dist = pos.norm();
         const bool selected = (i == dbg.armor_idx);
@@ -386,7 +421,7 @@ static void draw_selected_target_panel(
             selected ? "*" : " ",
             a.visible ? "V" : "-",
             in_window ? "W" : "-",
-            a.z_to_v * 57.3, cc_deg, a.score, dist),
+            z_to_v * 57.3, cc_deg, a.score, dist),
             color);
     }
 }
@@ -529,14 +564,18 @@ static void draw_target_geometry_markers(
         return;
     }
     const auto& v = snapshot.vehicles[tid];
+    const double pred_dt = std::max(0.0, dbg.prediction_dt);
+    const Eigen::Vector3d center_world = v.predict_center(pred_dt);
 
     bool center_valid = false;
-    const cv::Point2f center_px = aimer::tf::world_to_pixel(v.center, q_imu, center_valid);
+    const cv::Point2f center_px = aimer::tf::world_to_pixel(
+        center_world, q_imu, center_valid
+    );
     if (center_valid) {
         cv::drawMarker(vis, center_px, cv::Scalar(255, 0, 255),
             cv::MARKER_TILTED_CROSS, 16, 2, cv::LINE_AA);
 
-        Eigen::Vector3d tip_world = v.center + v.velocity * 0.15;
+        Eigen::Vector3d tip_world = center_world + v.velocity * 0.15;
         bool tip_valid = false;
         const cv::Point2f tip_px = aimer::tf::world_to_pixel(tip_world, q_imu, tip_valid);
         if (tip_valid) {
@@ -547,7 +586,7 @@ static void draw_target_geometry_markers(
 
     for (int i = 0; i < v.armor_count; ++i) {
         const auto& armor = v.armors[i];
-        Eigen::Vector3d pos = v.predict_armor_position(i, 0.0);
+        Eigen::Vector3d pos = v.predict_armor_position(i, pred_dt);
         bool valid = false;
         cv::Point2f px = aimer::tf::world_to_pixel(pos, q_imu, valid);
         if (!valid) continue;
@@ -559,7 +598,9 @@ static void draw_target_geometry_markers(
         int radius = selected ? 9 : 6;
         cv::circle(vis, px, radius, color, 2, cv::LINE_AA);
         cv::putText(vis,
-            fmt::format("A{}{} z{:+.0f}", i, armor.visible ? "V" : "-", armor.z_to_v * 57.3),
+            fmt::format("A{}{} z{:+.0f}",
+                i, armor.visible ? "V" : "-",
+                predicted_armor_z_to_v(v, i, pred_dt) * 57.3),
             px + cv::Point2f(8, -6),
             cv::FONT_HERSHEY_SIMPLEX, 0.35, color, 1, cv::LINE_AA);
     }

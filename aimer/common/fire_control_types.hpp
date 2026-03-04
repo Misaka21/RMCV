@@ -9,6 +9,7 @@
 #define __AIMER_FIRE_CONTROL_CORE_TYPES_HPP__
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 
 #include <Eigen/Core>
@@ -245,6 +246,41 @@ struct FireDebugInfo {
     int snapshot_frame_id = -1;
     int fail_stage = 0;                // 0=未执行, 1=选目标失败, 2=装甲板瞄准失败, 3=弹道解算失败, 9=成功
     double bullet_speed = 0;
+
+    // 选板/陀螺诊断
+    int armor_aim_mode = 0;            // 0=DIRECT, 1=INDIRECT
+    double armor_time_to_fire = 0;     // INDIRECT 等待时长
+    bool selected_armor_visible = false;
+    double selected_armor_z_to_v = 0;  // rad
+    int selected_armor_count = 0;
+    bool orientation_window_on = false;
+    double orientation_window_deg = 0; // deg
+    bool spin_active = false;
+    int spin_level = 0;                // 0/1/2
+    double spin_omega = 0;             // rad/s
+    double prediction_dt = 0;          // s (img->prediction 目标时间)
+
+    // 开火门控分解（与 FireDecision 同语义）
+    double gate_min_confidence = 0;
+    double gate_error_rate = 0;
+    double gate_confidence = 0;
+    bool gate_conf_ok = false;
+    bool gate_angle_ok = false;
+    bool gate_yaw_ok = false;
+    bool gate_pitch_ok = false;
+    bool gate_allow_fire_ok = false;   // self_state.allow_fire
+    double gate_hit_offset_yaw = 0;    // m
+    double gate_hit_offset_pitch = 0;  // m
+    double gate_yaw_limit = 0;         // m
+    double gate_pitch_limit = 0;       // m
+
+    // 指令注入参数（调参用）
+    double cmd_additional_predict_time = 0;
+    double aim_offset_yaw = 0;         // rad
+    double aim_offset_pitch = 0;       // rad
+
+    // 数据时效
+    double snapshot_age_ms = 0;
 
     // fail_stage 转人可读字符串
     static const char* fail_stage_name(int stage) {

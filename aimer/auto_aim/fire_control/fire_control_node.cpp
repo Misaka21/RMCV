@@ -19,6 +19,7 @@
 #include "aimer/common/fire_control_types.hpp"
 #include "umt/BasicObjManager.hpp"
 #include "plugin/debug/logger.hpp"
+#include "plugin/param/runtime_parameter.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
 #include "plugin/webview/dashboard.hpp"
 
@@ -352,6 +353,9 @@ void fire_control_run(const std::string& /* config_path */) {
             dbg.snapshot_primary_id = snapshot.primary_target_id;
             dbg.snapshot_frame_id = snapshot.frame_id;
             dbg.bullet_speed = snapshot.self_state.bullet_speed;
+            dbg.snapshot_age_ms = (snapshot.self_state.timestamp_us > 0)
+                ? static_cast<double>(current_time_us - snapshot.self_state.timestamp_us) / 1000.0
+                : -1.0;
 
             // 云台状态: 无论是否有目标都写，用于绘制枪管指向
             {
@@ -370,6 +374,23 @@ void fire_control_run(const std::string& /* config_path */) {
             dbg.latency_fire_to_hit = latency.fire_to_hit * 1000;
             dbg.latency_total = latency.prediction_latency() * 1000;
             dbg.latency_hit_total = latency.hit_latency() * 1000;
+            dbg.prediction_dt = latency.prediction_latency();
+            dbg.cmd_additional_predict_time = runtime_param::get_param<double>(
+                "AutoAim.FireControl.Cmd.additional_predict_time"
+            );
+            dbg.aim_offset_yaw = runtime_param::get_param<double>(
+                "AutoAim.FireControl.AimOffset.yaw"
+            );
+            dbg.aim_offset_pitch = runtime_param::get_param<double>(
+                "AutoAim.FireControl.AimOffset.pitch"
+            );
+            dbg.gate_min_confidence = runtime_param::get_param<double>(
+                "AutoAim.FireControl.min_confidence"
+            );
+            dbg.gate_error_rate = runtime_param::get_param<double>(
+                "AutoAim.FireControl.error_rate"
+            );
+            dbg.gate_allow_fire_ok = snapshot.self_state.allow_fire;
 
             if (mode == aimer::AimMode::AUTOAIM) {
                 const auto& aim = controller.last_aim();
@@ -382,6 +403,9 @@ void fire_control_run(const std::string& /* config_path */) {
                 dbg.target_id = cmd.target_id;
                 dbg.armor_idx = armor_aim.armor_idx;
                 dbg.target_pos = armor_aim.target_pos;
+                dbg.armor_aim_mode = static_cast<int>(armor_aim.mode);
+                dbg.armor_time_to_fire = armor_aim.time_to_fire;
+                dbg.selected_armor_z_to_v = armor_aim.z_to_v;
 
                 dbg.aim_yaw = aim.yaw;
                 dbg.aim_pitch = aim.pitch;
@@ -393,6 +417,56 @@ void fire_control_run(const std::string& /* config_path */) {
                 dbg.fly_time = aim.fly_time;
                 dbg.timestamp = current_time;
                 dbg.fail_stage = controller.last_fail_stage();
+
+                if (snapshot.is_valid(cmd.target_id)) {
+                    const auto& v = snapshot.vehicles[cmd.target_id];
+                    dbg.gate_confidence = v.confidence;
+                    dbg.gate_conf_ok = (v.confidence >= dbg.gate_min_confidence);
+                    dbg.spin_active = v.spin.active;
+                    dbg.spin_level = static_cast<int>(v.spin.level);
+                    dbg.spin_omega = v.spin.omega;
+                    dbg.selected_armor_count = v.armor_count;
+                    const double max_orientation_angle_deg = runtime_param::get_param<double>(
+                        "AutoAim.FireControl.PID.max_orientation_angle"
+                    );
+                    dbg.orientation_window_deg = max_orientation_angle_deg;
+                    dbg.orientation_window_on =
+                        v.spin.active
+                        && (v.spin.level != predictor::SpinLevel::HIGH)
+                        && (max_orientation_angle_deg > 0.0);
+
+                    if (armor_aim.armor_idx >= 0 && armor_aim.armor_idx < v.armor_count) {
+                        const auto& armor = v.armors[armor_aim.armor_idx];
+                        dbg.selected_armor_visible = armor.visible;
+                    } else {
+                        dbg.selected_armor_visible = false;
+                    }
+                }
+
+                const double yaw_err = ::fire_control::GimbalState::normalize_angle(
+                    aim.yaw - gimbal.yaw
+                );
+                const double pitch_err = aim.pitch - gimbal.pitch;
+                dbg.gate_angle_ok = (std::abs(yaw_err) < M_PI_2) && (std::abs(pitch_err) < M_PI_2);
+
+                if (dbg.gate_angle_ok && aim.distance > 0.01 && armor_aim.armor_width > 0.0
+                    && armor_aim.armor_height > 0.0)
+                {
+                    dbg.gate_hit_offset_yaw = aim.distance * std::abs(std::tan(yaw_err));
+                    dbg.gate_hit_offset_pitch = aim.distance * std::abs(std::tan(pitch_err));
+                    const double cos_inclined = std::abs(std::cos(armor_aim.z_to_v));
+                    dbg.gate_yaw_limit = (armor_aim.armor_width * 0.5) * cos_inclined * dbg.gate_error_rate;
+                    dbg.gate_pitch_limit = (armor_aim.armor_height * 0.5) * dbg.gate_error_rate;
+                    dbg.gate_yaw_ok = dbg.gate_hit_offset_yaw < dbg.gate_yaw_limit;
+                    dbg.gate_pitch_ok = dbg.gate_hit_offset_pitch < dbg.gate_pitch_limit;
+                } else {
+                    dbg.gate_hit_offset_yaw = 0.0;
+                    dbg.gate_hit_offset_pitch = 0.0;
+                    dbg.gate_yaw_limit = 0.0;
+                    dbg.gate_pitch_limit = 0.0;
+                    dbg.gate_yaw_ok = false;
+                    dbg.gate_pitch_ok = false;
+                }
             }
             fire_debug->get() = dbg;
         }
