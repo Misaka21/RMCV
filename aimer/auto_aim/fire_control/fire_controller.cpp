@@ -41,12 +41,12 @@ double get_spin_window_rad(const predictor::VehicleState& vehicle)
 
     switch (vehicle.spin.level) {
         case predictor::SpinLevel::HIGH:
-            return aimer::math::deg_to_rad(top2_deg);
+            return aimer::math::deg2rad(top2_deg);
         case predictor::SpinLevel::LOW:
-            return aimer::math::deg_to_rad(top1_deg);
+            return aimer::math::deg2rad(top1_deg);
         case predictor::SpinLevel::NONE:
         default:
-            return aimer::math::deg_to_rad(top0_deg);
+            return aimer::math::deg2rad(top0_deg);
     }
 }
 
