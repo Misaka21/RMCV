@@ -76,12 +76,14 @@ double get_armor_credit_time() {
 }
 
 double get_draw_predict_dt() {
-    // 优先使用火控实际的 prediction_dt (img→hit 击打时间)
+    // 优先使用火控全链路击打时间: prediction_dt + control_to_fire
+    // prediction_dt = img_age + send_to_control + fire_to_hit (火控位置预测用)
+    // control_to_fire = 控制器→出膛 (ms, 需转换为 s)
     auto fd = umt::BasicObjManager<::fire_control::FireDebugInfo>::find("fire_debug");
     if (fd) {
         const auto& dbg = fd->get();
         if (dbg.fc_heartbeat > 0 && dbg.prediction_dt > 0.001) {
-            return dbg.prediction_dt;
+            return dbg.prediction_dt + dbg.latency_control_to_fire / 1000.0;
         }
     }
     // 火控未启动时 fallback
