@@ -393,13 +393,12 @@
     control_to_fire = 0.020
 
 [AutoAim.FireControl.PID]
-    #@double 陀螺可见板朝向窗口 (deg)，用于 soft preference：[-angle, +angle]
-    # @note <= 0 时关闭窗口，始终按喵中心最小移动选可见板
+    #@double 低速陀螺可见板朝向窗口 (deg)：仅在 [-angle, +angle] 内选可见板
+    # @note <= 0 或高速陀螺时关闭窗口，始终按喵中心最小移动选可见板
     max_orientation_angle = 60.0
-    #@double DIRECT 选板时朝向角权重（越大越偏好正对，越小越偏好喵中心最小转动）
-    direct_orientation_weight = 0.15
-    #@double DIRECT 选板切换迟滞比例（0.12=新板需至少好12%才切换）
-    switch_armor_hysteresis = 0.12
+    #@double 切板保持面积比例（rm.cv.fans风格）:
+    # 仅当上一板投影面积 >= 当前最大投影面积 * 此比例时保持上一板
+    keep_tracking_area_ratio = 0.9
 
 [AutoAim.FireControl.Trajectory]
     #@string 求解器类型: 
@@ -441,8 +440,6 @@
     memorizing_time = 5.0
     #@double 前哨站目标保持时间 (s)
     keep_time_outpost = 0.5
-    #@double 目标切换迟滞，新目标必须好于当前*此比例才切换
-    switch_hysteresis = 0.15
 
 # ==================== 可视化配置 ====================
 

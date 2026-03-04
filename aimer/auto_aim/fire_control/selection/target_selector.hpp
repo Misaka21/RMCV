@@ -100,11 +100,10 @@ private:
     std::pair<double, double> pos_to_yaw_pitch(const Eigen::Vector3d& pos) const;
 
     /**
-     * @brief 检查该敌人是否有可打击的装甲板
+     * @brief 检查该敌人是否有可见装甲板
      */
     bool has_visible_armor(
         const predictor::VehicleState& vehicle,
-        double max_angle,
         double dt
     ) const;
 
@@ -114,10 +113,7 @@ private:
     void try_catch_target(
         const VisibleCandidate& candidate,
         const predictor::BattlefieldSnapshot& snapshot,
-        double current_time,
-        const GimbalState& gimbal,
-        double max_angle,
-        double dt
+        double current_time
     );
 
     /**
@@ -131,13 +127,12 @@ private:
     double keep_as_target_time(const predictor::VehicleState& vehicle) const;
 
     /**
-     * @brief 评估单个敌人的最佳可见候选板（仅 visible + 角度可打）
+     * @brief 评估单个敌人的最佳可见候选板（仅 visible）
      */
     VisibleCandidate evaluate_visible_candidate(
         int target_id,
         const predictor::VehicleState& vehicle,
         const GimbalState& gimbal,
-        double max_angle,
         double dt
     ) const;
 
@@ -148,7 +143,6 @@ private:
     int pick_best_visible_armor(
         const predictor::VehicleState& vehicle,
         const GimbalState& gimbal,
-        double max_angle,
         double dt
     ) const;
 
@@ -157,7 +151,6 @@ private:
     int current_target_id_ = -1;
     int forced_target_id_ = -1;       // 预瞄锁定的目标
     double target_caught_time_ = 0.0; // 最近一次确认当前目标的时刻
-    double current_target_score_ = std::numeric_limits<double>::infinity();
 };
 
 }  // namespace autoaim::fire_control

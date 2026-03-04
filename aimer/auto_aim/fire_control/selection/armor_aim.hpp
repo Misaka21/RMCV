@@ -4,7 +4,9 @@
  *
  * 当前策略:
  * - 仅在可见装甲板中选择执行板（始终 direct-center）
- * - 陀螺目标可使用 orientation 窗口作为软偏好
+ * - 低速陀螺可启用 orientation 窗口硬筛选（无候选时回退到 direct-center）
+ * - max_orientation_angle <= 0 或高速陀螺时，强制 direct-center
+ * - 切板保持规则采用 keep_tracking_area_ratio（rm.cv.fans 风格）
  * - 不再使用 INDIRECT emerging 瞄准路径
  */
 
@@ -54,7 +56,8 @@ struct ArmorAimResult {
  *
  * 根据目标状态选择可见执行板:
  * - 非陀螺: 可见板喵中心最小移动
- * - 陀螺: 可见板喵中心最小移动 + orientation 窗口软偏好
+ * - 低速陀螺: 先在 orientation 窗口内选可见板；若窗口内无可见板，回退可见板喵中心
+ * - 高速陀螺: 直接可见板喵中心
  */
 class ArmorAim {
 public:
@@ -130,9 +133,7 @@ private:
         const std::vector<int>& direct_indices,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
-        int preferred_armor_idx,
-        bool use_orientation_window,
-        double max_orientation_angle
+        int preferred_armor_idx
     ) const;
 
     /**

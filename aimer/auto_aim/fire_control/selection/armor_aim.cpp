@@ -37,20 +37,25 @@ double center_cost(
     return std::hypot(dyaw, dpitch);
 }
 
-double orientation_window_penalty(
-    double z_to_v,
-    bool use_orientation_window,
-    double max_orientation_angle
+double projected_area_proxy(
+    const predictor::VehicleState& vehicle,
+    int armor_idx,
+    double predict_dt
 )
 {
-    if (!use_orientation_window || max_orientation_angle <= 0.0) {
+    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
         return 0.0;
     }
-    const double abs_z = std::abs(z_to_v);
-    if (abs_z <= max_orientation_angle) {
-        return 0.0;
-    }
-    return abs_z - max_orientation_angle;
+
+    const auto& armor = vehicle.armors[armor_idx];
+    const Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, predict_dt);
+    const double dist2 = std::max(1e-6, pos.squaredNorm());
+    const double facing = std::abs(std::cos(armor.z_to_v));
+    const double geom_area = armor.width() * armor.height();
+
+    // 火控阶段无法直接访问检测像素面积，使用投影面积代理:
+    // A_proj ∝ A_geom * cos(z_to_v) / d^2
+    return geom_area * facing / dist2;
 }
 
 }  // namespace
@@ -103,11 +108,14 @@ ArmorAimResult ArmorAim::compute_spin(
     int preferred_armor_idx
 ) const
 {
-    // 陀螺: 可见板 direct-center，orientation 窗口仅作软偏好
+    // 陀螺:
+    // - 高速陀螺: 强制可见板喵中心
+    // - 低速陀螺: orientation 窗口硬筛选（无候选时回退可见板喵中心）
     const double max_orientation_angle = runtime_param::get_param<double>(
         "AutoAim.FireControl.PID.max_orientation_angle"
     ) * M_PI / 180.0;
-    const bool use_orientation_window = max_orientation_angle > 0.0;
+    const bool high_spin = (vehicle.spin.level == predictor::SpinLevel::HIGH);
+    const bool use_orientation_window = (!high_spin) && (max_orientation_angle > 0.0);
 
     return compute_direct_visible(
         vehicle, predict_dt, gimbal, preferred_armor_idx,
@@ -127,25 +135,39 @@ ArmorAimResult ArmorAim::compute_direct_visible(
     ArmorAimResult result;
     result.mode = AimMode::DIRECT;
 
-    std::vector<int> direct_indices;
-    direct_indices.reserve(vehicle.armor_count);
+    std::vector<int> visible_indices;
+    visible_indices.reserve(vehicle.armor_count);
     for (int i = 0; i < vehicle.armor_count; ++i) {
         if (vehicle.armors[i].visible) {
-            direct_indices.push_back(i);
+            visible_indices.push_back(i);
         }
     }
-    if (direct_indices.empty()) {
+    if (visible_indices.empty()) {
         return result;
+    }
+
+    // 低速陀螺时，先尝试在 orientation 窗口内选可见板。
+    // 若窗口内无可见板（例如英雄该板尚未转入可见区），回退到全部可见板喵中心。
+    std::vector<int> candidate_indices = visible_indices;
+    if (use_orientation_window && max_orientation_angle > 0.0) {
+        std::vector<int> in_window;
+        in_window.reserve(visible_indices.size());
+        for (int idx : visible_indices) {
+            if (std::abs(vehicle.armors[idx].z_to_v) <= max_orientation_angle) {
+                in_window.push_back(idx);
+            }
+        }
+        if (!in_window.empty()) {
+            candidate_indices.swap(in_window);
+        }
     }
 
     const int armor_idx = choose_best_direct(
         vehicle,
-        direct_indices,
+        candidate_indices,
         predict_dt,
         gimbal,
-        preferred_armor_idx,
-        use_orientation_window,
-        max_orientation_angle
+        preferred_armor_idx
     );
     if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
         return result;
@@ -169,36 +191,25 @@ int ArmorAim::choose_best_direct(
     const std::vector<int>& direct_indices,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
-    int preferred_armor_idx,
-    bool use_orientation_window,
-    double max_orientation_angle
+    int preferred_armor_idx
 ) const
 {
     if (direct_indices.empty()) {
         return -1;
     }
 
-    // 默认权重: 以喵中心最小移动为主，朝向角仅作次级约束
-    const double orient_weight = get_param_or(
-        "AutoAim.FireControl.PID.direct_orientation_weight", 0.15
-    );
-    const double switch_hysteresis = std::max(0.0, get_param_or(
-        "AutoAim.FireControl.PID.switch_armor_hysteresis", 0.12
-    ));
+    const double keep_tracking_area_ratio = std::clamp(get_param_or(
+        "AutoAim.FireControl.PID.keep_tracking_area_ratio", 0.9
+    ), 0.0, 1.0);
 
     auto score_idx = [&](int idx) {
-        const auto& armor = vehicle.armors[idx];
-        double score = orient_weight * orientation_window_penalty(
-            armor.z_to_v, use_orientation_window, max_orientation_angle
-        );
         if (gimbal != nullptr) {
             const Eigen::Vector3d pos = vehicle.predict_armor_position(idx, predict_dt);
-            score += center_cost(pos, *gimbal);
-        } else {
-            // 无云台状态时回退到“最正对”策略
-            score += std::abs(armor.z_to_v);
+            return center_cost(pos, *gimbal);
         }
-        return score;
+        // 无云台状态时回退到“最正对”策略
+        const auto& armor = vehicle.armors[idx];
+        return std::abs(armor.z_to_v);
     };
 
     int best_idx = direct_indices[0];
@@ -212,13 +223,22 @@ int ArmorAim::choose_best_direct(
         }
     }
 
-    // 切板迟滞: 上一板仍在可打集合且并不明显更差时，优先保持
+    // 按 rm.cv.fans keep-tracking-area-ratio 思路:
+    // 仅当上一板的“投影面积代理”不小于最大值的指定比例时才保持。
     const bool preferred_in_set = std::find(
         direct_indices.begin(), direct_indices.end(), preferred_armor_idx
     ) != direct_indices.end();
     if (preferred_in_set) {
-        const double preferred_score = score_idx(preferred_armor_idx);
-        if (preferred_score <= best_score * (1.0 + switch_hysteresis)) {
+        double max_area_proxy = 0.0;
+        for (int idx : direct_indices) {
+            max_area_proxy = std::max(
+                max_area_proxy,
+                projected_area_proxy(vehicle, idx, predict_dt)
+            );
+        }
+        const double preferred_area_proxy =
+            projected_area_proxy(vehicle, preferred_armor_idx, predict_dt);
+        if (preferred_area_proxy >= keep_tracking_area_ratio * max_area_proxy) {
             return preferred_armor_idx;
         }
     }

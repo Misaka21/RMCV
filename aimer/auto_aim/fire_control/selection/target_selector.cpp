@@ -52,27 +52,6 @@ int pick_fallback_armor_idx(const predictor::VehicleState& vehicle) {
     return 0;
 }
 
-double normalize_score(double raw_score, const predictor::VehicleState& vehicle)
-{
-    return raw_score / std::max(0.1, vehicle.confidence);
-}
-
-double orientation_window_penalty(
-    double z_to_v,
-    bool use_orientation_window,
-    double max_angle
-)
-{
-    if (!use_orientation_window || max_angle <= 0.0) {
-        return 0.0;
-    }
-    const double abs_z = std::abs(z_to_v);
-    if (abs_z <= max_angle) {
-        return 0.0;
-    }
-    return abs_z - max_angle;
-}
-
 }  // namespace
 
 // ============================================================================
@@ -86,17 +65,13 @@ TargetSelection TargetSelector::select(
 {
     TargetSelection result;
     const double current_time = snapshot.timestamp;
-    // 与 ArmorAim 统一：可打角阈值使用同一参数，避免“选敌可打但选板不可打”抖动
-    const double max_angle = runtime_param::get_param<double>(
-        "AutoAim.FireControl.PID.max_orientation_angle"
-    ) * M_PI / 180.0;
 
     // ========== 1. 预瞄锁定优先 ==========
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
-        if (has_visible_armor(vehicle, max_angle, dt)) {
+        if (has_visible_armor(vehicle, dt)) {
             const auto forced_candidate = evaluate_visible_candidate(
-                forced_target_id_, vehicle, gimbal, max_angle, dt
+                forced_target_id_, vehicle, gimbal, dt
             );
             int armor_idx = forced_candidate.valid()
                 ? forced_candidate.armor_idx
@@ -104,17 +79,11 @@ TargetSelection TargetSelector::select(
             if (armor_idx >= 0) {
                 current_target_id_ = forced_target_id_;
                 target_caught_time_ = current_time;
-                if (forced_candidate.valid()) {
-                    current_target_score_ = normalize_score(forced_candidate.score, vehicle);
-                } else {
-                    // 强锁但当前无可见候选时，清空评分，避免解锁后沿用陈旧分数
-                    current_target_score_ = std::numeric_limits<double>::infinity();
-                }
 
                 result.has_target = true;
                 result.target_id = forced_target_id_;
                 result.priority = forced_candidate.valid()
-                    ? (1.0 / (1.0 + normalize_score(forced_candidate.score, vehicle)))
+                    ? (1.0 / (1.0 + forced_candidate.score))
                     : 0.0;
                 result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
                 return result;
@@ -125,12 +94,9 @@ TargetSelection TargetSelector::select(
     // ========== 2. 构造“最中心可见目标”候选 ==========
     VisibleCandidate best_candidate;
     snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
-        if (!vehicle.valid || vehicle.confidence < 0.1) return;
-        auto candidate = evaluate_visible_candidate(id, vehicle, gimbal, max_angle, dt);
+        if (!vehicle.valid) return;
+        auto candidate = evaluate_visible_candidate(id, vehicle, gimbal, dt);
         if (!candidate.valid()) return;
-
-        // 置信度衰减：同样中心距离下优先更稳定的目标
-        candidate.score = normalize_score(candidate.score, vehicle);
         if (candidate.score < best_candidate.score) {
             best_candidate = candidate;
         }
@@ -140,26 +106,19 @@ TargetSelection TargetSelector::select(
     const int tracked_target = latched_target(current_time);
     if (tracked_target < 0) {
         current_target_id_ = -1;
-        current_target_score_ = std::numeric_limits<double>::infinity();
     }
     if (tracked_target >= 0 && snapshot.is_valid(tracked_target)) {
         const auto& tracked_vehicle = snapshot.vehicles[tracked_target];
-        if (has_visible_armor(tracked_vehicle, max_angle, dt)) {
+        if (has_visible_armor(tracked_vehicle, dt)) {
             target_caught_time_ = current_time;
-            auto tracked_visible = evaluate_visible_candidate(
-                tracked_target, tracked_vehicle, gimbal, max_angle, dt
-            );
-            if (tracked_visible.valid()) {
-                current_target_score_ = normalize_score(tracked_visible.score, tracked_vehicle);
-            }
         } else if (best_candidate.valid()) {
             try_catch_target(
-                best_candidate, snapshot, current_time, gimbal, max_angle, dt
+                best_candidate, snapshot, current_time
             );
         }
     } else if (best_candidate.valid()) {
         try_catch_target(
-            best_candidate, snapshot, current_time, gimbal, max_angle, dt
+            best_candidate, snapshot, current_time
         );
     }
 
@@ -170,12 +129,12 @@ TargetSelection TargetSelector::select(
     }
 
     const auto& selected_vehicle = snapshot.vehicles[selected_target];
-    if (!has_visible_armor(selected_vehicle, max_angle, dt)) {
+    if (!has_visible_armor(selected_vehicle, dt)) {
         return result;
     }
 
     const auto selected_visible = evaluate_visible_candidate(
-        selected_target, selected_vehicle, gimbal, max_angle, dt
+        selected_target, selected_vehicle, gimbal, dt
     );
     int armor_idx = selected_visible.valid()
         ? selected_visible.armor_idx
@@ -187,7 +146,7 @@ TargetSelection TargetSelector::select(
     result.has_target = true;
     result.target_id = selected_target;
     result.priority = selected_visible.valid()
-        ? (1.0 / (1.0 + normalize_score(selected_visible.score, selected_vehicle)))
+        ? (1.0 / (1.0 + selected_visible.score))
         : 0.0;
     result.predicted_pos = selected_vehicle.predict_armor_position(armor_idx, dt);
     return result;
@@ -213,7 +172,6 @@ void TargetSelector::clear_target()
     forced_target_id_ = -1;
     current_target_id_ = -1;
     target_caught_time_ = 0;
-    current_target_score_ = std::numeric_limits<double>::infinity();
 }
 
 // ============================================================================
@@ -246,7 +204,6 @@ double TargetSelector::compute_center_distance(
 
 bool TargetSelector::has_visible_armor(
     const predictor::VehicleState& vehicle,
-    double /* max_angle */,
     double /* dt */
 ) const
 {
@@ -262,10 +219,7 @@ bool TargetSelector::has_visible_armor(
 void TargetSelector::try_catch_target(
     const VisibleCandidate& candidate,
     const predictor::BattlefieldSnapshot& snapshot,
-    double current_time,
-    const GimbalState& gimbal,
-    double max_angle,
-    double dt
+    double current_time
 )
 {
     if (!candidate.valid()) {
@@ -275,13 +229,11 @@ void TargetSelector::try_catch_target(
     if (current_target_id_ < 0 || !snapshot.is_valid(current_target_id_)) {
         current_target_id_ = candidate.target_id;
         target_caught_time_ = current_time;
-        current_target_score_ = candidate.score;
         return;
     }
 
     if (candidate.target_id == current_target_id_) {
         target_caught_time_ = current_time;
-        current_target_score_ = candidate.score;
         return;
     }
 
@@ -291,32 +243,8 @@ void TargetSelector::try_catch_target(
         return;
     }
 
-    double baseline_score = current_target_score_;
-    auto current_visible = evaluate_visible_candidate(
-        current_target_id_, current_vehicle, gimbal, max_angle, dt
-    );
-    if (current_visible.valid()) {
-        baseline_score = normalize_score(current_visible.score, current_vehicle);
-    }
-
-    // 候选必须明显更好才切换，避免多车并行场景下左右跳
-    const double switch_hysteresis = std::clamp(
-        get_param_or("AutoAim.FireControl.TargetSelector.switch_hysteresis", 0.15),
-        0.0, 0.95
-    );
-    if (std::isfinite(baseline_score)) {
-        if (baseline_score <= 1e-6) {
-            return;
-        }
-        const double improve_ratio = (baseline_score - candidate.score) / baseline_score;
-        if (improve_ratio < switch_hysteresis) {
-            return;
-        }
-    }
-
     current_target_id_ = candidate.target_id;
     target_caught_time_ = current_time;
-    current_target_score_ = candidate.score;
 }
 
 int TargetSelector::latched_target(double current_time) const
@@ -363,12 +291,11 @@ TargetSelector::VisibleCandidate TargetSelector::evaluate_visible_candidate(
     int target_id,
     const predictor::VehicleState& vehicle,
     const GimbalState& gimbal,
-    double max_angle,
     double dt
 ) const
 {
     VisibleCandidate candidate;
-    const int armor_idx = pick_best_visible_armor(vehicle, gimbal, max_angle, dt);
+    const int armor_idx = pick_best_visible_armor(vehicle, gimbal, dt);
     if (armor_idx < 0) {
         return candidate;
     }
@@ -383,14 +310,9 @@ TargetSelector::VisibleCandidate TargetSelector::evaluate_visible_candidate(
 int TargetSelector::pick_best_visible_armor(
     const predictor::VehicleState& vehicle,
     const GimbalState& gimbal,
-    double max_angle,
     double dt
 ) const
 {
-    const bool use_orientation_window = vehicle.spin.active && max_angle > 0.0;
-    const double orient_weight = get_param_or(
-        "AutoAim.FireControl.PID.direct_orientation_weight", 0.15
-    );
     int best_idx = -1;
     double best_score = std::numeric_limits<double>::infinity();
 
@@ -399,10 +321,7 @@ int TargetSelector::pick_best_visible_armor(
         if (!armor.visible) continue;
 
         const Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
-        const double center = compute_center_distance(pos, gimbal);
-        const double score = center + orient_weight * orientation_window_penalty(
-            armor.z_to_v, use_orientation_window, max_angle
-        );
+        const double score = compute_center_distance(pos, gimbal);
         if (score < best_score) {
             best_score = score;
             best_idx = i;
