@@ -507,5 +507,5 @@
 [Visualizer]
     #@bool 是否显示可视化窗口
     show_window = true
-    #@string 显示视图: "predictor" 或 "detector"
+    #@string 显示视图: "predictor" / "firecontrol" / "detector"
     view = "predictor"

@@ -3,8 +3,9 @@
  * @brief 统一可视化线程
  *
  * 所有 imshow 集中在此线程，支持视图切换:
- *   - "predictor": predictor_debug.image + 火控 OSD + 战场面板 + 延迟面板 + 像素标记
- *   - "detector":  detector_debug_img 直显
+ *   - "predictor": predictor_debug.image + 战场面板 + 延迟面板
+ *   - "firecontrol": predictor_debug.image + 火控 OSD + 目标几何 + 像素标记
+ *   - "detector": detector_debug_img 直显
  *
  * 数据源:
  *   BasicObjManager<BattlefieldSnapshot> "battlefield"
@@ -15,6 +16,7 @@
 
 #include "visualizer_node.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -81,12 +83,40 @@ static cv::Mat copy_to_reused_buffer(const cv::Mat& src, cv::Mat& buffer) {
     return buffer;
 }
 
+static int choose_debug_target_id(
+    const BattlefieldSnapshot& snapshot,
+    const FireDebugInfo& dbg
+) {
+    if (dbg.target_id >= 0 && snapshot.is_valid(dbg.target_id)) {
+        return dbg.target_id;
+    }
+    if (snapshot.primary_target_id >= 0 && snapshot.is_valid(snapshot.primary_target_id)) {
+        return snapshot.primary_target_id;
+    }
+    return -1;
+}
+
+static double center_cost_deg(
+    const Eigen::Vector3d& pos,
+    const FireDebugInfo& dbg
+) {
+    const double yaw = std::atan2(pos.y(), pos.x());
+    const double pitch = std::atan2(pos.z(), std::hypot(pos.x(), pos.y()));
+    const double dyaw = ::fire_control::GimbalState::normalize_angle(yaw - dbg.gimbal_yaw);
+    const double dpitch = pitch - dbg.gimbal_pitch;
+    return std::hypot(dyaw, dpitch) * 57.3;
+}
+
 // ==================== OSD 绘制函数 ====================
 
 /**
- * @brief 左上角火控诊断面板 (~9行)
+ * @brief 左上角火控诊断面板
  */
-static void draw_fire_debug_panel(cv::Mat& vis, const FireDebugInfo& dbg) {
+static void draw_fire_debug_panel(
+    cv::Mat& vis,
+    const BattlefieldSnapshot& snapshot,
+    const FireDebugInfo& dbg
+) {
     int lh = 15;
     int tx = 8;
     int ty = 16;
@@ -97,8 +127,8 @@ static void draw_fire_debug_panel(cv::Mat& vis, const FireDebugInfo& dbg) {
     };
 
     // 半透明背景
-    int panel_h = 170;
-    int panel_w = 380;
+    int panel_h = 250;
+    int panel_w = 460;
     int safe_w = std::min(panel_w, vis.cols);
     int safe_h = std::min(panel_h, vis.rows);
     if (safe_w > 0 && safe_h > 0) {
@@ -118,12 +148,14 @@ static void draw_fire_debug_panel(cv::Mat& vis, const FireDebugInfo& dbg) {
     put(fmt::format("FC: {} | {}", alive ? "ALIVE" : "DEAD", mode_name),
         alive ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255));
 
-    // 2. Stage + Target + Armor
+    // 2. Stage + Target + Armor + Control
     cv::Scalar stage_color = (dbg.fail_stage == 9) ? cv::Scalar(0, 255, 0)
                            : (dbg.fail_stage == 0) ? cv::Scalar(150, 150, 150)
                                                    : cv::Scalar(0, 128, 255);
-    put(fmt::format("Stage: {} | Tgt: {} Arm: {}",
+    put(fmt::format("Stage: {} | ctrl:{} fire:{} | Tgt:{} Arm:{}",
         FireDebugInfo::fail_stage_name(dbg.fail_stage),
+        dbg.control_enabled ? "ON" : "OFF",
+        dbg.fire_now ? "NOW" : "HOLD",
         dbg.target_id, dbg.armor_idx), stage_color);
 
     // 3. Bullet speed + snapshot info
@@ -150,23 +182,66 @@ static void draw_fire_debug_panel(cv::Mat& vis, const FireDebugInfo& dbg) {
         dbg.latency_hit_total),
         cv::Scalar(120, 220, 255));
 
-    // 以下仅在有效瞄准时显示
-    if (dbg.fail_stage == 9) {
-        // 6. Dist + FlyTime
-        put(fmt::format("Dist: {:.2f}m  FlyT: {:.1f}ms",
-            dbg.distance, dbg.fly_time * 1000), {200, 200, 200});
+    // 6. Dist + FlyTime
+    put(fmt::format("Dist: {:.2f}m  FlyT: {:.1f}ms",
+        dbg.distance, dbg.fly_time * 1000), {200, 200, 200});
 
-        // 7. Aim / Cmd 角度
-        put(fmt::format("Aim:  y={:+.2f} p={:+.2f} deg",
-            dbg.aim_yaw * 57.3, dbg.aim_pitch * 57.3), {0, 165, 255});  // 橙色
-        put(fmt::format("Cmd:  y={:+.2f} p={:+.2f} deg",
-            dbg.cmd_yaw * 57.3, dbg.cmd_pitch * 57.3), {0, 255, 255});  // 黄色
+    // 7. Aim / Cmd 角度
+    put(fmt::format("Aim:  y={:+.2f} p={:+.2f} deg",
+        dbg.aim_yaw * 57.3, dbg.aim_pitch * 57.3), {0, 165, 255});  // 橙色
+    put(fmt::format("Cmd:  y={:+.2f} p={:+.2f} deg",
+        dbg.cmd_yaw * 57.3, dbg.cmd_pitch * 57.3), {0, 255, 255});  // 黄色
 
-        // 8. Error + FIRE 状态 (tracking_error 单位是米: 落点偏移距离)
-        cv::Scalar fire_color = dbg.fire_now ? cv::Scalar(0, 0, 255) : cv::Scalar(100, 200, 255);
-        put(fmt::format("Err: {:.0f}cm  {}",
-            dbg.tracking_error * 100, dbg.fire_now ? ">>> FIRE <<<" : "HOLD"),
-            fire_color);
+    // 8. Error + FIRE 状态 (tracking_error 单位是米: 落点偏移距离)
+    cv::Scalar fire_color = dbg.fire_now ? cv::Scalar(0, 0, 255) : cv::Scalar(100, 200, 255);
+    put(fmt::format("Err: {:.0f}cm  {}",
+        dbg.tracking_error * 100, dbg.fire_now ? ">>> FIRE <<<" : "HOLD"),
+        fire_color);
+
+    // 9. 开火门控分解 (用于定位“瞄到了但不开火/乱开火”问题)
+    const int tid = choose_debug_target_id(snapshot, dbg);
+    if (tid >= 0 && snapshot.is_valid(tid)) {
+        const auto& vehicle = snapshot.vehicles[tid];
+        const double min_conf = runtime_param::get_param<double>("AutoAim.FireControl.min_confidence");
+        const double error_rate = runtime_param::get_param<double>("AutoAim.FireControl.error_rate");
+        const bool conf_ok = vehicle.confidence >= min_conf;
+
+        put(fmt::format("Gate conf: {:.2f} / {:.2f} [{}]",
+            vehicle.confidence, min_conf, conf_ok ? "OK" : "BLOCK"),
+            conf_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+
+        if (dbg.armor_idx >= 0 && dbg.armor_idx < vehicle.armor_count)
+        {
+            const auto& armor = vehicle.armors[dbg.armor_idx];
+            const double yaw_err = ::fire_control::GimbalState::normalize_angle(
+                dbg.aim_yaw - dbg.gimbal_yaw
+            );
+            const double pitch_err = dbg.aim_pitch - dbg.gimbal_pitch;
+            const bool angle_ok = std::abs(yaw_err) < M_PI_2 && std::abs(pitch_err) < M_PI_2;
+
+            if (angle_ok && dbg.distance > 0.01) {
+                const double hit_offset_yaw = dbg.distance * std::abs(std::tan(yaw_err));
+                const double hit_offset_pitch = dbg.distance * std::abs(std::tan(pitch_err));
+                const double cos_inclined = std::abs(std::cos(armor.z_to_v));
+                const double yaw_limit = (armor.width() / 2.0) * cos_inclined * error_rate;
+                const double pitch_limit = (armor.height() / 2.0) * error_rate;
+                const bool yaw_ok = hit_offset_yaw < yaw_limit;
+                const bool pitch_ok = hit_offset_pitch < pitch_limit;
+
+                put(fmt::format("Gate yaw: {:.1f}/{:.1f}cm [{}]",
+                    hit_offset_yaw * 100, yaw_limit * 100, yaw_ok ? "OK" : "BLOCK"),
+                    yaw_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+                put(fmt::format("Gate pit: {:.1f}/{:.1f}cm [{}]",
+                    hit_offset_pitch * 100, pitch_limit * 100, pitch_ok ? "OK" : "BLOCK"),
+                    pitch_ok ? cv::Scalar(80, 220, 80) : cv::Scalar(0, 0, 255));
+                put(fmt::format("z_to_v:{:+.1f}deg cos:{:.2f} err_rate:{:.2f}",
+                    armor.z_to_v * 57.3, cos_inclined, error_rate), cv::Scalar(170, 210, 255));
+            } else {
+                put("Gate angle: BLOCK (yaw/pitch error >= 90deg)", cv::Scalar(0, 0, 255));
+            }
+        } else {
+            put("Gate armor: N/A (invalid armor idx)", cv::Scalar(120, 120, 255));
+        }
     }
 }
 
@@ -237,6 +312,82 @@ static void draw_battlefield_panel(cv::Mat& vis, const BattlefieldSnapshot& snap
             spin_label, v.spin.omega * 57.3, v.spin.radius,
             v.velocity.x(), v.velocity.y()), {150, 150, 150});
     });
+}
+
+/**
+ * @brief 右上角选中目标逐装甲板面板
+ */
+static void draw_selected_target_panel(
+    cv::Mat& vis,
+    const BattlefieldSnapshot& snapshot,
+    const FireDebugInfo& dbg
+) {
+    const int tid = choose_debug_target_id(snapshot, dbg);
+    if (tid < 0 || !snapshot.is_valid(tid)) {
+        return;
+    }
+
+    const auto& v = snapshot.vehicles[tid];
+    const double max_angle = runtime_param::get_param<double>(
+        "AutoAim.FireControl.PID.max_orientation_angle"
+    ) * M_PI / 180.0;
+    const bool use_window = v.spin.active && max_angle > 0.0;
+
+    const int lh = 15;
+    const int rows = 4 + std::max(0, v.armor_count);
+    const int panel_h = 12 + rows * lh + 6;
+    const int panel_w = 510;
+    const int panel_x = std::max(0, vis.cols - panel_w - 6);
+    const int panel_y = 6;
+    const int safe_w = std::min(panel_w, vis.cols - panel_x);
+    const int safe_h = std::min(panel_h, vis.rows - panel_y);
+    if (safe_w <= 0 || safe_h <= 0) {
+        return;
+    }
+
+    cv::Mat bg = vis(cv::Rect(panel_x, panel_y, safe_w, safe_h));
+    bg = bg * 0.3;
+
+    int tx = panel_x + 8;
+    int ty = panel_y + 16;
+    auto put = [&](const std::string& text, cv::Scalar color = {220, 220, 220}) {
+        cv::putText(vis, text, {tx, ty}, cv::FONT_HERSHEY_SIMPLEX,
+            0.38, color, 1, cv::LINE_AA);
+        ty += lh;
+    };
+
+    const char* spin_label = "NONE";
+    if (v.spin.level == SpinLevel::LOW) spin_label = "LOW";
+    else if (v.spin.level == SpinLevel::HIGH) spin_label = "HIGH";
+    put(fmt::format("Selected T{}  pri={}  arm_sel={}  conf={:.2f}",
+        tid, snapshot.primary_target_id, dbg.armor_idx, v.confidence), cv::Scalar(0, 255, 255));
+    put(fmt::format("spin:{} active={} w={:+.1f}d/s  center={:.2f}m",
+        spin_label, v.spin.active ? 1 : 0, v.spin.omega * 57.3, v.center.norm()), cv::Scalar(180, 180, 255));
+    put(fmt::format("ori_window:{}  max={:.1f}deg  frame={} mask=0x{:03x}",
+        use_window ? "ON" : "OFF", max_angle * 57.3, snapshot.frame_id, snapshot.valid_mask),
+        cv::Scalar(160, 220, 255));
+    put("A#: flags(* selected, V visible, W in-window) | z_to_v | center_cost | score | dist",
+        cv::Scalar(140, 140, 140));
+
+    for (int i = 0; i < v.armor_count; ++i) {
+        const auto& a = v.armors[i];
+        const Eigen::Vector3d pos = v.predict_armor_position(i, 0.0);
+        const bool in_window = (!use_window) || (std::abs(a.z_to_v) <= max_angle);
+        const double cc_deg = center_cost_deg(pos, dbg);
+        const double dist = pos.norm();
+        const bool selected = (i == dbg.armor_idx);
+
+        cv::Scalar color = selected ? cv::Scalar(0, 80, 255)
+                       : (a.visible ? cv::Scalar(120, 220, 120)
+                                    : cv::Scalar(150, 150, 150));
+        put(fmt::format("A{}: {}{}{}  z={:+5.1f}deg  c={:5.1f}deg  s={:.2f}  d={:.2f}m",
+            i,
+            selected ? "*" : " ",
+            a.visible ? "V" : "-",
+            in_window ? "W" : "-",
+            a.z_to_v * 57.3, cc_deg, a.score, dist),
+            color);
+    }
 }
 
 /**
@@ -363,6 +514,56 @@ static void draw_pixel_markers(cv::Mat& vis, const FireDebugInfo& dbg,
     }
 }
 
+/**
+ * @brief 叠加选中目标的中心/速度/逐装甲板像素标记
+ */
+static void draw_target_geometry_markers(
+    cv::Mat& vis,
+    const BattlefieldSnapshot& snapshot,
+    const FireDebugInfo& dbg,
+    const Eigen::Quaterniond& q_imu
+) {
+    const int tid = choose_debug_target_id(snapshot, dbg);
+    if (tid < 0 || !snapshot.is_valid(tid)) {
+        return;
+    }
+    const auto& v = snapshot.vehicles[tid];
+
+    bool center_valid = false;
+    const cv::Point2f center_px = aimer::tf::world_to_pixel(v.center, q_imu, center_valid);
+    if (center_valid) {
+        cv::drawMarker(vis, center_px, cv::Scalar(255, 0, 255),
+            cv::MARKER_TILTED_CROSS, 16, 2, cv::LINE_AA);
+
+        Eigen::Vector3d tip_world = v.center + v.velocity * 0.15;
+        bool tip_valid = false;
+        const cv::Point2f tip_px = aimer::tf::world_to_pixel(tip_world, q_imu, tip_valid);
+        if (tip_valid) {
+            cv::arrowedLine(vis, center_px, tip_px, cv::Scalar(255, 0, 255),
+                2, cv::LINE_AA, 0, 0.25);
+        }
+    }
+
+    for (int i = 0; i < v.armor_count; ++i) {
+        const auto& armor = v.armors[i];
+        Eigen::Vector3d pos = v.predict_armor_position(i, 0.0);
+        bool valid = false;
+        cv::Point2f px = aimer::tf::world_to_pixel(pos, q_imu, valid);
+        if (!valid) continue;
+
+        const bool selected = (i == dbg.armor_idx);
+        cv::Scalar color = selected ? cv::Scalar(0, 80, 255)
+                       : (armor.visible ? cv::Scalar(50, 230, 50)
+                                        : cv::Scalar(120, 120, 120));
+        int radius = selected ? 9 : 6;
+        cv::circle(vis, px, radius, color, 2, cv::LINE_AA);
+        cv::putText(vis,
+            fmt::format("A{}{} z{:+.0f}", i, armor.visible ? "V" : "-", armor.z_to_v * 57.3),
+            px + cv::Point2f(8, -6),
+            cv::FONT_HERSHEY_SIMPLEX, 0.35, color, 1, cv::LINE_AA);
+    }
+}
+
 // ==================== 主循环 ====================
 
 void start_visualizer_node() {
@@ -412,10 +613,16 @@ void start_visualizer_node() {
         try {
             // 读取视图模式
             std::string view = runtime_param::get_param<std::string>("Visualizer.view");
+            bool is_detector_view = (view == "detector");
+            bool is_firecontrol_view = (view == "firecontrol");
+            if (!is_detector_view && !is_firecontrol_view && view != "predictor") {
+                // 兜底: 非法值按 predictor 处理，避免窗口空白
+                view = "predictor";
+            }
 
             cv::Mat vis;
 
-            if (view == "detector") {
+            if (is_detector_view) {
                 // 检测器视图: 直显 detector_debug_img
                 const auto& det_img = detector_debug_img->get();
                 if (det_img.empty()) {
@@ -432,10 +639,11 @@ void start_visualizer_node() {
 
                 // 去重策略:
                 // - 新图像帧总是重绘
-                // - 同一图像帧下，若 fire_debug 心跳有更新也允许重绘（可见 500Hz 火控动态）
+                // - firecontrol 视图下，同一图像帧若 fire_debug 心跳有更新也允许重绘
                 bool same_frame = (predictor_dbg.frame_id == last_frame_id);
                 bool autoaim_mode = aimer::to_aim_mode(dbg.fc_mode) == aimer::AimMode::AUTOAIM;
-                bool fc_updated = autoaim_mode
+                bool fc_updated = is_firecontrol_view
+                    && autoaim_mode
                     && (dbg.fc_heartbeat > 0.0)
                     && std::abs(dbg.fc_heartbeat - last_dbg_heartbeat) > 1e-9;
 
@@ -460,14 +668,19 @@ void start_visualizer_node() {
                 // 拷贝到复用缓冲区再叠加 OSD，减少重复分配抖动
                 vis = copy_to_reused_buffer(predictor_dbg.image, vis_buffer);
 
-                // OSD 面板
-                draw_fire_debug_panel(vis, dbg);
+                // 公共面板
                 draw_battlefield_panel(vis, snapshot);
                 draw_latency_panel(vis, snapshot, predictor_dbg, dbg);
 
-                // 像素标记 (枪管、瞄准点等)
-                if (dbg.fc_heartbeat > 0) {
-                    draw_pixel_markers(vis, dbg, predictor_dbg.q_imu);
+                // firecontrol 专用面板/标记
+                if (is_firecontrol_view) {
+                    draw_fire_debug_panel(vis, snapshot, dbg);
+                    draw_selected_target_panel(vis, snapshot, dbg);
+
+                    if (dbg.fc_heartbeat > 0) {
+                        draw_pixel_markers(vis, dbg, predictor_dbg.q_imu);
+                        draw_target_geometry_markers(vis, snapshot, dbg, predictor_dbg.q_imu);
+                    }
                 }
             }
 

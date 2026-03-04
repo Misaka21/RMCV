@@ -17,7 +17,9 @@ namespace visualizer {
 /**
  * @brief 启动可视化节点 (~30Hz)
  *
- * 热重载参数: Visualizer.show_window (bool)
+ * 热重载参数:
+ *   - Visualizer.show_window (bool)
+ *   - Visualizer.view (string: predictor/firecontrol/detector)
  */
 void start_visualizer_node();
 
