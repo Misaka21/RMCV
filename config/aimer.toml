@@ -462,7 +462,7 @@
     #@double 空气阻力系数 k
     # 线性模型: a = -k*v, 单位 1/s
     # 二次模型: a = -k*v*|v|, 单位 1/m, 对于17mm弹丸约 0.001~0.005
-    air_resistance_k = 0.01
+    air_resistance_k = 0.022928514188
     #@int 弹道解算最大迭代次数 (Ceres)
     max_iter = 10
     #@double RK4积分步长 (s)
