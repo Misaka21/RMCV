@@ -88,6 +88,7 @@ public:
     const FireGateDebug& last_gate_debug() const { return last_gate_debug_; }
     int last_fail_stage() const { return last_fail_stage_; }
     double last_prediction_dt() const { return last_prediction_dt_; }
+    const LatencyInfo& last_latency() const { return last_latency_; }
     int last_armor_id() const { return last_armor_id_; }
     bool last_rotate_back_ok() const { return last_rotate_back_ok_; }
     bool last_rotate_back_active() const { return last_rotate_back_active_; }
@@ -104,6 +105,19 @@ private:
         const AimResult& aim,
         bool can_fire,
         double confidence
+    );
+
+    bool solve_aim_with_latency_iteration(
+        const predictor::BattlefieldSnapshot& snapshot,
+        const predictor::VehicleState& vehicle,
+        const Eigen::Vector3d& self_velocity,
+        double current_time,
+        const LatencyInfo& base_latency,
+        int preferred_armor_idx,
+        ArmorAimResult& armor_result,
+        AimResult& aim,
+        GimbalPlan& plan,
+        LatencyInfo& out_latency
     );
 
     bool evaluate_fire_window(
@@ -146,6 +160,7 @@ private:
     int last_solution_frame_id_ = -1;
     int last_no_target_frame_id_ = -1;
     double last_target_confidence_ = 0.0;
+    LatencyInfo last_latency_;
     bool has_cached_solution_ = false;
     int last_armor_id_ = -1;  // 上一次选中装甲板的绝对 id
 

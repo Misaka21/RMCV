@@ -16,10 +16,8 @@
 #include "aimer/common/robot_state.hpp"
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/latency/latency_estimator.hpp"
-#include "aimer/common/trajectory/solver_factory.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "fire_controller.hpp"
-#include "selection/armor_aim.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/common/fire_control_types.hpp"
 #include "umt/BasicObjManager.hpp"
@@ -34,6 +32,9 @@ namespace {
 
 constexpr int64_t AIM_MODE_STALE_TIMEOUT_US = 300000;  // 300ms
 constexpr int64_t SNAPSHOT_STALE_TIMEOUT_US = 200000;  // 200ms
+constexpr double DEFAULT_IMG_TO_PREDICT_LATENCY = 0.015;  // 15ms
+constexpr double MIN_IMG_TO_PREDICT_LATENCY = 1e-4;       // 0.1ms
+constexpr double MAX_IMG_TO_PREDICT_LATENCY = 0.1;        // 100ms
 
 // 获取当前时间 (秒)
 double get_current_time() {
@@ -128,9 +129,16 @@ int find_armor_idx_by_id(
     int preferred_armor_idx
 ) {
     // img_to_predict
-    double img_to_predict = (snapshot.predict_timestamp > 0)
-        ? (snapshot.predict_timestamp - snapshot.timestamp)
-        : 0.015;
+    double img_to_predict = DEFAULT_IMG_TO_PREDICT_LATENCY;
+    if (snapshot.predict_timestamp > 0.0 && snapshot.timestamp > 0.0) {
+        const double measured = snapshot.predict_timestamp - snapshot.timestamp;
+        if (std::isfinite(measured)
+            && measured >= MIN_IMG_TO_PREDICT_LATENCY
+            && measured <= MAX_IMG_TO_PREDICT_LATENCY)
+        {
+            img_to_predict = measured;
+        }
+    }
 
     // 目标距离
     double distance = 5.0;
@@ -150,71 +158,6 @@ int find_armor_idx_by_id(
     double bullet_speed = snapshot.self_state.bullet_speed;
 
     return estimator.build(img_to_predict, distance, bullet_speed, "AutoAim.FireControl");
-}
-
-/**
- * @brief 迭代更新 fire_to_hit (参考 rm.cv.fans filter_to_prediction_time)
- *
- * 问题: 弹道解算需要预测位置 → 预测位置需要 prediction_latency()
- *       → prediction_latency() 需要 fire_to_hit → 鸡生蛋
- *
- * 解决: 迭代收敛，通常 2 次迭代即可
- */
-void finalize_latency(
-    ::fire_control::LatencyInfo& latency,
-    const predictor::BattlefieldSnapshot& snapshot,
-    double current_time,
-    int preferred_target_id,
-    int preferred_armor_idx,
-    const ::fire_control::GimbalState* gimbal
-) {
-    (void)preferred_armor_idx;
-    const auto* target = choose_latency_target(snapshot, preferred_target_id);
-    if (!target) return;
-
-    ArmorAim armor_aim;
-    const double img_age = std::max(0.0, current_time - snapshot.timestamp);
-
-    constexpr int NUM_ITERATIONS = 2;
-    for (int iter = 0; iter < NUM_ITERATIONS; ++iter) {
-        // 与 FireController::control() 使用同一预测时间轴:
-        // prediction_dt = img_age + send_to_control + fire_to_hit
-        double dt = img_age + latency.send_to_control + latency.fire_to_hit;
-
-        // 对齐 rm.cv.fans：按当前时刻独立求解装甲板，不依赖上一时刻 preferred。
-        Eigen::Vector3d pos = Eigen::Vector3d::Zero();
-        ArmorAimResult armor_result = armor_aim.compute(
-            *target, dt, gimbal, &snapshot.self_state.q_imu, -1
-        );
-        if (armor_result.valid) {
-            pos = armor_result.target_pos;
-        } else {
-            int armor_idx = choose_latency_armor_idx(*target, -1);
-            if (armor_idx >= 0) {
-                pos = target->predict_armor_position(armor_idx, dt);
-            }
-        }
-
-        if (pos.squaredNorm() < 1e-9) {
-            continue;
-        }
-
-        const Eigen::Vector3d self_velocity(
-            snapshot.self_state.velocity.x(),
-            snapshot.self_state.velocity.y(),
-            0.0
-        );
-        const Eigen::Vector3d target_vec = aimer::tf::world_to_barrel_origin_world(
-            pos, snapshot.self_state.q_imu
-        );
-        ::fire_control::AimResult aim = ::fire_control::trajectory::solve(
-            target_vec, snapshot.self_state.bullet_speed, self_velocity
-        );
-
-        if (aim.valid) {
-            latency.set_fly_time(aim.fly_time);
-        }
-    }
 }
 
 }  // namespace
@@ -239,9 +182,10 @@ void fire_control_run(const std::string& /* config_path */) {
     // 模式跟踪
     aimer::AimMode last_mode = aimer::AimMode::DISABLED;
     bool last_snapshot_stale = true;
-    int last_frame_id = -1;
     int last_snapshot_frame_id = -1;
     int64_t last_snapshot_update_us = 0;
+    int last_predict_to_send_frame_id = -1;
+    double last_predict_to_send_predict_ts = -1.0;
     int cached_latency_frame_id = -1;
     int cached_latency_target_id = -1;
     int cached_latency_armor_idx = -2;
@@ -299,13 +243,6 @@ void fire_control_run(const std::string& /* config_path */) {
         last_snapshot_stale = snapshot_stale;
         aimer::AimMode prev_mode = last_mode;
 
-        // 检测新帧，更新延迟估计
-        if (snapshot.frame_id != last_frame_id && snapshot.predict_timestamp > 0) {
-            last_frame_id = snapshot.frame_id;
-            double predict_to_send = current_time - snapshot.predict_timestamp;
-            latency_estimator.update_predict_to_send(predict_to_send, current_time);
-        }
-
         // 模式切换检测
         if (mode != last_mode) {
             debug::print(debug::PrintMode::INFO, "AutoAimFireControl",
@@ -316,6 +253,8 @@ void fire_control_run(const std::string& /* config_path */) {
             // 重置控制器状态
             if (mode == aimer::AimMode::AUTOAIM) {
                 controller.reset();
+                last_predict_to_send_frame_id = -1;
+                last_predict_to_send_predict_ts = -1.0;
             }
             last_mode = mode;
         }
@@ -391,15 +330,6 @@ void fire_control_run(const std::string& /* config_path */) {
                 latency = build_latency(
                     latency_estimator, snapshot, latency_target_id, latency_armor_idx
                 );
-                // 迭代更新 fire_to_hit (延迟准备在 node 层完成)
-                finalize_latency(
-                    latency,
-                    snapshot,
-                    current_time,
-                    latency_target_id,
-                    latency_armor_idx,
-                    &controller.gimbal_state()
-                );
 
                 cached_latency = latency;
                 cached_latency_frame_id = snapshot.frame_id;
@@ -428,6 +358,10 @@ void fire_control_run(const std::string& /* config_path */) {
                 cmd.control_enabled = false;
             } else {
                 cmd = controller.control(snapshot, current_time, latency);
+                latency = controller.last_latency();
+                if (has_cached_latency) {
+                    cached_latency = latency;
+                }
             }
             break;
 
@@ -447,6 +381,23 @@ void fire_control_run(const std::string& /* config_path */) {
 
         // 输出控制指令
         if (should_write) {
+            // 对齐 rm.cv.fans: predict_to_send 在“预测完成 -> 命令准备发出”时采样，
+            // 不需要串口回传；该量用于下一帧延迟估计。
+            if (mode == aimer::AimMode::AUTOAIM
+                && !snapshot_stale
+                && snapshot.predict_timestamp > 0.0
+                && snapshot.timestamp > 0.0)
+            {
+                if (snapshot.frame_id != last_predict_to_send_frame_id
+                    || std::abs(snapshot.predict_timestamp - last_predict_to_send_predict_ts) > 1e-9)
+                {
+                    const double send_ts = get_current_time();
+                    const double predict_to_send = send_ts - snapshot.predict_timestamp;
+                    latency_estimator.update_predict_to_send(predict_to_send, snapshot.timestamp);
+                    last_predict_to_send_frame_id = snapshot.frame_id;
+                    last_predict_to_send_predict_ts = snapshot.predict_timestamp;
+                }
+            }
             fire_cmd->get() = cmd;
         }
 

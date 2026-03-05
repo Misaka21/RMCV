@@ -142,6 +142,7 @@ void FireController::reset()
     last_solution_frame_id_ = -1;
     last_no_target_frame_id_ = -1;
     last_target_confidence_ = 0.0;
+    last_latency_ = {};
     last_armor_id_ = -1;
     has_cached_solution_ = false;
     lost_count_ = 0;
@@ -442,19 +443,108 @@ bool FireController::evaluate_rotate_back_gate(
     return last_rotate_back_ok_;
 }
 
+bool FireController::solve_aim_with_latency_iteration(
+    const predictor::BattlefieldSnapshot& snapshot,
+    const predictor::VehicleState& vehicle,
+    const Eigen::Vector3d& self_velocity,
+    double current_time,
+    const LatencyInfo& base_latency,
+    int preferred_armor_idx,
+    ArmorAimResult& armor_result,
+    AimResult& aim,
+    GimbalPlan& plan,
+    LatencyInfo& out_latency
+)
+{
+    out_latency = base_latency;
+    const double img_age = std::max(0.0, current_time - snapshot.timestamp);
+    const int iter_count = static_cast<int>(std::clamp(
+        get_param_or("AutoAim.FireControl.Latency.iterations", 2.0), 1.0, 5.0
+    ));
+
+    auto solve_once = [&](
+        double prediction_dt,
+        int preferred_idx,
+        ArmorAimResult& out_armor,
+        AimResult& out_aim
+    ) -> bool {
+        out_armor = armor_aim_.compute(
+            vehicle,
+            prediction_dt,
+            &gimbal_state_,
+            &snapshot.self_state.q_imu,
+            preferred_idx
+        );
+        if (!out_armor.valid) {
+            return false;
+        }
+
+        const Eigen::Vector3d target_vec = aimer::tf::world_to_barrel_origin_world(
+            out_armor.target_pos, snapshot.self_state.q_imu
+        );
+        out_aim = ::fire_control::trajectory::solve(
+            target_vec,
+            snapshot.self_state.bullet_speed,
+            self_velocity
+        );
+        return out_aim.valid;
+    };
+
+    int iter_preferred_idx = preferred_armor_idx;
+    for (int i = 0; i < iter_count; ++i) {
+        const double prediction_dt =
+            img_age + out_latency.send_to_control + out_latency.fire_to_hit;
+
+        ArmorAimResult iter_armor;
+        AimResult iter_aim;
+        if (!solve_once(prediction_dt, iter_preferred_idx, iter_armor, iter_aim)) {
+            return false;
+        }
+
+        if (std::isfinite(iter_aim.fly_time) && iter_aim.fly_time > 0.0) {
+            out_latency.set_fly_time(iter_aim.fly_time);
+        }
+        if (iter_armor.armor_idx >= 0 && iter_armor.armor_idx < vehicle.armor_count) {
+            iter_preferred_idx = iter_armor.armor_idx;
+        }
+    }
+
+    const double final_prediction_dt =
+        img_age + out_latency.send_to_control + out_latency.fire_to_hit;
+    if (!solve_once(final_prediction_dt, iter_preferred_idx, armor_result, aim)) {
+        return false;
+    }
+
+    double yaw_rate = 0.0;
+    double pitch_rate = 0.0;
+    estimate_aim_rate_from_target_vel(
+        armor_result,
+        snapshot.self_state.q_imu,
+        yaw_rate,
+        pitch_rate
+    );
+
+    plan = {};
+    plan.valid = true;
+    plan.yaw = aim.yaw;
+    plan.pitch = aim.pitch;
+    plan.yaw_vel = yaw_rate;
+    plan.pitch_vel = pitch_rate;
+    last_prediction_dt_ = final_prediction_dt;
+    return true;
+}
+
 FireCommand FireController::control(
     const predictor::BattlefieldSnapshot& snapshot,
     double current_time,
     const LatencyInfo& latency
 )
 {
-    // 注意: latency 已由 fire_control_node.cpp 的 finalize_latency() 完成迭代更新
-    //       FireController 直接使用即可
-
     // 1. 更新云台状态
     double dt = (last_time_ > 0) ? (current_time - last_time_) : CONTROL_DT;
     gimbal_state_.update(snapshot.self_state.q_imu, dt);
     last_time_ = current_time;
+    last_latency_ = latency;
 
     // 1.5 处理预瞄锁定 (右键控制)
     if (snapshot.self_state.aiming_lock) {
@@ -473,33 +563,32 @@ FireCommand FireController::control(
     if (!has_cached_solution_ && snapshot.frame_id == last_no_target_frame_id_) {
         last_fail_stage_ = 1;
         last_gate_debug_ = {};
+        last_aim_ = {};
+        last_armor_aim_ = {};
+        last_plan_ = {};
         last_armor_id_ = -1;
         return no_target_command();
     }
 
-    // 2. 计算预测时间:
-    // 目标状态时间轴在 img 时刻，当前时刻到命中预测应为:
-    // (current - img) + send_to_control + fire_to_hit
-    // 注意: 这里不应重复叠加 img_to_predict/predict_to_send。
-    const double img_age = std::max(0.0, current_time - snapshot.timestamp);
-    const double prediction_dt = img_age + latency.send_to_control + latency.fire_to_hit;
-    last_prediction_dt_ = prediction_dt;
+    // 2. 计算自车速度（弹道解算需要）
     const Eigen::Vector3d self_velocity(
         snapshot.self_state.velocity.x(),
         snapshot.self_state.velocity.y(),
         0.0
     );
 
-    // 3. 目标选择
-    // 同一帧优先沿用上次目标选择，避免 500Hz 下重复 select() 抖动；
-    // 但后续仍会用新的 prediction_dt 重算选板与弹道。
+    // 3. 目标选择（同帧复用 target_id，避免 500Hz 下同帧反复切敌）
+    const double img_age = std::max(0.0, current_time - snapshot.timestamp);
+    const double prediction_dt_for_select =
+        img_age + latency.send_to_control + latency.fire_to_hit;
+
     TargetSelection selection;
     if (has_cached_solution_ && snapshot.frame_id == last_solution_frame_id_
         && last_selection_.has_target && snapshot.is_valid(last_selection_.target_id))
     {
         selection = last_selection_;
     } else {
-        selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt);
+        selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt_for_select);
     }
     last_selection_ = selection;
 
@@ -517,6 +606,9 @@ FireCommand FireController::control(
             last_fail_stage_ = 1;
         }
         last_gate_debug_ = {};
+        last_aim_ = {};
+        last_armor_aim_ = {};
+        last_plan_ = {};
         return no_target_command();
     }
     lost_count_ = 0;
@@ -526,6 +618,9 @@ FireCommand FireController::control(
         last_fail_stage_ = 1;
         has_cached_solution_ = false;
         last_gate_debug_ = {};
+        last_aim_ = {};
+        last_armor_aim_ = {};
+        last_plan_ = {};
         last_armor_id_ = -1;
         return no_target_command();
     }
@@ -533,114 +628,60 @@ FireCommand FireController::control(
     // 获取目标车辆的引用 (用索引访问，避免指针悬空问题)
     const auto& vehicle = snapshot.vehicles[selection.target_id];
 
-    // 更新选择结果的预测位置 (用于调试显示)
-    int debug_armor_idx = vehicle.recommended_armor_idx;
-    if (debug_armor_idx < 0 || debug_armor_idx >= vehicle.armor_count) {
-        debug_armor_idx = 0;
+    // 5. 选择 preferred armor（跨帧沿用绝对 id）
+    int preferred_armor_idx = -1;
+    if (last_armor_id_ >= 0) {
+        for (int i = 0; i < vehicle.armor_count; ++i) {
+            if (vehicle.armors[i].id == last_armor_id_) {
+                preferred_armor_idx = i;
+                break;
+            }
+        }
     }
-    selection.predicted_pos = vehicle.predict_armor_position(debug_armor_idx, prediction_dt);
-    last_selection_ = selection;
+    if (preferred_armor_idx < 0
+        && vehicle.recommended_armor_idx >= 0
+        && vehicle.recommended_armor_idx < vehicle.armor_count)
+    {
+        preferred_armor_idx = vehicle.recommended_armor_idx;
+    }
 
+    // 6. 延迟迭代 + 选板 + 弹道一体求解
     ArmorAimResult armor_result;
     AimResult aim;
     GimbalPlan plan;
-
-    // 对齐 rm.cv.fans predictor 语义：同一图像帧内只做一次选板/瞄准决策，
-    // 避免 500Hz 周期内重复迭代导致同帧来回切板。
-    const bool reuse_frame_solution =
-        has_cached_solution_
-        && snapshot.frame_id == last_solution_frame_id_
-        && last_selection_.has_target
-        && last_selection_.target_id == selection.target_id
-        && last_armor_aim_.valid
-        && last_aim_.valid
-        && last_plan_.valid;
-
-    if (reuse_frame_solution) {
-        armor_result = last_armor_aim_;
-        aim = last_aim_;
-        plan = last_plan_;
-    } else {
-        int preferred_armor_idx = -1;
-        if (last_armor_id_ >= 0) {
-            for (int i = 0; i < vehicle.armor_count; ++i) {
-                if (vehicle.armors[i].id == last_armor_id_) {
-                    preferred_armor_idx = i;
-                    break;
-                }
-            }
-        }
-        if (preferred_armor_idx < 0
-            && vehicle.recommended_armor_idx >= 0
-            && vehicle.recommended_armor_idx < vehicle.armor_count)
-        {
-            preferred_armor_idx = vehicle.recommended_armor_idx;
-        }
-
-        // 5. 装甲板瞄准
-        armor_result = armor_aim_.compute(
+    LatencyInfo solved_latency;
+    if (!solve_aim_with_latency_iteration(
+            snapshot,
             vehicle,
-            prediction_dt,
-            &gimbal_state_,
-            &snapshot.self_state.q_imu,
-            preferred_armor_idx
-        );
-        last_armor_aim_ = armor_result;
-        if (armor_result.armor_id >= 0) {
-            last_armor_id_ = armor_result.armor_id;
-        } else if (armor_result.armor_idx >= 0 && armor_result.armor_idx < vehicle.armor_count) {
-            last_armor_id_ = vehicle.armors[armor_result.armor_idx].id;
-        } else {
-            last_armor_id_ = -1;
-        }
-
-        if (!armor_result.valid) {
-            last_fail_stage_ = 2;  // 装甲板瞄准失败
-            has_cached_solution_ = false;
-            last_gate_debug_ = {};
-            last_armor_id_ = -1;
-            return no_target_command();
-        }
-
-        // 6. 弹道解算
-        const Eigen::Vector3d target_vec = aimer::tf::world_to_barrel_origin_world(
-            armor_result.target_pos, snapshot.self_state.q_imu
-        );
-        aim = ::fire_control::trajectory::solve(
-            target_vec,
-            snapshot.self_state.bullet_speed,
-            self_velocity
-        );
-
-        if (!aim.valid) {
-            last_fail_stage_ = 3;  // 弹道解算失败
-            has_cached_solution_ = false;
-            last_gate_debug_ = {};
-            last_armor_id_ = -1;
-            return no_target_command();
-        }
-
-        // 7. 构造 GimbalPlan
-        // 使用“同一时刻目标角速度”估计额外预测项，避免跨控制周期差分导致黄圈抖动。
-        double yaw_rate = 0.0;
-        double pitch_rate = 0.0;
-        estimate_aim_rate_from_target_vel(
+            self_velocity,
+            current_time,
+            latency,
+            preferred_armor_idx,
             armor_result,
-            snapshot.self_state.q_imu,
-            yaw_rate,
-            pitch_rate
-        );
-
-        plan.valid = true;
-        plan.yaw = aim.yaw;
-        plan.pitch = aim.pitch;
-        plan.yaw_vel = yaw_rate;
-        plan.pitch_vel = pitch_rate;
-        last_plan_ = plan;
-        last_aim_ = aim;
+            aim,
+            plan,
+            solved_latency))
+    {
+        last_fail_stage_ = 2;  // 迭代求解失败（含选板/弹道失败）
+        has_cached_solution_ = false;
+        last_gate_debug_ = {};
+        last_aim_ = {};
+        last_armor_aim_ = {};
+        last_plan_ = {};
+        last_armor_id_ = -1;
+        return no_target_command();
     }
 
-    // 8. 开火判断 (使用 ArmorAimResult 中的装甲板信息)
+    last_latency_ = solved_latency;
+    last_plan_ = plan;
+    last_aim_ = aim;
+    last_armor_aim_ = armor_result;
+
+    // 更新选择结果预测位置（用于调试显示）
+    selection.predicted_pos = armor_result.target_pos;
+    last_selection_ = selection;
+
+    // 7. 开火判断
     last_solution_frame_id_ = snapshot.frame_id;
     last_target_confidence_ = vehicle.confidence;
     has_cached_solution_ = true;
@@ -650,12 +691,12 @@ FireCommand FireController::control(
         last_armor_id_ = vehicle.armors[armor_result.armor_idx].id;
     }
     bool can_fire = evaluate_fire_window(
-        snapshot, latency, vehicle, prediction_dt, self_velocity
+        snapshot, solved_latency, vehicle, last_prediction_dt_, self_velocity
     );
     can_fire = can_fire && evaluate_rotate_back_gate(
         vehicle,
-        prediction_dt,
-        latency,
+        last_prediction_dt_,
+        solved_latency,
         snapshot.self_state.bullet_speed,
         self_velocity,
         snapshot.self_state.q_imu

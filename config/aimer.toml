@@ -360,7 +360,7 @@
 # ==================== 火控配置 ====================
 
 [AutoAim.FireControl]
-    #@double 最小置信度，目标置信度低于此值不开火
+    #@double 置信度诊断阈值（当前仅用于调试显示，不直接阻止开火）
     min_confidence = 0.3
     #@double 开火误差容忍比例，落点偏移 < 装甲板尺寸 * error_rate 时开火
     error_rate = 0.6
@@ -400,6 +400,10 @@
     # 说明:
     # - img_to_predict / predict_to_send 由系统在线估计，不在这里配置
     # - 这里只保留需手工标定的静态链路
+
+    #@int fire_to_hit 迭代次数（每个控制周期内，目标预测与弹道往返迭代）
+    # @range [1,5]
+    iterations = 2
 
     #@double 信号传输延迟 (s)
     # @param +: 调大将使对运动靶的跟踪更超前
