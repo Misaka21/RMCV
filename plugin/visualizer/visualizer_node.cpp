@@ -578,6 +578,7 @@ static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot
  *
  * 白色空心圆: 图像中心
  * 绿色空心圆: 相机光轴
+ * 蓝色空心圆: 当前枪管前向点 (gimbal_yaw / gimbal_pitch)
  * 橙色空心圆: aim 点 (debug_aim)
  * 黄色空心圆: cmd 点 (debug_cmd 反算回角度)
  * 红色箭头:   从橙点出发，方向由 aim 角速度 (aim_yaw_vel / aim_pitch_vel) 决定
@@ -621,6 +622,17 @@ static void draw_pixel_markers(
 
     double ref_dist = dbg.distance > 0 ? dbg.distance : 5.0;
 
+    // 蓝色空心圆: 当前枪管前向点 (gimbal_yaw/pitch)
+    bool gimbal_valid = false;
+    cv::Point2f gimbal_px = angle_to_pixel(
+        dbg.gimbal_yaw, dbg.gimbal_pitch, q_imu, gimbal_valid, ref_dist
+    );
+    if (gimbal_valid) {
+        cv::circle(vis, gimbal_px, 10, cv::Scalar(255, 120, 40), 3, cv::LINE_AA);
+        cv::putText(vis, "G", gimbal_px + cv::Point2f(8, -8),
+            cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(255, 120, 40), 1, cv::LINE_AA);
+    }
+
     // 橙色空心圆: 预测瞄准点 (aim_yaw/pitch)
     bool aim_valid = false;
     cv::Point2f aim_px = angle_to_pixel(
@@ -628,6 +640,8 @@ static void draw_pixel_markers(
     );
     if (aim_valid) {
         cv::circle(vis, aim_px, 10, cv::Scalar(0, 105, 255), 4, cv::LINE_AA);
+        cv::putText(vis, "A", aim_px + cv::Point2f(8, -8),
+            cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 105, 255), 1, cv::LINE_AA);
     }
 
     // 黄色空心圆: 实际发送角 (cmd_yaw/pitch, 含延迟补偿)
@@ -637,6 +651,28 @@ static void draw_pixel_markers(
     );
     if (cmd_valid) {
         cv::circle(vis, cmd_px, 10, cv::Scalar(0, 255, 255), 4, cv::LINE_AA);
+        cv::putText(vis, "C", cmd_px + cv::Point2f(8, -8),
+            cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(0, 255, 255), 1, cv::LINE_AA);
+    }
+
+    // A/C/G 三点距离 (仅调试语义，不参与控制)
+    int py = 72;
+    if (gimbal_valid && aim_valid) {
+        cv::putText(vis, fmt::format("d(G,A)={:.1f}px", cv::norm(gimbal_px - aim_px)),
+            cv::Point(vis.cols - 260, py), cv::FONT_HERSHEY_SIMPLEX,
+            0.45, cv::Scalar(255, 170, 90), 1, cv::LINE_AA);
+        py += 16;
+    }
+    if (gimbal_valid && cmd_valid) {
+        cv::putText(vis, fmt::format("d(G,C)={:.1f}px", cv::norm(gimbal_px - cmd_px)),
+            cv::Point(vis.cols - 260, py), cv::FONT_HERSHEY_SIMPLEX,
+            0.45, cv::Scalar(255, 230, 90), 1, cv::LINE_AA);
+        py += 16;
+    }
+    if (aim_valid && cmd_valid) {
+        cv::putText(vis, fmt::format("d(A,C)={:.1f}px", cv::norm(aim_px - cmd_px)),
+            cv::Point(vis.cols - 260, py), cv::FONT_HERSHEY_SIMPLEX,
+            0.45, cv::Scalar(120, 210, 255), 1, cv::LINE_AA);
     }
 
     // 红色箭头: 用“角度前向一步后的像素位置”减“当前像素位置”得到方向。
