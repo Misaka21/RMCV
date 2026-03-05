@@ -10,7 +10,7 @@
  *
  * 锁定机制:
  *   - 当有目标且可见时，保持当前目标
- *   - 高速陀螺允许“无可见板继续跟踪”（供 indirect）
+ *   - top1/top2 允许“无可见板继续跟踪”（供 indirect）
  *   - 当目标丢失超过 keep_time 后才切换
  *   - 支持预瞄锁定 (右键按下时强制锁定)
  *
@@ -110,9 +110,13 @@ private:
 
     /**
      * @brief 是否允许在“无可见板”时继续跟踪（供 INDIRECT 使用）
+     *
+     * 对齐 rm.cv.fans 的 top credit 语义：
+     *   只要处于陀螺级别且仍在信用时间内，即便窗口角为 0 也可继续跟踪。
      */
     bool can_track_without_visible(
-        const predictor::VehicleState& vehicle
+        const predictor::VehicleState& vehicle,
+        double current_time
     ) const;
 
     /**
@@ -120,7 +124,8 @@ private:
      */
     bool is_trackable_target(
         const predictor::VehicleState& vehicle,
-        double dt
+        double dt,
+        double current_time
     ) const;
 
     /**

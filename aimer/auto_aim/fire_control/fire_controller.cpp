@@ -192,13 +192,17 @@ bool FireController::evaluate_fire_window(
         DirectAimContext direct_ctx;
         direct_ctx.bullet_speed = snapshot.self_state.bullet_speed;
         direct_ctx.self_velocity = self_velocity;
+        int preferred_idx = -1;
+        if (last_armor_aim_.armor_idx >= 0 && last_armor_aim_.armor_idx < vehicle.armor_count) {
+            preferred_idx = last_armor_aim_.armor_idx;
+        }
 
         ArmorAimResult hit_armor = armor_aim_.compute(
             vehicle,
             hit_dt,
             &gimbal_state_,
             &snapshot.self_state.q_imu,
-            -1,
+            preferred_idx,
             &direct_ctx
         );
         if (!hit_armor.valid) {
@@ -359,16 +363,21 @@ bool FireController::evaluate_rotate_back_gate(
     DirectAimContext direct_ctx;
     direct_ctx.bullet_speed = bullet_speed;
     direct_ctx.self_velocity = self_velocity;
+    int preferred_idx = -1;
+    if (last_armor_aim_.armor_idx >= 0 && last_armor_aim_.armor_idx < vehicle.armor_count) {
+        preferred_idx = last_armor_aim_.armor_idx;
+    }
 
     ArmorAimResult water_aim = armor_aim_.compute(
-        vehicle, time_water_hit, &gimbal_state_, &q_imu, -1, &direct_ctx
+        vehicle, time_water_hit, &gimbal_state_, &q_imu, preferred_idx, &direct_ctx
     );
     if (!water_aim.valid || water_aim.armor_idx < 0 || water_aim.armor_idx >= vehicle.armor_count) {
         return true;
     }
+    preferred_idx = water_aim.armor_idx;
 
     ArmorAimResult command_aim = armor_aim_.compute(
-        vehicle, time_command_hit, &gimbal_state_, &q_imu, -1, &direct_ctx
+        vehicle, time_command_hit, &gimbal_state_, &q_imu, preferred_idx, &direct_ctx
     );
     if (!command_aim.valid || command_aim.armor_idx < 0 || command_aim.armor_idx >= vehicle.armor_count) {
         return true;

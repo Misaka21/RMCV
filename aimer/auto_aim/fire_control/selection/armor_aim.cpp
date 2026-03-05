@@ -398,6 +398,10 @@ ArmorAimResult ArmorAim::compute_indirect(
     double closest_to_lim = std::numeric_limits<double>::infinity();
     double best_radius = 0.0;
     double best_z_plus = 0.0;
+    bool preferred_valid = false;
+    double preferred_to_lim = std::numeric_limits<double>::infinity();
+    double preferred_radius = 0.0;
+    double preferred_z_plus = 0.0;
 
     struct CandidateDiag {
         int idx = -1;
@@ -442,10 +446,30 @@ ArmorAimResult ArmorAim::compute_indirect(
             best_radius = radius;
             best_z_plus = offset.z();
         }
+
+        if (i == preferred_armor_idx) {
+            preferred_valid = true;
+            preferred_to_lim = armor_to_lim;
+            preferred_radius = radius;
+            preferred_z_plus = offset.z();
+        }
     }
 
     if (best_idx < 0 || !std::isfinite(closest_to_lim)) {
         return result;
+    }
+
+    if (preferred_valid && std::isfinite(preferred_to_lim)) {
+        const double switch_hyst = aimer::math::deg2rad(std::max(
+            0.0, get_param_or("AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 5.0)
+        ));
+        // 迟滞切板：偏好板只要不明显差于最优，则继续保持，避免 0/3 高频互切。
+        if (preferred_to_lim <= closest_to_lim + switch_hyst) {
+            best_idx = preferred_armor_idx;
+            closest_to_lim = preferred_to_lim;
+            best_radius = preferred_radius;
+            best_z_plus = preferred_z_plus;
+        }
     }
 
     // 对齐 rm.cv.fans lmtd_top_model::choose_indirect_aim:
@@ -530,7 +554,6 @@ int ArmorAim::choose_best_direct(
     int preferred_armor_idx
 ) const
 {
-    (void)preferred_armor_idx;
     if (direct_indices.empty()) {
         return -1;
     }
@@ -551,6 +574,8 @@ int ArmorAim::choose_best_direct(
         DirectScore best_score = score_direct_candidate(
             vehicle, best_idx, predict_dt, *gimbal, q_imu, direct_ctx
         );
+        DirectScore preferred_score{};
+        bool has_preferred = false;
 
         for (int idx : ordered_indices) {
             const DirectScore score = score_direct_candidate(
@@ -559,6 +584,20 @@ int ArmorAim::choose_best_direct(
             if (direct_score_better(score, best_score)) {
                 best_score = score;
                 best_idx = idx;
+            }
+            if (idx == preferred_armor_idx) {
+                preferred_score = score;
+                has_preferred = true;
+            }
+        }
+
+        if (has_preferred && preferred_score.non_idle) {
+            const double hysteresis = aimer::math::deg2rad(std::max(
+                0.0, get_param_or("AutoAim.FireControl.PID.direct_switch_hysteresis_deg", 2.0)
+            ));
+            // 迟滞保持：偏好板只要不明显劣于当前最优就维持，减少双板来回切。
+            if (!best_score.non_idle || preferred_score.swing_cost <= best_score.swing_cost + hysteresis) {
+                return preferred_armor_idx;
             }
         }
         return best_idx;

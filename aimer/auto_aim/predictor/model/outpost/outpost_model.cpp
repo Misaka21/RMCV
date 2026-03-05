@@ -111,6 +111,7 @@ VehicleState OutpostModel::predict(double timestamp) const {
         vs.armors[i].position = armor_pos;
         vs.armors[i].velocity = velocity;  // 继承中心速度
         vs.armors[i].visible = visible_fresh;
+        vs.armors[i].last_seen = last_update_time_;
 
         // 装甲板朝向 = 中心到装甲板的方向
         double armor_theta = theta + i * (2.0 * M_PI / 3.0);

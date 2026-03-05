@@ -448,6 +448,13 @@
     #@double top2 的 hit-swing 门控误差比例（未配置时回退到 top2_max_out_error）
     top2_max_swing_error = 1.8
 
+    #@double direct 选板切换迟滞 (deg)
+    # 同帧/相邻帧候选评分接近时优先保持上一块板，减少双板来回切
+    direct_switch_hysteresis_deg = 2.0
+    #@double indirect 选板切换迟滞 (deg)
+    # armor_to_limit 评分接近时优先保持上一块板，减少等待点抖动
+    indirect_switch_hysteresis_deg = 5.0
+
 
     #@double 回转耗时线性模型系数 a (s/deg), t = a * |delta_yaw_deg| + b
     angle_to_rotate_time_a = 1.79e-3
@@ -515,6 +522,11 @@
     memorizing_time = 5.0
     #@double 前哨站目标保持时间 (s)
     keep_time_outpost = 0.5
+    #@double top1/top2 无可见板时的跟踪信用时间 (s)
+    # 对齐 rm.cv.fans top credit 语义：orientation=0 也能在空窗期维持目标
+    top_credit_time = 1.0
+    #@double 前哨站无可见板信用时间 (s)
+    top_credit_time_outpost = 1.0
 
 # ==================== 可视化配置 ====================
 

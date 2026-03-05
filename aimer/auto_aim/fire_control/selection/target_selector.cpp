@@ -10,7 +10,7 @@
  *
  * 锁定机制:
  *   - 当有目标且可见时，保持当前目标
- *   - top1/top2 陀螺允许“无可见板继续跟踪”（供 indirect）
+ *   - top1/top2 允许“无可见板继续跟踪”（供 indirect）
  *   - 当目标丢失超过 keep_time 后才切换
  */
 
@@ -70,7 +70,7 @@ TargetSelection TargetSelector::select(
     // ========== 1. 预瞄锁定优先 ==========
     if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
         const auto& vehicle = snapshot.vehicles[forced_target_id_];
-        if (is_trackable_target(vehicle, dt)) {
+        if (is_trackable_target(vehicle, dt, current_time)) {
             const auto forced_candidate = evaluate_visible_candidate(
                 forced_target_id_, vehicle, gimbal, dt
             );
@@ -110,7 +110,7 @@ TargetSelection TargetSelector::select(
     }
     if (tracked_target >= 0 && snapshot.is_valid(tracked_target)) {
         const auto& tracked_vehicle = snapshot.vehicles[tracked_target];
-        if (is_trackable_target(tracked_vehicle, dt)) {
+        if (is_trackable_target(tracked_vehicle, dt, current_time)) {
             target_caught_time_ = current_time;
         } else if (best_candidate.valid()) {
             try_catch_target(
@@ -130,7 +130,7 @@ TargetSelection TargetSelector::select(
     }
 
     const auto& selected_vehicle = snapshot.vehicles[selected_target];
-    if (!is_trackable_target(selected_vehicle, dt)) {
+    if (!is_trackable_target(selected_vehicle, dt, current_time)) {
         return result;
     }
 
@@ -218,35 +218,48 @@ bool TargetSelector::has_visible_armor(
 }
 
 bool TargetSelector::can_track_without_visible(
-    const predictor::VehicleState& vehicle
+    const predictor::VehicleState& vehicle,
+    double current_time
 ) const
 {
     if (!vehicle.spin.active) {
         return false;
     }
-    // 仅在开启窗口时，允许无可见板保持（用于等待下一块板进入窗口）。
     if (vehicle.spin.level == predictor::SpinLevel::NONE) {
         return false;
     }
-    double window_deg = 0.0;
-    if (vehicle.spin.level == predictor::SpinLevel::LOW) {
-        window_deg = get_param_or(
-            "AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0
-        );
-    } else {
-        window_deg = get_param_or(
-            "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
+
+    // 对齐 rm.cv.fans: allow_indirect 由 top_level 决定，而不是由 orientation window 是否大于 0 决定。
+    // 这里用“最近一次有效观测时间”近似 top credit，避免在两板空窗期直接丢目标。
+    const double credit_default = get_param_or("AutoAim.Predictor.LmtdEKF.credit_dt", 1.0);
+    double credit_time = get_param_or(
+        "AutoAim.FireControl.TargetSelector.top_credit_time", credit_default
+    );
+    if (vehicle.enemy_type == predictor::EnemyType::OUTPOST) {
+        credit_time = get_param_or(
+            "AutoAim.FireControl.TargetSelector.top_credit_time_outpost", credit_time
         );
     }
-    return std::abs(window_deg) > 1e-6;
+    credit_time = std::max(0.0, credit_time);
+
+    double latest_seen = -std::numeric_limits<double>::infinity();
+    for (int i = 0; i < vehicle.armor_count; ++i) {
+        latest_seen = std::max(latest_seen, vehicle.armors[i].last_seen);
+    }
+    if (!std::isfinite(latest_seen) || latest_seen <= 0.0) {
+        return false;
+    }
+    const double obs_age = std::max(0.0, current_time - latest_seen);
+    return obs_age <= credit_time;
 }
 
 bool TargetSelector::is_trackable_target(
     const predictor::VehicleState& vehicle,
-    double dt
+    double dt,
+    double current_time
 ) const
 {
-    return has_visible_armor(vehicle, dt) || can_track_without_visible(vehicle);
+    return has_visible_armor(vehicle, dt) || can_track_without_visible(vehicle, current_time);
 }
 
 void TargetSelector::try_catch_target(
