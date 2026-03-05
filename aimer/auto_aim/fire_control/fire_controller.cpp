@@ -121,19 +121,6 @@ bool estimate_aim_rate_from_target_vel(
     return std::isfinite(yaw_rate) && std::isfinite(pitch_rate);
 }
 
-int find_armor_idx_by_id(const predictor::VehicleState& vehicle, int armor_id)
-{
-    if (armor_id < 0) {
-        return -1;
-    }
-    for (int i = 0; i < vehicle.armor_count; ++i) {
-        if (vehicle.armors[i].id == armor_id) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 }  // namespace
 
 void FireController::reset()
@@ -199,7 +186,7 @@ bool FireController::evaluate_fire_window(
             hit_dt,
             &gimbal_state_,
             &snapshot.self_state.q_imu,
-            last_armor_aim_.armor_idx
+            -1
         );
         if (!hit_armor.valid) {
             last_gate_debug_.swing_ok = false;
@@ -351,16 +338,15 @@ bool FireController::evaluate_rotate_back_gate(
     const double time_command_hit = prediction_dt + control_to_fire;
     last_rotate_back_command_time_ = time_command_hit;
 
-    ArmorAimResult water_aim = last_armor_aim_;
-    if (!water_aim.valid) {
-        water_aim = armor_aim_.compute(vehicle, time_water_hit, &gimbal_state_, &q_imu, -1);
-    }
+    ArmorAimResult water_aim = armor_aim_.compute(
+        vehicle, time_water_hit, &gimbal_state_, &q_imu, -1
+    );
     if (!water_aim.valid || water_aim.armor_idx < 0 || water_aim.armor_idx >= vehicle.armor_count) {
         return true;
     }
 
     ArmorAimResult command_aim = armor_aim_.compute(
-        vehicle, time_command_hit, &gimbal_state_, &q_imu, water_aim.armor_idx
+        vehicle, time_command_hit, &gimbal_state_, &q_imu, -1
     );
     if (!command_aim.valid || command_aim.armor_idx < 0 || command_aim.armor_idx >= vehicle.armor_count) {
         return true;
@@ -484,9 +470,6 @@ FireCommand FireController::control(
         0.0
     );
 
-    const int prev_target_id = last_selection_.has_target ? last_selection_.target_id : -1;
-    const int prev_armor_idx = last_armor_aim_.valid ? last_armor_aim_.armor_idx : -1;
-
     // 3. 目标选择
     // 同一帧优先沿用上次目标选择，避免 500Hz 下重复 select() 抖动；
     // 但后续仍会用新的 prediction_dt 重算选板与弹道。
@@ -559,24 +542,12 @@ FireCommand FireController::control(
         plan = last_plan_;
     } else {
         // 5. 装甲板瞄准
-        const bool same_target_as_last =
-            (prev_target_id >= 0 && selection.target_id == prev_target_id);
-        int preferred_armor_idx = -1;
-        if (same_target_as_last) {
-            preferred_armor_idx = find_armor_idx_by_id(vehicle, last_armor_id_);
-            if (preferred_armor_idx < 0
-                && prev_armor_idx >= 0
-                && prev_armor_idx < vehicle.armor_count)
-            {
-                preferred_armor_idx = prev_armor_idx;
-            }
-        }
         armor_result = armor_aim_.compute(
             vehicle,
             prediction_dt,
             &gimbal_state_,
             &snapshot.self_state.q_imu,
-            preferred_armor_idx
+            -1
         );
         last_armor_aim_ = armor_result;
         if (armor_result.armor_id >= 0) {

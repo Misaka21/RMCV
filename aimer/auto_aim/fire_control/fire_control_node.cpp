@@ -165,11 +165,11 @@ void finalize_latency(
     int preferred_armor_idx,
     const ::fire_control::GimbalState* gimbal
 ) {
+    (void)preferred_armor_idx;
     const auto* target = choose_latency_target(snapshot, preferred_target_id);
     if (!target) return;
 
     ArmorAim armor_aim;
-    int iter_preferred_armor_idx = preferred_armor_idx;
     const double img_age = std::max(0.0, current_time - snapshot.timestamp);
 
     constexpr int NUM_ITERATIONS = 2;
@@ -178,20 +178,17 @@ void finalize_latency(
         // prediction_dt = img_age + send_to_control + fire_to_hit
         double dt = img_age + latency.send_to_control + latency.fire_to_hit;
 
-        // 与 FireController 使用同一套选板输入（云台状态 + 切板迟滞），
-        // 避免 fly_time 基于不同装甲板估计。
+        // 对齐 rm.cv.fans：按当前时刻独立求解装甲板，不依赖上一时刻 preferred。
         Eigen::Vector3d pos = Eigen::Vector3d::Zero();
         ArmorAimResult armor_result = armor_aim.compute(
-            *target, dt, gimbal, &snapshot.self_state.q_imu, iter_preferred_armor_idx
+            *target, dt, gimbal, &snapshot.self_state.q_imu, -1
         );
         if (armor_result.valid) {
             pos = armor_result.target_pos;
-            iter_preferred_armor_idx = armor_result.armor_idx;
         } else {
-            int armor_idx = choose_latency_armor_idx(*target, iter_preferred_armor_idx);
+            int armor_idx = choose_latency_armor_idx(*target, -1);
             if (armor_idx >= 0) {
                 pos = target->predict_armor_position(armor_idx, dt);
-                iter_preferred_armor_idx = armor_idx;
             }
         }
 
@@ -586,7 +583,7 @@ void fire_control_run(const std::string& /* config_path */) {
                             break;
                     }
                     // 与 ArmorAim::compute_spin 对齐:
-                    // max_orientation_angle<=0 时表示“只喵中心，不做窗口判定”。
+                    // window=0 时 direct 仅会在极窄条件命中，通常回退到 indirect 等待。
                     dbg.orientation_window_on =
                         v.spin.active && std::abs(dbg.orientation_window_deg) > 1e-6;
 
@@ -607,13 +604,14 @@ void fire_control_run(const std::string& /* config_path */) {
         // - 橙黄点角度突变（对应可视化“乱飘”）
         if (get_param_or("AutoAim.FireControl.Debug.enable", false)
             && mode == aimer::AimMode::AUTOAIM) {
-            const auto& aim = controller.last_aim();
-            const auto& armor_aim = controller.last_armor_aim();
-            const auto& gate = controller.last_gate_debug();
-            const auto fail_stage = controller.last_fail_stage();
-            const double log_period = std::max(
-                0.1, get_param_or("AutoAim.FireControl.Debug.period_s", 0.5)
-            );
+                const auto& aim = controller.last_aim();
+                const auto& armor_aim = controller.last_armor_aim();
+                const auto& plan = controller.last_plan();
+                const auto& gate = controller.last_gate_debug();
+                const auto fail_stage = controller.last_fail_stage();
+                const double log_period = std::max(
+                    0.1, get_param_or("AutoAim.FireControl.Debug.period_s", 0.5)
+                );
             const double jump_thresh = aimer::math::deg2rad(
                 get_param_or("AutoAim.FireControl.Debug.jump_deg", 8.0)
             );
@@ -635,17 +633,78 @@ void fire_control_run(const std::string& /* config_path */) {
                 aim_jump_pitch = std::abs(aim.pitch - last_aim_pitch);
             }
 
-            const bool jump_event = has_last_cmd
-                && (cmd_jump_yaw > jump_thresh
-                    || cmd_jump_pitch > jump_thresh
-                    || aim_jump_yaw > jump_thresh
-                    || aim_jump_pitch > jump_thresh);
+                const bool jump_event = has_last_cmd
+                    && (cmd_jump_yaw > jump_thresh
+                        || cmd_jump_pitch > jump_thresh
+                        || aim_jump_yaw > jump_thresh
+                        || aim_jump_pitch > jump_thresh);
 
-            if (periodic || target_switch || fail_stage_switch || jump_event) {
+                // 橙黄差值诊断：验证 yellow(cmd) 是否等于 orange(aim)+前馈/偏置
+                const double add_pred_t = get_param_or(
+                    "AutoAim.FireControl.Cmd.additional_predict_time", 0.0
+                );
+                const double aim_offset_yaw = get_param_or(
+                    "AutoAim.FireControl.AimOffset.yaw", 0.0
+                );
+                const double aim_offset_pitch = get_param_or(
+                    "AutoAim.FireControl.AimOffset.pitch", 0.0
+                );
+                const double cmd_minus_aim_yaw = aimer::math::angle_diff(aim.yaw, cmd.yaw);
+                const double cmd_minus_aim_pitch = cmd.pitch - aim.pitch;
+                const double expected_cmd_minus_aim_yaw = add_pred_t * plan.yaw_vel + aim_offset_yaw;
+                const double expected_cmd_minus_aim_pitch =
+                    add_pred_t * plan.pitch_vel + aim_offset_pitch;
+
+                bool spin_active = false;
+                int spin_level = -1;
+                double spin_omega = 0.0;
+                double orientation_window_deg = 0.0;
+                bool orientation_window_on = false;
+                if (snapshot.is_valid(cmd.target_id)) {
+                    const auto& v_dbg = snapshot.vehicles[cmd.target_id];
+                    spin_active = v_dbg.spin.active;
+                    spin_level = static_cast<int>(v_dbg.spin.level);
+                    spin_omega = v_dbg.spin.omega;
+                    const double top0_window_deg = (v_dbg.armor_count == 4)
+                        ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
+                        : get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0);
+                    const double top1_window_deg = get_param_or(
+                        "AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0
+                    );
+                    const double top2_window_deg = get_param_or(
+                        "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
+                    );
+                    switch (v_dbg.spin.level) {
+                        case predictor::SpinLevel::HIGH:
+                            orientation_window_deg = top2_window_deg;
+                            break;
+                        case predictor::SpinLevel::LOW:
+                            orientation_window_deg = top1_window_deg;
+                            break;
+                        case predictor::SpinLevel::NONE:
+                        default:
+                            orientation_window_deg = top0_window_deg;
+                            break;
+                    }
+                    orientation_window_on = spin_active && std::abs(orientation_window_deg) > 1e-6;
+                }
+
+                if (periodic || target_switch || fail_stage_switch || jump_event) {
                 std::string visible = "N/A";
+                std::string vis_stat = "N/A";
+                int vis_count = 0;
+                int armor_count = 0;
                 if (snapshot.is_valid(cmd.target_id)
-                    && armor_aim.armor_idx >= 0
+                        && armor_aim.armor_idx >= 0
                     && armor_aim.armor_idx < snapshot.vehicles[cmd.target_id].armor_count) {
+                    const auto& v_dbg = snapshot.vehicles[cmd.target_id];
+                    armor_count = v_dbg.armor_count;
+                    for (int vi = 0; vi < armor_count; ++vi) {
+                        if (v_dbg.armors[vi].visible) {
+                            ++vis_count;
+                        }
+                    }
+                    vis_stat = fmt::format("{}/{}", vis_count, armor_count);
                     visible = snapshot.vehicles[cmd.target_id].armors[armor_aim.armor_idx].visible
                         ? "Y" : "N";
                 }
@@ -666,26 +725,38 @@ void fire_control_run(const std::string& /* config_path */) {
                     : (target_switch || fail_stage_switch
                         ? debug::PrintMode::INFO
                         : debug::PrintMode::DEBUG);
+                const int prev_tid = has_last_cmd ? last_log_target_id : -1;
+                const int prev_aid = has_last_cmd ? last_log_armor_idx : -1;
 
                 debug::print(
                     level,
                     "AutoAimFireControl",
-                    "[{}] frame={} tid={} aid={}/id:{} mode={} vis={} "
+                    "[{}] frame={} {}:{}->{}:{} id:{} mode={} vis={} vcnt={} "
                     "aim=({:.2f},{:.2f}) cmd=({:.2f},{:.2f}) "
+                    "dCmdAim=({:+.2f},{:+.2f}) ff=({:+.2f},{:+.2f}) add={:.0f}ms "
                     "dA=({:.2f},{:.2f}) dC=({:.2f},{:.2f}) "
                     "pred_dt={:.1f}ms lat={:.1f}ms fail={} fire={} "
-                    "gate=[{}{}{}{}{}{}{}{}] z2v={:.1f}deg ttf={:.1f}ms",
+                    "gate=[{}{}{}{}{}{}{}{}] z2v={:.1f}deg ttf={:.1f}ms "
+                    "spin=[{} L{} w={:.2f} win={:.1f}{}]",
                     marker,
                     snapshot.frame_id,
+                    prev_tid,
+                    prev_aid,
                     cmd.target_id,
                     armor_aim.armor_idx,
                     armor_aim.armor_id,
                     pmode(armor_aim.mode),
                     visible,
+                    vis_stat,
                     aimer::math::rad2deg(aim.yaw),
                     aimer::math::rad2deg(aim.pitch),
                     aimer::math::rad2deg(cmd.yaw),
                     aimer::math::rad2deg(cmd.pitch),
+                    aimer::math::rad2deg(cmd_minus_aim_yaw),
+                    aimer::math::rad2deg(cmd_minus_aim_pitch),
+                    aimer::math::rad2deg(expected_cmd_minus_aim_yaw),
+                    aimer::math::rad2deg(expected_cmd_minus_aim_pitch),
+                    add_pred_t * 1000.0,
                     aimer::math::rad2deg(aim_jump_yaw),
                     aimer::math::rad2deg(aim_jump_pitch),
                     aimer::math::rad2deg(cmd_jump_yaw),
@@ -703,7 +774,12 @@ void fire_control_run(const std::string& /* config_path */) {
                     gate.allow_fire_ok ? "+" : "-",
                     controller.last_rotate_back_ok() ? "+" : "-",
                     aimer::math::rad2deg(armor_aim.z_to_v),
-                    armor_aim.time_to_fire * 1000.0
+                    armor_aim.time_to_fire * 1000.0,
+                    spin_active ? "A" : "-",
+                    spin_level,
+                    spin_omega,
+                    orientation_window_deg,
+                    orientation_window_on ? "Y" : "N"
                 );
                 last_fc_log_ts = current_time;
             }

@@ -224,8 +224,7 @@ bool TargetSelector::can_track_without_visible(
     if (!vehicle.spin.active) {
         return false;
     }
-    // 对齐 rm.cv.fans: 只要处于陀螺等级(top1/top2)且窗口>0，
-    // 就允许无可见板时继续跟踪（供 indirect 路径使用）。
+    // 仅在开启窗口时，允许无可见板保持（用于等待下一块板进入窗口）。
     if (vehicle.spin.level == predictor::SpinLevel::NONE) {
         return false;
     }

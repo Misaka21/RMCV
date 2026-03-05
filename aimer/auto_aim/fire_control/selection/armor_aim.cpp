@@ -332,13 +332,8 @@ ArmorAimResult ArmorAim::compute_indirect(
 
     int best_idx = -1;
     double closest_to_lim = std::numeric_limits<double>::infinity();
-    double best_armor_to_lim = 0.0;
     double best_radius = 0.0;
     double best_z_plus = 0.0;
-    bool preferred_found = false;
-    double preferred_armor_to_lim = std::numeric_limits<double>::infinity();
-    double preferred_radius = 0.0;
-    double preferred_z_plus = 0.0;
 
     struct CandidateDiag {
         int idx = -1;
@@ -364,19 +359,9 @@ ArmorAimResult ArmorAim::compute_indirect(
         // 对齐 rm.cv.fans: max_out_angle = sample_width/2 * max_out_error / radius
         const double leave_angle = sample_armor_width * 0.5 * max_out_error / radius;
         const double z_to_v = predicted_z_to_v(vehicle, i, predict_dt);
-        double armor_to_lim = (omega > 0.0)
+        const double armor_to_lim = (omega > 0.0)
             ? (aimer::math::reduced_angle((zn_to_lim - z_to_v) - M_PI + leave_angle) + M_PI - leave_angle)
             : (aimer::math::reduced_angle((z_to_v - zn_to_lim) - M_PI + leave_angle) + M_PI - leave_angle);
-
-        // center-mode(top2 window ~= 0) 下，负值表示“刚刚离开中心线”。
-        // 若仍把负值当作最优，会在“刚过去的板”和“下一块将出现的板”之间来回切。
-        // 这里将其映射到下一圈，稳定等待将出现的板。
-        if (vehicle.spin.level == predictor::SpinLevel::HIGH
-            && std::abs(max_orientation_angle) <= 1e-6
-            && armor_to_lim < 0.0)
-        {
-            armor_to_lim += 2.0 * M_PI;
-        }
 
         diags.push_back(CandidateDiag{
             i,
@@ -387,53 +372,22 @@ ArmorAimResult ArmorAim::compute_indirect(
             radius
         });
 
-        if (i == preferred_armor_idx && std::isfinite(armor_to_lim)) {
-            preferred_found = true;
-            preferred_armor_to_lim = armor_to_lim;
-            preferred_radius = radius;
-            preferred_z_plus = offset.z();
-        }
-
         if (armor_to_lim < closest_to_lim) {
             closest_to_lim = armor_to_lim;
             best_idx = i;
-            best_armor_to_lim = armor_to_lim;
             best_radius = radius;
             best_z_plus = offset.z();
         }
     }
 
-    // 间接模式切板迟滞：当前偏好板也可用时，除非新候选显著更早进入窗口，否则保持。
-    if (preferred_found
-        && preferred_armor_idx >= 0
-        && preferred_armor_idx < armor_count
-        && best_idx >= 0
-        && best_idx != preferred_armor_idx
-        && std::isfinite(preferred_armor_to_lim)
-        && std::isfinite(best_armor_to_lim))
-    {
-        const double switch_hys_deg = get_param_or(
-            "AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 18.0
-        );
-        const double switch_hys = std::max(0.0, aimer::math::deg2rad(switch_hys_deg));
-        const bool switch_not_significant =
-            best_armor_to_lim + switch_hys >= preferred_armor_to_lim;
-        if (switch_not_significant) {
-            best_idx = preferred_armor_idx;
-            best_armor_to_lim = preferred_armor_to_lim;
-            best_radius = preferred_radius;
-            best_z_plus = preferred_z_plus;
-        }
-    }
-
-    if (best_idx < 0 || !std::isfinite(best_armor_to_lim)) {
+    if (best_idx < 0 || !std::isfinite(closest_to_lim)) {
         return result;
     }
 
     // 对齐 rm.cv.fans lmtd_top_model::choose_indirect_aim:
     // min_armor_to_wait 允许为负；最终瞄点是同一装甲板在
     // (predict_dt + time_to_emerge) 的预测位置，而不是强制投影到 lim 方向。
-    const double time_to_emerge = best_armor_to_lim / std::abs(omega);
+    const double time_to_emerge = closest_to_lim / std::abs(omega);
     const Eigen::Vector3d emerge_pos =
         vehicle.predict_armor_position(best_idx, predict_dt + time_to_emerge);
     if (!emerge_pos.allFinite() || emerge_pos.squaredNorm() < 1e-9) {
@@ -510,6 +464,7 @@ int ArmorAim::choose_best_direct(
     int preferred_armor_idx
 ) const
 {
+    (void)preferred_armor_idx;
     if (direct_indices.empty()) {
         return -1;
     }
@@ -531,36 +486,6 @@ int ArmorAim::choose_best_direct(
         if (score < best_score) {
             best_score = score;
             best_idx = idx;
-        }
-    }
-
-    // 切板迟滞：上一帧板子仍在候选内且与当前最优差距不大时，继续保持。
-    // 语义对齐 rm.cv.fans “先保持追踪，再在优势明显时切换”。
-    // 默认切板迟滞
-    double switch_hys_deg = get_param_or(
-        "AutoAim.FireControl.PID.switch_armor_hysteresis_deg", 3.0
-    );
-    // 超快陀螺 + center-mode（top2 window=0）时，增强迟滞抑制 0/3 频繁切板
-    // 该模式下不走窗口/indirect，直接瞄中心，过快切板会导致橙黄点大跳。
-    if (vehicle.spin.active && vehicle.spin.level == predictor::SpinLevel::HIGH) {
-        const double top2_window_deg = get_param_or(
-            "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
-        );
-        if (std::abs(top2_window_deg) <= 1e-6) {
-            const double center_hys_deg = get_param_or(
-                "AutoAim.FireControl.PID.center_mode_switch_hysteresis_deg", 18.0
-            );
-            switch_hys_deg = std::max(switch_hys_deg, center_hys_deg);
-        }
-    }
-    const double switch_hys = std::max(0.0, aimer::math::deg2rad(switch_hys_deg));
-    if (preferred_armor_idx >= 0
-        && preferred_armor_idx < vehicle.armor_count
-        && std::find(direct_indices.begin(), direct_indices.end(), preferred_armor_idx) != direct_indices.end())
-    {
-        const double preferred_score = score_idx(preferred_armor_idx);
-        if (preferred_score <= best_score + switch_hys) {
-            return preferred_armor_idx;
         }
     }
 
