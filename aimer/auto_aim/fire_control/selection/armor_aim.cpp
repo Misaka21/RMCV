@@ -470,6 +470,14 @@ int ArmorAim::choose_best_direct(
         return -1;
     }
 
+    // 对齐 rm.cv.fans 的“无硬锁板”前提下，固定候选遍历顺序，
+    // 避免 vehicle.armors[] 因 tracked_id 轮转导致同分候选来回抖动。
+    std::vector<int> ordered_indices = direct_indices;
+    std::sort(ordered_indices.begin(), ordered_indices.end(),
+        [&](int a, int b) {
+            return vehicle.armors[a].id < vehicle.armors[b].id;
+        });
+
     auto score_idx = [&](int idx) {
         if (gimbal != nullptr) {
             const Eigen::Vector3d pos = vehicle.predict_armor_position(idx, predict_dt);
@@ -479,10 +487,10 @@ int ArmorAim::choose_best_direct(
         return std::abs(predicted_z_to_v(vehicle, idx, predict_dt));
     };
 
-    int best_idx = direct_indices[0];
+    int best_idx = ordered_indices[0];
     double best_score = score_idx(best_idx);
 
-    for (int idx : direct_indices) {
+    for (int idx : ordered_indices) {
         const double score = score_idx(idx);
         if (score < best_score) {
             best_score = score;
