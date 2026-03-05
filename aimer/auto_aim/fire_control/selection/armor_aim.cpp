@@ -173,13 +173,14 @@ ArmorAimResult ArmorAim::compute_non_spin(
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
-    int /* preferred_armor_idx */
+    int preferred_armor_idx
 ) const
 {
     (void)q_imu;
-    // 非陀螺: 直接喵中心（仅可见）
+    // 非陀螺: 直接喵中心（仅可见）。
+    // 与 predictor::armor_model 对齐：优先沿用推荐装甲板，避免 firecontrol 重选导致的跨层抖动。
     return compute_direct(
-        vehicle, predict_dt, gimbal, -1,
+        vehicle, predict_dt, gimbal, preferred_armor_idx,
         /*use_orientation_window=*/false,
         /*max_orientation_angle=*/0.0,
         /*visible_only=*/true,
@@ -464,9 +465,17 @@ int ArmorAim::choose_best_direct(
     int preferred_armor_idx
 ) const
 {
-    (void)preferred_armor_idx;
     if (direct_indices.empty()) {
         return -1;
+    }
+
+    // 非陀螺路径允许沿用 predictor 推荐板，减少同帧/跨帧切板。
+    if (preferred_armor_idx >= 0 && preferred_armor_idx < vehicle.armor_count) {
+        for (int idx : direct_indices) {
+            if (idx == preferred_armor_idx) {
+                return idx;
+            }
+        }
     }
 
     auto score_idx = [&](int idx) {

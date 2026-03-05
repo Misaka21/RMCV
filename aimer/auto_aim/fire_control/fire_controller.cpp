@@ -558,13 +558,17 @@ FireCommand FireController::control(
         aim = last_aim_;
         plan = last_plan_;
     } else {
+        const int preferred_armor_idx = (!vehicle.spin.active)
+            ? vehicle.recommended_armor_idx
+            : -1;
+
         // 5. 装甲板瞄准
         armor_result = armor_aim_.compute(
             vehicle,
             prediction_dt,
             &gimbal_state_,
             &snapshot.self_state.q_imu,
-            -1
+            preferred_armor_idx
         );
         last_armor_aim_ = armor_result;
         if (armor_result.armor_id >= 0) {

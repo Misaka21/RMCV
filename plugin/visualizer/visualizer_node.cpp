@@ -429,11 +429,15 @@ static void draw_selected_target_panel(
     const double top2_window_deg = get_param_or(
         "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
     );
-    double max_angle_deg = top0_window_deg;
-    if (v.spin.level == SpinLevel::LOW) {
-        max_angle_deg = top1_window_deg;
-    } else if (v.spin.level == SpinLevel::HIGH) {
-        max_angle_deg = top2_window_deg;
+    double max_angle_deg = 0.0;
+    if (v.spin.active) {
+        if (v.spin.level == SpinLevel::LOW) {
+            max_angle_deg = top1_window_deg;
+        } else if (v.spin.level == SpinLevel::HIGH) {
+            max_angle_deg = top2_window_deg;
+        } else {
+            max_angle_deg = top0_window_deg;
+        }
     }
     const double max_angle = max_angle_deg * M_PI / 180.0;
     const bool use_window = v.spin.active && max_angle >= 0.0;

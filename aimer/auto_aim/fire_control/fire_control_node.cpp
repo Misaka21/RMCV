@@ -577,20 +577,25 @@ void fire_control_run(const std::string& /* config_path */) {
                     const double top2_window_deg = get_param_or(
                         "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
                     );
-                    switch (v.spin.level) {
-                        case predictor::SpinLevel::HIGH:
-                            dbg.orientation_window_deg = top2_window_deg;
-                            break;
-                        case predictor::SpinLevel::LOW:
-                            dbg.orientation_window_deg = top1_window_deg;
-                            break;
-                        case predictor::SpinLevel::NONE:
-                        default:
-                            dbg.orientation_window_deg = top0_window_deg;
-                            break;
+                    if (v.spin.active) {
+                        switch (v.spin.level) {
+                            case predictor::SpinLevel::HIGH:
+                                dbg.orientation_window_deg = top2_window_deg;
+                                break;
+                            case predictor::SpinLevel::LOW:
+                                dbg.orientation_window_deg = top1_window_deg;
+                                break;
+                            case predictor::SpinLevel::NONE:
+                            default:
+                                // 预留兼容：若后续存在 active+NONE 组合，仍可退回 top0 配置。
+                                dbg.orientation_window_deg = top0_window_deg;
+                                break;
+                        }
+                    } else {
+                        // 非陀螺(ArmorModel)路径不使用 orientation window。
+                        dbg.orientation_window_deg = 0.0;
                     }
-                    // 与 ArmorAim::compute_spin 对齐:
-                    // window=0 时 direct 仅会在极窄条件命中，通常回退到 indirect 等待。
+                    // 与 ArmorAim::compute_spin 对齐：仅陀螺路径启用窗口。
                     dbg.orientation_window_on =
                         v.spin.active && std::abs(dbg.orientation_window_deg) > 1e-6;
 
@@ -683,17 +688,21 @@ void fire_control_run(const std::string& /* config_path */) {
                     const double top2_window_deg = get_param_or(
                         "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
                     );
-                    switch (v_dbg.spin.level) {
-                        case predictor::SpinLevel::HIGH:
-                            orientation_window_deg = top2_window_deg;
-                            break;
-                        case predictor::SpinLevel::LOW:
-                            orientation_window_deg = top1_window_deg;
-                            break;
-                        case predictor::SpinLevel::NONE:
-                        default:
-                            orientation_window_deg = top0_window_deg;
-                            break;
+                    if (spin_active) {
+                        switch (v_dbg.spin.level) {
+                            case predictor::SpinLevel::HIGH:
+                                orientation_window_deg = top2_window_deg;
+                                break;
+                            case predictor::SpinLevel::LOW:
+                                orientation_window_deg = top1_window_deg;
+                                break;
+                            case predictor::SpinLevel::NONE:
+                            default:
+                                orientation_window_deg = top0_window_deg;
+                                break;
+                        }
+                    } else {
+                        orientation_window_deg = 0.0;
                     }
                     orientation_window_on = spin_active && std::abs(orientation_window_deg) > 1e-6;
                 }
