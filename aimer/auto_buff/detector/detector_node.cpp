@@ -87,6 +87,12 @@ void BuffDetectorNode::start() {
 
 void BuffDetectorNode::stop() {
     running_.store(false);
+    // 唤醒可能阻塞在 pop() 上的异步推理线程
+    if (detector_) {
+        if (auto* trt = dynamic_cast<TensorrtBuffDetector*>(detector_.get())) {
+            trt->stop();
+        }
+    }
     if (detection_thread_.joinable()) {
         detection_thread_.join();
     }

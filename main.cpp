@@ -267,8 +267,19 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // 等待线程结束
+    // 等待线程结束 (带超时兜底)
     fmt::print(fmt::fg(fmt::color::yellow), "[INFO] 等待线程结束...\n");
+
+    // 超时看门狗：如果 join 超时则强制退出
+    constexpr int SHUTDOWN_TIMEOUT_S = 5;
+    std::thread shutdown_watchdog([timeout = SHUTDOWN_TIMEOUT_S]() {
+        std::this_thread::sleep_for(std::chrono::seconds(timeout));
+        fmt::print(fmt::fg(fmt::color::red),
+            "[WARN] 退出超时 ({}s)，强制退出\n", timeout);
+        std::_Exit(0);
+    });
+    shutdown_watchdog.detach();
+
     if (param_thread.joinable()) {
         param_thread.join();
     }
