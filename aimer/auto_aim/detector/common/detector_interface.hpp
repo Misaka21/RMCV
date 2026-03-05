@@ -83,6 +83,13 @@ public:
      */
     virtual bool is_async() const { return false; }
 
+    /**
+     * @brief 请求异步检测器退出阻塞等待
+     *
+     * 默认无操作；真正异步后端应覆写并唤醒 pop()。
+     */
+    virtual void stop() {}
+
     // ========== 异步接口 (默认实现: 同步模拟) ==========
 
     /**

@@ -141,7 +141,7 @@ public:
     /**
      * @brief 通知 pop() 停止阻塞 (用于退出)
      */
-    void stop();
+    void stop() override;
 
 private:
     /**

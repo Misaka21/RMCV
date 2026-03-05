@@ -12,7 +12,6 @@
 #include <opencv2/core/mat.hpp>
 
 #include "detector_factory.hpp"
-#include "detector_trt/tensorrt_buff_detector.hpp"
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
@@ -87,11 +86,9 @@ void BuffDetectorNode::start() {
 
 void BuffDetectorNode::stop() {
     running_.store(false);
-    // 唤醒可能阻塞在 pop() 上的异步推理线程
     if (detector_) {
-        if (auto* trt = dynamic_cast<TensorrtBuffDetector*>(detector_.get())) {
-            trt->stop();
-        }
+        // 统一异步停止接口：唤醒可能阻塞在 pop() 上的线程
+        detector_->stop();
     }
     if (detection_thread_.joinable()) {
         detection_thread_.join();
@@ -206,9 +203,8 @@ void BuffDetectorNode::process_frame_async() {
     stats::FpsStats pop_stats("BuffDetectorNode", "detected");
 
     auto stop_async_detector = [&]() {
-        // stop() 用于唤醒 TensorRT 的阻塞 pop()
-        if (auto* trt = dynamic_cast<TensorrtBuffDetector*>(detector_.get())) {
-            trt->stop();
+        if (detector_) {
+            detector_->stop();
         }
     };
 

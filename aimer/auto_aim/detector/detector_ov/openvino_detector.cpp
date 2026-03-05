@@ -167,6 +167,10 @@ std::vector<DetectedArmor> OpenvinoDetector::detect(const cv::Mat& image)
 void OpenvinoDetector::push(const cv::Mat& image, int frame_id, int64_t timestamp_us,
                             const serial::SerialReceiveData& serial_data)
 {
+    if (stopped_.load()) {
+        return;
+    }
+
     // 队列过长时直接丢弃新帧 (不阻塞)
     {
         std::lock_guard lock(task_mutex_);
@@ -215,7 +219,10 @@ AsyncDetectionResult OpenvinoDetector::pop()
     // 出队
     {
         std::unique_lock lock(task_mutex_);
-        task_cv_.wait(lock, [this] { return !task_queue_.empty(); });
+        task_cv_.wait(lock, [this] { return !task_queue_.empty() || stopped_.load(); });
+        if (stopped_.load() && task_queue_.empty()) {
+            return {};
+        }
         task = std::move(task_queue_.front());
         task_queue_.pop();
     }
@@ -245,6 +252,11 @@ AsyncDetectionResult OpenvinoDetector::pop()
 size_t OpenvinoDetector::queue_size() const {
     std::lock_guard lock(task_mutex_);
     return task_queue_.size();
+}
+
+void OpenvinoDetector::stop() {
+    stopped_.store(true);
+    task_cv_.notify_all();
 }
 
 // ============================================================================

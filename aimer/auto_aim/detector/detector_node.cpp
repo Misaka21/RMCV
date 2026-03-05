@@ -14,7 +14,6 @@
 
 #include "detector_factory.hpp"
 #include "detector_helpers.hpp"
-#include "detector_trt/tensorrt_detector.hpp"
 #include "aimer/common/robot_state.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/param/static_config.hpp"
@@ -160,10 +159,7 @@ void run_async_loop(detector::DetectorInterface* det) {
     stats::FpsStats pop_stats("DetectorNode", "detected");
 
     auto stop_async_detector = [&]() {
-        // stop() 用于唤醒 TensorRT 的阻塞 pop()
-        if (auto* trt = dynamic_cast<detector::TensorrtDetector*>(det)) {
-            trt->stop();
-        }
+        det->stop();
     };
 
     // Push 线程: 从相机读取帧，推送给检测器

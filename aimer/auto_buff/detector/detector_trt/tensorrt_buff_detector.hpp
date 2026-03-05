@@ -118,7 +118,7 @@ public:
     AsyncBuffDetectionResult pop() override;
     size_t queue_size() const override;
 
-    void stop();
+    void stop() override;
 
 private:
     void build_engine_from_onnx();

@@ -16,6 +16,7 @@
 #define AIMER_AUTOAIM_DETECTOR_OPENVINO_DETECTOR_HPP
 
 #include <chrono>
+#include <atomic>
 #include <memory>
 #include <queue>
 #include <string>
@@ -86,6 +87,7 @@ public:
               const serial::SerialReceiveData& serial_data) override;
     AsyncDetectionResult pop() override;
     size_t queue_size() const override;
+    void stop() override;
 
 private:
     std::tuple<cv::Mat, float, int, int> preprocess(const cv::Mat& image);
@@ -104,6 +106,7 @@ private:
     mutable std::mutex task_mutex_;
     std::condition_variable task_cv_;
     std::queue<InferenceTask> task_queue_;
+    std::atomic<bool> stopped_{false};
 
     // 配置
     OpenvinoConfig config_;

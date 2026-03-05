@@ -11,6 +11,7 @@
 #define AIMER_AUTOBUFF_DETECTOR_OV_OPENVINO_BUFF_DETECTOR_HPP
 
 #include <chrono>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <condition_variable>
@@ -88,6 +89,7 @@ public:
               const serial::SerialReceiveData& serial_data) override;
     AsyncBuffDetectionResult pop() override;
     size_t queue_size() const override;
+    void stop() override;
 
 private:
     OvBuffConfig config_;
@@ -107,6 +109,7 @@ private:
     mutable std::mutex       task_mutex_;
     std::condition_variable  task_cv_;
     std::queue<OvInferenceTask> task_queue_;
+    std::atomic<bool> stopped_{false};
 
     // 调试
     mutable cv::Mat debug_img_;
