@@ -1,4 +1,5 @@
 // C++ system headers
+#include <atomic>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -34,10 +35,16 @@
 #define WEB_DIR "web"
 #endif
 
+// 全局原子标志，信号处理函数中安全使用（不走锁）
+static std::atomic<bool> g_shutdown_requested{false};
+
 void signal_handler(int sig) {
+    if (g_shutdown_requested.exchange(true)) {
+        // 第二次 Ctrl+C: 强制退出
+        fmt::print(fmt::fg(fmt::color::red), "\n[WARN] 再次收到信号 {}, 强制退出\n", sig);
+        std::_Exit(1);
+    }
     fmt::print(fmt::fg(fmt::color::yellow), "\n[INFO] 收到信号 {}, 正在退出...\n", sig);
-    auto app_running = umt::BasicObjManager<bool>::find("app_running");
-    if (app_running) app_running->get() = false;
 }
 
 void print_usage(const char* prog_name) {
@@ -215,6 +222,10 @@ int main(int argc, char* argv[]) {
         // (因为 Py_Main 会阻塞，无法响应信号)
         std::thread exit_monitor([&app_running]() {
             while (app_running->get()) {
+                if (g_shutdown_requested.load()) {
+                    app_running->get() = false;
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
             // 等待其他线程有时间清理
@@ -248,6 +259,10 @@ int main(int argc, char* argv[]) {
     {
         // 普通模式：主线程等待
         while (app_running->get()) {
+            if (g_shutdown_requested.load()) {
+                app_running->get() = false;
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }

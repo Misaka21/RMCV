@@ -136,6 +136,8 @@ void run_sync_loop(detector::DetectorInterface* det) {
 
         } catch (const umt::MessageError_Timeout&) {
             // 超时，继续
+        } catch (const umt::MessageError_Stopped&) {
+            break;
         }
     }
 }
@@ -193,6 +195,9 @@ void run_async_loop(detector::DetectorInterface* det) {
 
             } catch (const umt::MessageError_Timeout&) {
                 // 超时，继续
+            } catch (const umt::MessageError_Stopped&) {
+                // Publisher 已销毁
+                break;
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "DetectorNode",
                              "Push loop exception: {}", e.what());

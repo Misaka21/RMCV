@@ -270,6 +270,8 @@ void start_recorder_node() {
                 has_sync = true;
             } catch (const umt::MessageError_Timeout&) {
                 // 超时，继续
+            } catch (const umt::MessageError_Stopped&) {
+                break;
             }
 
             if (!enable_recording) continue;

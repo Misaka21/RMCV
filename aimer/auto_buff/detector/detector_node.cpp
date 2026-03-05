@@ -177,6 +177,9 @@ void BuffDetectorNode::process_frame_sync() {
 
         } catch (const umt::MessageError_Timeout&) {
             // 超时，继续
+        } catch (const umt::MessageError_Stopped&) {
+            // Publisher 已销毁
+            break;
         }
     }
 }
@@ -230,6 +233,11 @@ void BuffDetectorNode::process_frame_async() {
 
             } catch (const umt::MessageError_Timeout&) {
                 // 超时，继续
+            } catch (const umt::MessageError_Stopped&) {
+                // Publisher 已销毁（程序退出中），安静退出
+                debug::print(debug::PrintMode::INFO, "BuffDetectorNode",
+                             "Push loop: publisher stopped, exiting");
+                break;
             } catch (const std::exception& e) {
                 debug::print(debug::PrintMode::ERROR, "BuffDetectorNode",
                              "Push loop exception: {}", e.what());
