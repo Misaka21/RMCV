@@ -14,6 +14,7 @@
 #include <fmt/format.h>
 
 #include "aimer/common/math/math.hpp"
+#include "aimer/common/trajectory/solver_factory.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/debug/logger.hpp"
@@ -57,16 +58,71 @@ double now_sec()
     return std::chrono::duration<double>(now).count();
 }
 
-double center_cost(
-    const Eigen::Vector3d& pos,
-    const ::fire_control::GimbalState& gimbal
+struct DirectScore {
+    bool non_idle = false;
+    double swing_cost = std::numeric_limits<double>::infinity();
+};
+
+DirectScore score_direct_candidate(
+    const predictor::VehicleState& vehicle,
+    int idx,
+    double predict_dt,
+    const ::fire_control::GimbalState& gimbal,
+    const Eigen::Quaterniond* q_imu,
+    const DirectAimContext* direct_ctx
 )
 {
-    const double yaw = std::atan2(pos.y(), pos.x());
-    const double pitch = std::atan2(pos.z(), std::hypot(pos.x(), pos.y()));
-    const double dyaw = ::fire_control::GimbalState::normalize_angle(yaw - gimbal.yaw);
-    const double dpitch = pitch - gimbal.pitch;
-    return std::hypot(dyaw, dpitch);
+    DirectScore score;
+    const Eigen::Vector3d pos = vehicle.predict_armor_position(idx, predict_dt);
+    if (!pos.allFinite() || pos.squaredNorm() < 1e-9) {
+        return score;
+    }
+
+    double aim_yaw = 0.0;
+    double aim_pitch = 0.0;
+    bool aim_valid = false;
+
+    if (q_imu != nullptr && direct_ctx != nullptr && direct_ctx->bullet_speed > 1e-3) {
+        const Eigen::Vector3d target_vec = aimer::tf::world_to_barrel_origin_world(pos, *q_imu);
+        const ::fire_control::AimResult aim = ::fire_control::trajectory::solve(
+            target_vec, direct_ctx->bullet_speed, direct_ctx->self_velocity
+        );
+        if (aim.valid) {
+            aim_yaw = aim.yaw;
+            aim_pitch = aim.pitch;
+            aim_valid = true;
+        }
+    }
+
+    if (!aim_valid) {
+        aim_yaw = std::atan2(pos.y(), pos.x());
+        aim_pitch = std::atan2(pos.z(), std::hypot(pos.x(), pos.y()));
+    }
+
+    const double aim_offset_yaw = aimer::math::deg2rad(
+        get_param_or("AutoAim.FireControl.AimOffset.yaw", 0.0)
+    );
+    const double aim_offset_pitch = aimer::math::deg2rad(
+        get_param_or("AutoAim.FireControl.AimOffset.pitch", 0.0)
+    );
+
+    const double yaw_err = ::fire_control::GimbalState::normalize_angle(
+        (aim_yaw + aim_offset_yaw) - gimbal.yaw
+    );
+    const double pitch_err = (aim_pitch + aim_offset_pitch) - gimbal.pitch;
+
+    // 对齐 rm.cv.fans 的 aim_cmp 前置语义：不可用候选优先级更低
+    score.non_idle = std::abs(yaw_err) < M_PI_2 && std::abs(pitch_err) < M_PI_2;
+    score.swing_cost = std::hypot(yaw_err, pitch_err);
+    return score;
+}
+
+bool direct_score_better(const DirectScore& lhs, const DirectScore& rhs)
+{
+    if (lhs.non_idle != rhs.non_idle) {
+        return lhs.non_idle;  // 非 IDLE 优先
+    }
+    return lhs.swing_cost < rhs.swing_cost;
 }
 
 double predicted_z_to_v(
@@ -136,7 +192,7 @@ ArmorAimResult ArmorAim::compute(
     double predict_dt
 ) const
 {
-    return compute(vehicle, predict_dt, nullptr, nullptr, -1);
+    return compute(vehicle, predict_dt, nullptr, nullptr, -1, nullptr);
 }
 
 ArmorAimResult ArmorAim::compute(
@@ -144,7 +200,8 @@ ArmorAimResult ArmorAim::compute(
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
-    int preferred_armor_idx
+    int preferred_armor_idx,
+    const DirectAimContext* direct_ctx
 ) const
 {
     if (!vehicle.valid) {
@@ -153,19 +210,20 @@ ArmorAimResult ArmorAim::compute(
 
     // 是否陀螺仅信 predictor 输出，避免火控重复阈值判定
     if (!vehicle.spin.active) {
-        return compute_non_spin(vehicle, predict_dt, gimbal, q_imu, preferred_armor_idx);
+        return compute_non_spin(vehicle, predict_dt, gimbal, q_imu, preferred_armor_idx, direct_ctx);
     }
-    return compute_spin(vehicle, predict_dt, gimbal, q_imu, preferred_armor_idx);
+    return compute_spin(vehicle, predict_dt, gimbal, q_imu, preferred_armor_idx, direct_ctx);
 }
 
 ArmorAimResult ArmorAim::compute(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
-    int preferred_armor_idx
+    int preferred_armor_idx,
+    const DirectAimContext* direct_ctx
 ) const
 {
-    return compute(vehicle, predict_dt, gimbal, nullptr, preferred_armor_idx);
+    return compute(vehicle, predict_dt, gimbal, nullptr, preferred_armor_idx, direct_ctx);
 }
 
 ArmorAimResult ArmorAim::compute_non_spin(
@@ -173,14 +231,14 @@ ArmorAimResult ArmorAim::compute_non_spin(
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
-    int preferred_armor_idx
+    int preferred_armor_idx,
+    const DirectAimContext* direct_ctx
 ) const
 {
-    (void)q_imu;
     // 非陀螺: 直接喵中心（仅可见）。
-    // 与 predictor::armor_model 对齐：优先沿用推荐装甲板，避免 firecontrol 重选导致的跨层抖动。
+    // 选板评分对齐 rm.cv.fans armor_model::aim_cmp（non-idle + swing_cost）。
     return compute_direct(
-        vehicle, predict_dt, gimbal, preferred_armor_idx,
+        vehicle, predict_dt, gimbal, q_imu, direct_ctx, preferred_armor_idx,
         /*use_orientation_window=*/false,
         /*max_orientation_angle=*/0.0,
         /*visible_only=*/true,
@@ -193,7 +251,8 @@ ArmorAimResult ArmorAim::compute_spin(
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
-    int preferred_armor_idx
+    int preferred_armor_idx,
+    const DirectAimContext* direct_ctx
 ) const
 {
     // 策略（对齐 rm.cv.fans）：
@@ -205,7 +264,7 @@ ArmorAimResult ArmorAim::compute_spin(
     // 无论窗口角是否为 0，先尝试 direct(窗口内)，失败再回退 indirect（top1/top2）。
     // 当 max_orientation_angle=0 时，direct 仅在板恰好进入中心线时命中；否则走 indirect 等待。
     ArmorAimResult direct = compute_direct(
-        vehicle, predict_dt, gimbal, preferred_armor_idx,
+        vehicle, predict_dt, gimbal, q_imu, direct_ctx, preferred_armor_idx,
         /*use_orientation_window=*/true,
         profile.max_orientation_angle,
         /*visible_only=*/profile.direct_visible_only,
@@ -239,6 +298,8 @@ ArmorAimResult ArmorAim::compute_direct(
     const predictor::VehicleState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
+    const Eigen::Quaterniond* q_imu,
+    const DirectAimContext* direct_ctx,
     int preferred_armor_idx,
     bool use_orientation_window,
     double max_orientation_angle,
@@ -282,6 +343,8 @@ ArmorAimResult ArmorAim::compute_direct(
         candidate_indices,
         predict_dt,
         gimbal,
+        q_imu,
+        direct_ctx,
         preferred_armor_idx
     );
     if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
@@ -462,6 +525,8 @@ int ArmorAim::choose_best_direct(
     const std::vector<int>& direct_indices,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
+    const Eigen::Quaterniond* q_imu,
+    const DirectAimContext* direct_ctx,
     int preferred_armor_idx
 ) const
 {
@@ -478,26 +543,37 @@ int ArmorAim::choose_best_direct(
             return vehicle.armors[a].id < vehicle.armors[b].id;
         });
 
-    auto score_idx = [&](int idx) {
-        if (gimbal != nullptr) {
-            const Eigen::Vector3d pos = vehicle.predict_armor_position(idx, predict_dt);
-            return center_cost(pos, *gimbal);
+    // 对齐 rm.cv.fans armor_model::aim_cmp:
+    // 1) non-idle 优先
+    // 2) 再比较 swing_cost
+    if (gimbal != nullptr) {
+        int best_idx = ordered_indices[0];
+        DirectScore best_score = score_direct_candidate(
+            vehicle, best_idx, predict_dt, *gimbal, q_imu, direct_ctx
+        );
+
+        for (int idx : ordered_indices) {
+            const DirectScore score = score_direct_candidate(
+                vehicle, idx, predict_dt, *gimbal, q_imu, direct_ctx
+            );
+            if (direct_score_better(score, best_score)) {
+                best_score = score;
+                best_idx = idx;
+            }
         }
-        // 无云台状态时回退到“最正对”策略
-        return std::abs(predicted_z_to_v(vehicle, idx, predict_dt));
-    };
+        return best_idx;
+    }
 
+    // 无云台状态时回退到“最正对”策略
     int best_idx = ordered_indices[0];
-    double best_score = score_idx(best_idx);
-
+    double best_score = std::abs(predicted_z_to_v(vehicle, best_idx, predict_dt));
     for (int idx : ordered_indices) {
-        const double score = score_idx(idx);
+        const double score = std::abs(predicted_z_to_v(vehicle, idx, predict_dt));
         if (score < best_score) {
             best_score = score;
             best_idx = idx;
         }
     }
-
     return best_idx;
 }
 

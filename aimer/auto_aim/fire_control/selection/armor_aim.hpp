@@ -53,6 +53,17 @@ struct ArmorAimResult {
 };
 
 /**
+ * @brief direct 选板评分上下文
+ *
+ * 当提供有效弹速时，direct 评分会优先使用“弹道解后的 aim(yaw/pitch)”计算 swing cost；
+ * 否则回退到几何 yaw/pitch。
+ */
+struct DirectAimContext {
+    double bullet_speed = 0.0;
+    Eigen::Vector3d self_velocity = Eigen::Vector3d::Zero();
+};
+
+/**
  * @brief 装甲板瞄准器
  *
  * 根据目标状态选择执行路径:
@@ -81,21 +92,23 @@ public:
      * @param vehicle 目标车辆状态
      * @param predict_dt 预测时间
      * @param gimbal 当前云台状态（用于最小转动代价）
-     * @param preferred_armor_idx 上一帧偏好索引（用于切板迟滞）
+     * @param preferred_armor_idx 上一帧偏好索引（当前 direct 对齐 rm.cv.fans，不强制使用）
      */
     ArmorAimResult compute(
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
-        int preferred_armor_idx
+        int preferred_armor_idx,
+        const DirectAimContext* direct_ctx = nullptr
     ) const;
 
     ArmorAimResult compute(
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
-        int preferred_armor_idx
+        int preferred_armor_idx,
+        const DirectAimContext* direct_ctx = nullptr
     ) const;
 
 private:
@@ -107,7 +120,8 @@ private:
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
-        int preferred_armor_idx
+        int preferred_armor_idx,
+        const DirectAimContext* direct_ctx
     ) const;
 
     /**
@@ -118,7 +132,8 @@ private:
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
-        int preferred_armor_idx
+        int preferred_armor_idx,
+        const DirectAimContext* direct_ctx
     ) const;
 
     /**
@@ -131,6 +146,8 @@ private:
         const predictor::VehicleState& vehicle,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
+        const Eigen::Quaterniond* q_imu,
+        const DirectAimContext* direct_ctx,
         int preferred_armor_idx,
         bool use_orientation_window,
         double max_orientation_angle,
@@ -154,13 +171,17 @@ private:
     /**
      * @brief 选择 DIRECT 模式的最佳装甲板
      *
-     * 从可见装甲板中选择需要最小云台移动的那块
+     * 对齐 rm.cv.fans armor_model::aim_cmp：
+     * - non-idle 候选优先
+     * - swing_cost 最小优先
      */
     int choose_best_direct(
         const predictor::VehicleState& vehicle,
         const std::vector<int>& direct_indices,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
+        const Eigen::Quaterniond* q_imu,
+        const DirectAimContext* direct_ctx,
         int preferred_armor_idx
     ) const;
 

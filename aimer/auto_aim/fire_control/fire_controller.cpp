@@ -189,13 +189,17 @@ bool FireController::evaluate_fire_window(
     if (vehicle.spin.active && std::abs(vehicle.spin.omega) > 1e-4) {
         const double control_to_fire = std::max(0.0, latency.control_to_fire);
         const double hit_dt = prediction_dt + control_to_fire;
+        DirectAimContext direct_ctx;
+        direct_ctx.bullet_speed = snapshot.self_state.bullet_speed;
+        direct_ctx.self_velocity = self_velocity;
 
         ArmorAimResult hit_armor = armor_aim_.compute(
             vehicle,
             hit_dt,
             &gimbal_state_,
             &snapshot.self_state.q_imu,
-            -1
+            -1,
+            &direct_ctx
         );
         if (!hit_armor.valid) {
             last_gate_debug_.swing_ok = false;
@@ -352,16 +356,19 @@ bool FireController::evaluate_rotate_back_gate(
     const double time_water_hit = prediction_dt;
     const double time_command_hit = prediction_dt + control_to_fire;
     last_rotate_back_command_time_ = time_command_hit;
+    DirectAimContext direct_ctx;
+    direct_ctx.bullet_speed = bullet_speed;
+    direct_ctx.self_velocity = self_velocity;
 
     ArmorAimResult water_aim = armor_aim_.compute(
-        vehicle, time_water_hit, &gimbal_state_, &q_imu, -1
+        vehicle, time_water_hit, &gimbal_state_, &q_imu, -1, &direct_ctx
     );
     if (!water_aim.valid || water_aim.armor_idx < 0 || water_aim.armor_idx >= vehicle.armor_count) {
         return true;
     }
 
     ArmorAimResult command_aim = armor_aim_.compute(
-        vehicle, time_command_hit, &gimbal_state_, &q_imu, -1
+        vehicle, time_command_hit, &gimbal_state_, &q_imu, -1, &direct_ctx
     );
     if (!command_aim.valid || command_aim.armor_idx < 0 || command_aim.armor_idx >= vehicle.armor_count) {
         return true;
@@ -468,12 +475,16 @@ bool FireController::solve_aim_with_latency_iteration(
         ArmorAimResult& out_armor,
         AimResult& out_aim
     ) -> bool {
+        DirectAimContext direct_ctx;
+        direct_ctx.bullet_speed = snapshot.self_state.bullet_speed;
+        direct_ctx.self_velocity = self_velocity;
         out_armor = armor_aim_.compute(
             vehicle,
             prediction_dt,
             &gimbal_state_,
             &snapshot.self_state.q_imu,
-            preferred_idx
+            preferred_idx,
+            &direct_ctx
         );
         if (!out_armor.valid) {
             return false;
