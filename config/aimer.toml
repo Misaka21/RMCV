@@ -380,10 +380,10 @@
     indirect_period_s = 0.2
 
 [AutoAim.FireControl.AimOffset]
-    #@double yaw 落点偏置 (rad)
+    #@double yaw 落点偏置 (deg)
     # @param +: 调大将向左打击
     yaw = 0.0
-    #@double pitch 落点偏置 (rad)
+    #@double pitch 落点偏置 (deg)
     # @param +: 调大将向上打击
     pitch = 0.0
 

@@ -264,7 +264,7 @@ static void draw_fire_debug_panel(
     // 10. 指令注入参数
     put(fmt::format("Cmd inject: add_pred={:.1f}ms  off(y,p)=({:+.2f},{:+.2f})deg",
         dbg.cmd_additional_predict_time * 1000.0,
-        dbg.aim_offset_yaw * 57.3, dbg.aim_offset_pitch * 57.3),
+        dbg.aim_offset_yaw, dbg.aim_offset_pitch),
         cv::Scalar(140, 220, 220));
 
     // 11. 开火门控分解（真实火控判定字段）

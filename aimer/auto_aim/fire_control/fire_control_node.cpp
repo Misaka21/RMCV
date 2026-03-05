@@ -485,6 +485,7 @@ void fire_control_run(const std::string& /* config_path */) {
             dbg.cmd_additional_predict_time = runtime_param::get_param<double>(
                 "AutoAim.FireControl.Cmd.additional_predict_time"
             );
+            // 偏置配置单位是 deg，debug 字段也保持 deg 直读展示
             dbg.aim_offset_yaw = runtime_param::get_param<double>(
                 "AutoAim.FireControl.AimOffset.yaw"
             );
@@ -649,12 +650,14 @@ void fire_control_run(const std::string& /* config_path */) {
                 const double add_pred_t = get_param_or(
                     "AutoAim.FireControl.Cmd.additional_predict_time", 0.0
                 );
-                const double aim_offset_yaw = get_param_or(
+                const double aim_offset_yaw_deg = get_param_or(
                     "AutoAim.FireControl.AimOffset.yaw", 0.0
                 );
-                const double aim_offset_pitch = get_param_or(
+                const double aim_offset_pitch_deg = get_param_or(
                     "AutoAim.FireControl.AimOffset.pitch", 0.0
                 );
+                const double aim_offset_yaw = aimer::math::deg2rad(aim_offset_yaw_deg);
+                const double aim_offset_pitch = aimer::math::deg2rad(aim_offset_pitch_deg);
                 const double cmd_minus_aim_yaw = aimer::math::angle_diff(aim.yaw, cmd.yaw);
                 const double cmd_minus_aim_pitch = cmd.pitch - aim.pitch;
                 const double expected_cmd_minus_aim_yaw = add_pred_t * plan.yaw_vel + aim_offset_yaw;

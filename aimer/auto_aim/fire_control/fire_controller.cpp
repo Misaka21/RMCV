@@ -674,13 +674,15 @@ FireCommand FireController::generate_command(
         pitch_vel_for_ff = std::clamp(pitch_vel_for_ff, -max_abs_vel, max_abs_vel);
     }
 
-    // 落点偏置 (运行时可热更新)
-    const double aim_offset_yaw = runtime_param::get_param<double>(
+    // 落点偏置 (配置单位: deg，运行时可热更新)
+    const double aim_offset_yaw_deg = runtime_param::get_param<double>(
         "AutoAim.FireControl.AimOffset.yaw"
     );
-    const double aim_offset_pitch = runtime_param::get_param<double>(
+    const double aim_offset_pitch_deg = runtime_param::get_param<double>(
         "AutoAim.FireControl.AimOffset.pitch"
     );
+    const double aim_offset_yaw = aimer::math::deg2rad(aim_offset_yaw_deg);
+    const double aim_offset_pitch = aimer::math::deg2rad(aim_offset_pitch_deg);
 
     // 云台控制:
     // cmd = 目标角 + 额外预测时间 * 角速度 + 落点偏置

@@ -296,8 +296,8 @@ struct FireDebugInfo {
 
     // 指令注入参数（调参用）
     double cmd_additional_predict_time = 0;
-    double aim_offset_yaw = 0;         // rad
-    double aim_offset_pitch = 0;       // rad
+    double aim_offset_yaw = 0;         // deg (配置直读)
+    double aim_offset_pitch = 0;       // deg (配置直读)
 
     // 数据时效
     double snapshot_age_ms = 0;
