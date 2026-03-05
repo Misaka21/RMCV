@@ -64,7 +64,9 @@ int choose_latency_slot(const autobuff::predictor::BuffSnapshot& snap) {
     double distance = 5.0;
     int slot = choose_latency_slot(snap);
     if (snap.valid && slot >= 0 && snap.has_slot(slot)) {
-        distance = snap.slots[slot].pos_cam.norm();
+        distance = aimer::tf::cam_to_barrel_origin_world(
+            snap.predict_slot_cam(slot, 0.0), snap.self_state.q_imu
+        ).norm();
     }
 
     double bullet_speed = snap.self_state.bullet_speed;
@@ -82,9 +84,10 @@ void finalize_latency(
     constexpr int NUM_ITER = 2;
     for (int i = 0; i < NUM_ITER; ++i) {
         double dt = latency.prediction_latency();
-        Eigen::Vector3d p = aimer::tf::cam_to_world(
-            snap.predict_slot_cam(slot, dt), snap.self_state.q_imu);
-        auto aim = ::fire_control::trajectory::solve(p, snap.self_state.bullet_speed);
+        Eigen::Vector3d target_vec = aimer::tf::cam_to_barrel_origin_world(
+            snap.predict_slot_cam(slot, dt), snap.self_state.q_imu
+        );
+        auto aim = ::fire_control::trajectory::solve(target_vec, snap.self_state.bullet_speed);
         if (aim.valid) latency.set_fly_time(aim.fly_time);
     }
 }

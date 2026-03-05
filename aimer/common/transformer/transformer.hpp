@@ -225,7 +225,7 @@ const cv::Mat& get_distort_coeffs();
 
 /**
  * @brief 更新里程计位置
- * @param v_gimbal Gimbal坐标系下的速度 (vx右, vy下, vz前)
+ * @param v_gimbal Gimbal坐标系下的速度 (vx前, vy左, vz上)
  * @param dt 时间间隔 (秒)
  * @param q_imu IMU四元数
  */
@@ -249,7 +249,36 @@ inline Eigen::Vector3d cam_to_world(const Eigen::Vector3d& p, const Eigen::Quate
     return point<Frame::Camera, Frame::World>(p, q);
 }
 
+/**
+ * @brief 世界系目标点转换为“枪口原点 + 世界轴向”目标向量
+ *
+ * 输出向量用于弹道解算（对齐 rm.cv.fans 的 xyz_i_barrel 语义）：
+ * - 原点在枪口
+ * - 轴向仍是世界系 (x前 y左 z上)，不旋到枪口轴
+ */
+inline Eigen::Vector3d world_to_barrel_origin_world(
+    const Eigen::Vector3d& p_world,
+    const Eigen::Quaterniond& q
+) {
+    const Eigen::Vector3d barrel_origin_world = point<Frame::Barrel, Frame::World>(
+        Eigen::Vector3d::Zero(), q
+    );
+    return p_world - barrel_origin_world;
+}
+
+/**
+ * @brief 相机系目标点转换为“枪口原点 + 世界轴向”目标向量
+ */
+inline Eigen::Vector3d cam_to_barrel_origin_world(
+    const Eigen::Vector3d& p_cam,
+    const Eigen::Quaterniond& q
+) {
+    return world_to_barrel_origin_world(cam_to_world(p_cam, q), q);
+}
+
 inline Eigen::Vector3d world_to_barrel(const Eigen::Vector3d& p, const Eigen::Quaterniond& q) {
+    // 完整坐标变换: 世界 -> 枪口坐标系 (含旋转+平移)
+    // 若用于弹道解算，通常应优先使用 world_to_barrel_origin_world().
     return point<Frame::World, Frame::Barrel>(p, q);
 }
 

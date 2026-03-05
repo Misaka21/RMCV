@@ -149,11 +149,11 @@ tf::update_odometry(Eigen::Vector3d(vx, vy, 0), dt, q_imu);
 
 | 坐标系 | 说明 | 轴向 |
 |--------|------|------|
-| World | 上电时云台位置 | X右 Y下 Z前 |
+| World | 上电时云台位置 | X前 Y左 Z上 |
 | Imu | IMU芯片坐标系 | 硬件定义 |
-| Gimbal | 云台坐标系 | X右 Y下 Z前 |
+| Gimbal | 云台坐标系 | X前 Y左 Z上 |
 | Camera | 相机坐标系 | X右 Y下 Z前 |
-| Barrel | 枪口坐标系 | X右 Y下 Z前 |
+| Barrel | 枪口坐标系 | X前 Y左 Z上 |
 
 详细文档：[aimer/common/transformer/README.md](aimer/common/transformer/README.md)
 

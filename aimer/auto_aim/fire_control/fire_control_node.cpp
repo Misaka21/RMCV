@@ -17,6 +17,7 @@
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/latency/latency_estimator.hpp"
 #include "aimer/common/trajectory/solver_factory.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "fire_controller.hpp"
 #include "selection/armor_aim.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
@@ -138,7 +139,9 @@ int find_armor_idx_by_id(
         if (armor_idx >= 0) {
             Eigen::Vector3d pos = target->predict_armor_position(armor_idx, 0.0);
             if (pos.squaredNorm() > 1e-9) {
-                distance = pos.norm();
+                distance = aimer::tf::world_to_barrel_origin_world(
+                    pos, snapshot.self_state.q_imu
+                ).norm();
             }
         }
     }
@@ -201,8 +204,11 @@ void finalize_latency(
             snapshot.self_state.velocity.y(),
             0.0
         );
+        const Eigen::Vector3d target_vec = aimer::tf::world_to_barrel_origin_world(
+            pos, snapshot.self_state.q_imu
+        );
         ::fire_control::AimResult aim = ::fire_control::trajectory::solve(
-            pos, snapshot.self_state.bullet_speed, self_velocity
+            target_vec, snapshot.self_state.bullet_speed, self_velocity
         );
 
         if (aim.valid) {

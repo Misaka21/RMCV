@@ -127,14 +127,13 @@ Camera                        Barrel
 
 例如 `t_camera2gimbal = [0, 0.05, 0]`：
 - Camera 原点在 Gimbal 坐标系下是 `(0, 0.05, 0)`
-- 即：相机在云台**下方 5cm**（Y正=下）
+- 即：相机在云台**左侧 5cm**（Y正=左）
 
 ```
-Gimbal 原点 ●────────────────
+Gimbal 原点 ●───→ +Y(左)
             │
-            │ 5cm (Y方向)
-            ▼
-Camera 原点 ●────────────────
+            │ 5cm
+            ● Camera 原点
 ```
 
 ### 3.2 旋转矩阵的含义
@@ -222,11 +221,13 @@ Eigen::Quaterniond q_imu = get_imu_quaternion();
 // 变换到世界坐标系 (用于预测)
 Eigen::Vector3d p_world = tf::cam_to_world(p_cam, q_imu);
 
-// 变换到枪口坐标系 (用于弹道计算)
-Eigen::Vector3d p_barrel = tf::world_to_barrel(p_world, q_imu);
+// 弹道输入: 枪口原点 + 世界轴向（推荐）
+Eigen::Vector3d p_ballistic = tf::world_to_barrel_origin_world(p_world, q_imu);
 
-// 或者直接 Camera → Barrel
-Eigen::Vector3d p_barrel2 = tf::cam_to_barrel(p_cam, q_imu);
+// 或者直接 Camera -> (枪口原点 + 世界轴向)
+Eigen::Vector3d p_ballistic2 = tf::cam_to_barrel_origin_world(p_cam, q_imu);
+
+// 如需完整变到枪口坐标系（含轴向旋转）再用 world_to_barrel/cam_to_barrel
 ```
 
 ### 5.3 变换链

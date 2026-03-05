@@ -10,6 +10,7 @@
 #include <string>
 
 #include "aimer/common/math/math.hpp"
+#include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::fire_control {
@@ -92,6 +93,7 @@ bool estimate_aim_rate_from_target_vel(
     const ArmorAimResult& armor,
     double bullet_speed,
     const Eigen::Vector3d& self_velocity,
+    const Eigen::Quaterniond& q_imu,
     double& yaw_rate,
     double& pitch_rate
 ) {
@@ -109,8 +111,11 @@ bool estimate_aim_rate_from_target_vel(
         return false;
     }
 
+    const Eigen::Vector3d target_vec_next = aimer::tf::world_to_barrel_origin_world(
+        target_pos_next, q_imu
+    );
     const AimResult aim_next = ::fire_control::trajectory::solve(
-        target_pos_next, bullet_speed, self_velocity
+        target_vec_next, bullet_speed, self_velocity
     );
     if (!aim_next.valid) {
         return false;
@@ -194,8 +199,11 @@ bool FireController::evaluate_fire_window(
             return false;
         }
 
+        const Eigen::Vector3d hit_target_vec = aimer::tf::world_to_barrel_origin_world(
+            hit_armor.target_pos, snapshot.self_state.q_imu
+        );
         const AimResult hit_aim = ::fire_control::trajectory::solve(
-            hit_armor.target_pos,
+            hit_target_vec,
             snapshot.self_state.bullet_speed,
             self_velocity
         );
@@ -266,8 +274,11 @@ bool FireController::evaluate_fire_window(
 
         // out gate: emerging 瞄点 与 同时刻装甲板中心 的差异不能过大
         const Eigen::Vector3d hit_center = vehicle.predict_armor_position(hit_armor.armor_idx, hit_dt);
+        const Eigen::Vector3d hit_center_vec = aimer::tf::world_to_barrel_origin_world(
+            hit_center, snapshot.self_state.q_imu
+        );
         const AimResult hit_center_aim = ::fire_control::trajectory::solve(
-            hit_center,
+            hit_center_vec,
             snapshot.self_state.bullet_speed,
             self_velocity
         );
@@ -392,11 +403,17 @@ bool FireController::evaluate_rotate_back_gate(
         return true;
     }
 
+    const Eigen::Vector3d pos_when_start_vec = aimer::tf::world_to_barrel_origin_world(
+        pos_when_start, q_imu
+    );
+    const Eigen::Vector3d command_pos_vec = aimer::tf::world_to_barrel_origin_world(
+        command_aim.target_pos, q_imu
+    );
     const AimResult aim_when_start = ::fire_control::trajectory::solve(
-        pos_when_start, bullet_speed, self_velocity
+        pos_when_start_vec, bullet_speed, self_velocity
     );
     const AimResult aim_when_command = ::fire_control::trajectory::solve(
-        command_aim.target_pos, bullet_speed, self_velocity
+        command_pos_vec, bullet_speed, self_velocity
     );
     if (!aim_when_start.valid || !aim_when_command.valid) {
         return true;
@@ -567,8 +584,11 @@ FireCommand FireController::control(
         }
 
         // 6. 弹道解算
+        const Eigen::Vector3d target_vec = aimer::tf::world_to_barrel_origin_world(
+            armor_result.target_pos, snapshot.self_state.q_imu
+        );
         aim = ::fire_control::trajectory::solve(
-            armor_result.target_pos,
+            target_vec,
             snapshot.self_state.bullet_speed,
             self_velocity
         );
@@ -590,6 +610,7 @@ FireCommand FireController::control(
             armor_result,
             snapshot.self_state.bullet_speed,
             self_velocity,
+            snapshot.self_state.q_imu,
             yaw_rate,
             pitch_rate
         );

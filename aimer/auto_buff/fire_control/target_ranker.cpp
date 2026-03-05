@@ -51,7 +51,10 @@ std::vector<SlotAimCandidate> TargetRanker::build(
             snap.predict_slot_cam(slot, predict_dt), snap.self_state.q_imu);
 
         // 弹道解算
-        cand.aim = ::fire_control::trajectory::solve(cand.pred_world, bullet_speed);
+        const Eigen::Vector3d target_vec = aimer::tf::world_to_barrel_origin_world(
+            cand.pred_world, snap.self_state.q_imu
+        );
+        cand.aim = ::fire_control::trajectory::solve(target_vec, bullet_speed);
         cand.ballistic_valid = cand.aim.valid;
 
         // 跟踪误差

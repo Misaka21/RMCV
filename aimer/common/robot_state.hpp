@@ -51,7 +51,8 @@ inline AimMode to_aim_mode(uint8_t raw) {
  * - enemy_color 与 allow_fire 由 hardware 层注入或串口透传
  */
 struct RobotState {
-    // IMU姿态 (云台坐标系 → 世界坐标系)
+    // IMU姿态 (Imu坐标系 → 世界坐标系)
+    // 云台姿态需结合 R_gimbal2imubody 修正得到
     Eigen::Quaterniond q_imu = Eigen::Quaterniond::Identity();
 
     // 自身速度 (世界坐标系, m/s) - 动打动用

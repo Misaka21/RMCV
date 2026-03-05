@@ -27,13 +27,15 @@ namespace fire_control {
  * @brief 弹道求解输入参数
  */
 struct TrajectoryInput {
-    // 目标位置 (枪管坐标系，xyz: 前左上)
+    // 目标位置向量（枪口原点 + 世界轴向，xyz: 前左上）
+    // 即：target_world - barrel_origin_world
+    // 注意：这里不是“枪口轴向坐标系”。
     Eigen::Vector3d target_pos = Eigen::Vector3d::Zero();
 
     // 弹速
     double bullet_speed = 15.0;
 
-    // 自身车辆速度 (枪管坐标系)
+    // 自身车辆速度（世界轴向，xyz: 前左上）
     // 静打动时为零向量，动打动时设置实际速度
     Eigen::Vector3d vehicle_velocity = Eigen::Vector3d::Zero();
 };
@@ -52,6 +54,7 @@ public:
 
     /**
      * @brief 解算瞄准角度 (便捷接口)
+     * @param target_pos 枪口原点 + 世界轴向目标向量
      */
     virtual AimResult solve(
         const Eigen::Vector3d& target_pos,
