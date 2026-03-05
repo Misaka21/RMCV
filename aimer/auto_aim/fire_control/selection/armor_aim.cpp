@@ -469,8 +469,12 @@ int ArmorAim::choose_best_direct(
         return -1;
     }
 
-    // 非陀螺路径允许沿用 predictor 推荐板，减少同帧/跨帧切板。
-    if (preferred_armor_idx >= 0 && preferred_armor_idx < vehicle.armor_count) {
+    // 仅非陀螺路径沿用 preferred。
+    // 陀螺（top）对齐 rm.cv.fans：direct 候选内按 swing-cost 选最小，不做硬锁板。
+    if (!vehicle.spin.active
+        && preferred_armor_idx >= 0
+        && preferred_armor_idx < vehicle.armor_count)
+    {
         for (int idx : direct_indices) {
             if (idx == preferred_armor_idx) {
                 return idx;
