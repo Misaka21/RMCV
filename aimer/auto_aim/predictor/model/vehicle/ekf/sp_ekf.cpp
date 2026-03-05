@@ -287,8 +287,7 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     // ⭐ 追踪目标选择
     // 规则：
     // 1) 已追踪 detector id 存在且面积满足 keep_ratio，保持
-    // 2) 已追踪 detector id 不存在时，优先选 |z_to_v| 最小（更正对，中心更稳）
-    // 3) 其余情况按面积最大
+    // 2) 否则切换到最大面积（与 rm.cv.fans 的主观测策略一致）
     const auto& primary = [&]() -> const ArmorData& {
         if (armors.size() == 1) {
             return armors[0];
@@ -319,7 +318,7 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
             }
             return armors[max_area_idx];
         }
-        return armors[0];
+        return armors[max_area_idx];
     }();
 
     // 单装甲板直接更新
