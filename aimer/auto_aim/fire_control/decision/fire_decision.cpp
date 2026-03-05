@@ -21,15 +21,12 @@ FireDecision::DecisionMetrics FireDecision::evaluate(
 {
     DecisionMetrics metrics;
 
-    // 1. 置信度检查
+    // 1. 置信度诊断（对齐 rm.cv.fans：开火门控不依赖 predictor 置信度）
     metrics.min_confidence = runtime_param::get_param<double>(
         "AutoAim.FireControl.min_confidence"
     );
     metrics.confidence = confidence;
-    metrics.conf_ok = (confidence >= metrics.min_confidence);
-    if (!metrics.conf_ok) {
-        return metrics;
-    }
+    metrics.conf_ok = true;
 
     // 2. 计算角度误差
     double yaw_err = GimbalState::normalize_angle(aim.yaw - gimbal.yaw);

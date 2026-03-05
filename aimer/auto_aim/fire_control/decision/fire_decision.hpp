@@ -17,9 +17,10 @@ namespace autoaim::fire_control {
  * @brief 开火判断器
  *
  * 判断逻辑:
- *   1. 置信度检查
- *   2. 角度误差 → 落点偏移
- *   3. 落点偏移 < 装甲板有效区域
+ *   1. 角度误差 → 落点偏移
+ *   2. 落点偏移 < 装甲板有效区域
+ *
+ * 注: predictor 置信度仅用于诊断，不作为开火硬门控（对齐 rm.cv.fans）。
  */
 class FireDecision {
 public:
@@ -47,7 +48,7 @@ public:
      * @param aim 弹道解算结果
      * @param armor_aim 装甲板瞄准结果 (包含装甲板尺寸和朝向)
      * @param gimbal 当前云台状态
-     * @param confidence 目标置信度
+     * @param confidence 目标置信度 (仅调试显示，不参与开火门控)
      * @return 是否可以开火
      */
     DecisionMetrics evaluate(
