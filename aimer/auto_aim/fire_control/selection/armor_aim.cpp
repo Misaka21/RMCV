@@ -200,18 +200,9 @@ ArmorAimResult ArmorAim::compute_spin(
     // top1/top2: direct -> indirect
     const TopAimProfile profile = get_top_aim_profile(vehicle);
 
-    // 用户策略约束：窗口角为 0 时，无论陀螺等级，直接喵中心，不做窗口/indirect。
-    if (profile.max_orientation_angle <= 1e-6) {
-        return compute_direct(
-            vehicle, predict_dt, gimbal, preferred_armor_idx,
-            /*use_orientation_window=*/false,
-            /*max_orientation_angle=*/0.0,
-            /*visible_only=*/true,
-            /*strict_orientation_window=*/false
-        );
-    }
-
-    // 先 direct（窗口内）
+    // 对齐 rm.cv.fans：
+    // 无论窗口角是否为 0，先尝试 direct(窗口内)，失败再回退 indirect（top1/top2）。
+    // 当 max_orientation_angle=0 时，direct 仅在板恰好进入中心线时命中；否则走 indirect 等待。
     ArmorAimResult direct = compute_direct(
         vehicle, predict_dt, gimbal, preferred_armor_idx,
         /*use_orientation_window=*/true,
@@ -373,9 +364,19 @@ ArmorAimResult ArmorAim::compute_indirect(
         // 对齐 rm.cv.fans: max_out_angle = sample_width/2 * max_out_error / radius
         const double leave_angle = sample_armor_width * 0.5 * max_out_error / radius;
         const double z_to_v = predicted_z_to_v(vehicle, i, predict_dt);
-        const double armor_to_lim = (omega > 0.0)
+        double armor_to_lim = (omega > 0.0)
             ? (aimer::math::reduced_angle((zn_to_lim - z_to_v) - M_PI + leave_angle) + M_PI - leave_angle)
             : (aimer::math::reduced_angle((z_to_v - zn_to_lim) - M_PI + leave_angle) + M_PI - leave_angle);
+
+        // center-mode(top2 window ~= 0) 下，负值表示“刚刚离开中心线”。
+        // 若仍把负值当作最优，会在“刚过去的板”和“下一块将出现的板”之间来回切。
+        // 这里将其映射到下一圈，稳定等待将出现的板。
+        if (vehicle.spin.level == predictor::SpinLevel::HIGH
+            && std::abs(max_orientation_angle) <= 1e-6
+            && armor_to_lim < 0.0)
+        {
+            armor_to_lim += 2.0 * M_PI;
+        }
 
         diags.push_back(CandidateDiag{
             i,
@@ -535,9 +536,23 @@ int ArmorAim::choose_best_direct(
 
     // 切板迟滞：上一帧板子仍在候选内且与当前最优差距不大时，继续保持。
     // 语义对齐 rm.cv.fans “先保持追踪，再在优势明显时切换”。
-    const double switch_hys_deg = get_param_or(
+    // 默认切板迟滞
+    double switch_hys_deg = get_param_or(
         "AutoAim.FireControl.PID.switch_armor_hysteresis_deg", 3.0
     );
+    // 超快陀螺 + center-mode（top2 window=0）时，增强迟滞抑制 0/3 频繁切板
+    // 该模式下不走窗口/indirect，直接瞄中心，过快切板会导致橙黄点大跳。
+    if (vehicle.spin.active && vehicle.spin.level == predictor::SpinLevel::HIGH) {
+        const double top2_window_deg = get_param_or(
+            "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
+        );
+        if (std::abs(top2_window_deg) <= 1e-6) {
+            const double center_hys_deg = get_param_or(
+                "AutoAim.FireControl.PID.center_mode_switch_hysteresis_deg", 18.0
+            );
+            switch_hys_deg = std::max(switch_hys_deg, center_hys_deg);
+        }
+    }
     const double switch_hys = std::max(0.0, aimer::math::deg2rad(switch_hys_deg));
     if (preferred_armor_idx >= 0
         && preferred_armor_idx < vehicle.armor_count

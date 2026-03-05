@@ -361,6 +361,20 @@
     #@double 开火误差容忍比例，落点偏移 < 装甲板尺寸 * error_rate 时开火
     error_rate = 0.6
 
+[AutoAim.FireControl.Debug]
+    #@bool 是否开启火控诊断日志
+    enable = false
+    #@bool 是否输出延迟缓存重建细节（排查同帧反复重建）
+    latency_detail = false
+    #@double 周期日志间隔 (s)
+    period_s = 0.5
+    #@double 角度突变阈值 (deg)，超过会输出 JUMP 事件
+    jump_deg = 8.0
+    #@bool 是否输出 indirect 选板细节日志（每块板的评分）
+    indirect_detail = false
+    #@double indirect 细节日志最小间隔 (s)
+    indirect_period_s = 0.2
+
 [AutoAim.FireControl.AimOffset]
     #@double yaw 落点偏置 (rad)
     # @param +: 调大将向左打击
@@ -402,7 +416,7 @@
     top0_max_orientation_angle_armors_other = 75.0
 
     #@double top1 的朝向窗口 (deg)
-    top1_max_orientation_angle = 0.0
+    top1_max_orientation_angle = 30.0
     #@double top2 的朝向窗口 (deg)
     top2_max_orientation_angle = 0.0
 

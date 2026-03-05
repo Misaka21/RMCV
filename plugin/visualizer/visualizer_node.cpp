@@ -104,6 +104,23 @@ static int choose_debug_target_id(
     return -1;
 }
 
+static int resolve_selected_armor_idx(
+    const VehicleState& v,
+    const FireDebugInfo& dbg
+) {
+    if (dbg.armor_id >= 0) {
+        for (int i = 0; i < v.armor_count; ++i) {
+            if (v.armors[i].id == dbg.armor_id) {
+                return i;
+            }
+        }
+    }
+    if (dbg.armor_idx >= 0 && dbg.armor_idx < v.armor_count) {
+        return dbg.armor_idx;
+    }
+    return -1;
+}
+
 static double center_cost_deg(
     const Eigen::Vector3d& pos,
     const FireDebugInfo& dbg
@@ -182,11 +199,11 @@ static void draw_fire_debug_panel(
     cv::Scalar stage_color = (dbg.fail_stage == 9) ? cv::Scalar(0, 255, 0)
                            : (dbg.fail_stage == 0) ? cv::Scalar(150, 150, 150)
                                                    : cv::Scalar(0, 128, 255);
-    put(fmt::format("Stage: {} | ctrl:{} fire:{} | Tgt:{} Arm:{}(id:{})",
+    put(fmt::format("Stage: {} | ctrl:{} fire:{} | Tgt:{} Arm:id={} (idx:{})",
         FireDebugInfo::fail_stage_name(dbg.fail_stage),
         dbg.control_enabled ? "ON" : "OFF",
         dbg.fire_now ? "NOW" : "HOLD",
-        dbg.target_id, dbg.armor_idx, dbg.armor_id), stage_color);
+        dbg.target_id, dbg.armor_id, dbg.armor_idx), stage_color);
 
     // 3. Bullet speed + snapshot info
     put(fmt::format("BS: {:.1f}m/s | valid: 0x{:03x} pri: {} frm: {}",
@@ -447,8 +464,9 @@ static void draw_selected_target_panel(
     const char* spin_label = "NONE";
     if (v.spin.level == SpinLevel::LOW) spin_label = "LOW";
     else if (v.spin.level == SpinLevel::HIGH) spin_label = "HIGH";
-    put(fmt::format("Selected T{}  pri={}  arm_sel={}(id:{})  conf={:.2f}",
-        tid, snapshot.primary_target_id, dbg.armor_idx, dbg.armor_id, v.confidence),
+    const int sel_idx = resolve_selected_armor_idx(v, dbg);
+    put(fmt::format("Selected T{}  pri={}  arm_sel=id:{} (idx:{})  conf={:.2f}",
+        tid, snapshot.primary_target_id, dbg.armor_id, sel_idx, v.confidence),
         cv::Scalar(0, 255, 255));
     put(fmt::format("AimMode={}  pred_dt={:.1f}ms  t_fire={:.1f}ms",
         armor_aim_mode_name(dbg.armor_aim_mode), pred_dt * 1000.0, dbg.armor_time_to_fire * 1000.0),
@@ -468,7 +486,7 @@ static void draw_selected_target_panel(
         const bool in_window = (!use_window) || (std::abs(z_to_v) <= max_angle);
         const double cc_deg = center_cost_deg(pos, dbg);
         const double dist = pos.norm();
-        const bool selected = (i == dbg.armor_idx);
+        const bool selected = (i == sel_idx);
 
         cv::Scalar color = selected ? cv::Scalar(0, 80, 255)
                        : (a.visible ? cv::Scalar(120, 220, 120)
@@ -552,14 +570,14 @@ static void draw_latency_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot
 }
 
 /**
- * @brief 像素标记 (与 rm.cv.fans 风格一致)
+ * @brief 像素标记 (与 rm.cv.fans 绘制语义对齐)
  *
- * 白色空心圆: 图像中心 (cols/2, rows/2)
- * 绿色空心圆: 相机光轴 (内参主点 cx, cy)
- * 橙色空心圆: 预测瞄准点 (子弹应该命中的位置)
- * 黄色空心圆: 实际发送角 (含云台延迟补偿)
- * 红色箭头:   目标速度方向 (从瞄准点出发)
- * 红色文字:   FIRE 状态
+ * 白色空心圆: 图像中心
+ * 绿色空心圆: 相机光轴
+ * 橙色空心圆: aim 点 (debug_aim)
+ * 黄色空心圆: cmd 点 (debug_cmd 反算回角度)
+ * 红色箭头:   从橙点出发，方向由 aim 角速度 (aim_yaw_vel / aim_pitch_vel) 决定
+ * 红色文字:   SHOOT_CMD
  */
 static void draw_pixel_markers(
     cv::Mat& vis,
@@ -617,20 +635,29 @@ static void draw_pixel_markers(
         cv::circle(vis, cmd_px, 10, cv::Scalar(0, 255, 255), 4, cv::LINE_AA);
     }
 
-    // 红色箭头: 从瞄准点出发的目标速度方向
-    if (aim_valid && cmd_valid) {
-        float dx = cmd_px.x - aim_px.x;
-        float dy = cmd_px.y - aim_px.y;
-        float len = std::sqrt(dx * dx + dy * dy);
-        if (len > 3.0f) {
-            cv::arrowedLine(vis, aim_px, cmd_px,
-                cv::Scalar(0, 0, 255), 2, cv::LINE_AA, 0, 0.15);
+    // 红色箭头: 以 aim 角速度为方向（与 rm.cv.fans 的 ypd_v 箭头一致）
+    if (aim_valid) {
+        const float vx = static_cast<float>(dbg.aim_yaw_vel * 180.0 / M_PI * 3.0);
+        const float vy = static_cast<float>(dbg.aim_pitch_vel * 180.0 / M_PI * 3.0);
+        const float v_norm = std::hypot(vx, vy);
+        if (v_norm > 2.0f) {
+            const cv::Point2f arrow_end { aim_px.x + vx, aim_px.y + vy };
+            cv::arrowedLine(
+                vis,
+                aim_px,
+                arrow_end,
+                cv::Scalar(0, 0, 255),
+                2,
+                cv::LINE_AA,
+                0,
+                0.15
+            );
         }
     }
 
-    // FIRE 状态文字
+    // SHOOT_CMD 状态文字
     if (dbg.fire_now) {
-        cv::putText(vis, "FIRE", cv::Point(vis.cols - 200, 50),
+        cv::putText(vis, "SHOOT_CMD", cv::Point(vis.cols - 300, 50),
             cv::FONT_HERSHEY_TRIPLEX, 1.5, cv::Scalar(0, 0, 255), 3, cv::LINE_AA);
     }
 }
@@ -669,6 +696,7 @@ static void draw_target_geometry_markers(
         }
     }
 
+    const int sel_idx = resolve_selected_armor_idx(v, dbg);
     for (int i = 0; i < v.armor_count; ++i) {
         const auto& armor = v.armors[i];
         Eigen::Vector3d pos = v.predict_armor_position(i, pred_dt);
@@ -676,7 +704,7 @@ static void draw_target_geometry_markers(
         cv::Point2f px = aimer::tf::world_to_pixel(pos, q_imu, valid);
         if (!valid) continue;
 
-        const bool selected = (i == dbg.armor_idx);
+        const bool selected = (i == sel_idx);
         cv::Scalar color = selected ? cv::Scalar(0, 80, 255)
                        : (armor.visible ? cv::Scalar(50, 230, 50)
                                         : cv::Scalar(120, 120, 120));
