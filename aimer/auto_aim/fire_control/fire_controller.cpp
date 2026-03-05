@@ -17,10 +17,6 @@ namespace autoaim::fire_control {
 
 namespace {
 
-// rm.cv.fans 中 additional-predict-time 的速度项使用“同一时刻目标角速度”。
-// 这里用短时外推 + 二次弹道解算得到局部 aim 角速度，避免跨周期差分抖动。
-constexpr double AIM_RATE_DT = 8e-3;  // 8ms
-
 double get_param_or(const std::string& name, double default_value)
 {
     auto ptr = runtime_param::find_param(name);
@@ -89,40 +85,46 @@ double get_spin_swing_error(const predictor::VehicleState& vehicle)
 }
 
 bool estimate_aim_rate_from_target_vel(
-    const AimResult& aim_now,
     const ArmorAimResult& armor,
-    double bullet_speed,
-    const Eigen::Vector3d& self_velocity,
     const Eigen::Quaterniond& q_imu,
     double& yaw_rate,
     double& pitch_rate
 ) {
     yaw_rate = 0.0;
     pitch_rate = 0.0;
-    if (!aim_now.valid || bullet_speed <= 1e-3) {
+    if (!armor.valid) {
         return false;
     }
-    if (!armor.target_vel.allFinite()) {
-        return false;
-    }
-
-    const Eigen::Vector3d target_pos_next = armor.target_pos + armor.target_vel * AIM_RATE_DT;
-    if (!target_pos_next.allFinite() || target_pos_next.squaredNorm() < 1e-9) {
+    if (!armor.target_pos.allFinite() || !armor.target_vel.allFinite()) {
         return false;
     }
 
-    const Eigen::Vector3d target_vec_next = aimer::tf::world_to_barrel_origin_world(
-        target_pos_next, q_imu
+    // 对齐 rm.cv.fans：additional-predict-time 使用模型同一时刻的 ypd_v，
+    // 不做二次弹道外推差分，避免切板时速度方向突变。
+    const Eigen::Vector3d rel_pos = aimer::tf::world_to_barrel_origin_world(
+        armor.target_pos, q_imu
     );
-    const AimResult aim_next = ::fire_control::trajectory::solve(
-        target_vec_next, bullet_speed, self_velocity
-    );
-    if (!aim_next.valid) {
+    const Eigen::Vector3d rel_vel = armor.target_vel;
+    if (rel_pos.squaredNorm() < 1e-9 || !rel_pos.allFinite() || !rel_vel.allFinite()) {
         return false;
     }
 
-    yaw_rate = GimbalState::normalize_angle(aim_next.yaw - aim_now.yaw) / AIM_RATE_DT;
-    pitch_rate = (aim_next.pitch - aim_now.pitch) / AIM_RATE_DT;
+    const double x = rel_pos.x();
+    const double y = rel_pos.y();
+    const double z = rel_pos.z();
+    const double x_dot = rel_vel.x();
+    const double y_dot = rel_vel.y();
+    const double z_dot = rel_vel.z();
+
+    const double xy2 = x * x + y * y;
+    const double xyz2 = xy2 + z * z;
+    const double xy = std::sqrt(xy2);
+    if (xy2 < 1e-9 || xyz2 < 1e-9 || xy < 1e-9) {
+        return false;
+    }
+
+    yaw_rate = -y * x_dot / xy2 + x * y_dot / xy2;
+    pitch_rate = z_dot * xy / xyz2 - x * z * x_dot / (xy * xyz2) - y * z * y_dot / (xy * xyz2);
     return std::isfinite(yaw_rate) && std::isfinite(pitch_rate);
 }
 
@@ -172,6 +174,7 @@ bool FireController::evaluate_fire_window(
         last_aim_,
         last_armor_aim_,
         gimbal_state_,
+        snapshot.self_state.q_imu,
         vehicle.confidence
     );
 
@@ -622,10 +625,7 @@ FireCommand FireController::control(
         double yaw_rate = 0.0;
         double pitch_rate = 0.0;
         estimate_aim_rate_from_target_vel(
-            aim,
             armor_result,
-            snapshot.self_state.bullet_speed,
-            self_velocity,
             snapshot.self_state.q_imu,
             yaw_rate,
             pitch_rate

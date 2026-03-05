@@ -55,6 +55,7 @@ public:
         const AimResult& aim,
         const ArmorAimResult& armor_aim,
         const GimbalState& gimbal,
+        const Eigen::Quaterniond& q_imu,
         double confidence
     ) const;
 
@@ -62,6 +63,7 @@ public:
         const AimResult& aim,
         const ArmorAimResult& armor_aim,
         const GimbalState& gimbal,
+        const Eigen::Quaterniond& q_imu,
         double confidence
     ) const;
 
