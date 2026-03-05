@@ -100,6 +100,10 @@
     q_scale_decay = 0.9
 
 # 统一的陀螺等级判断参数 (被 VehicleModel 使用)
+# 分级语义:
+# - top0 = SpinLevel::NONE (非陀螺)
+# - top1 = SpinLevel::LOW  (慢速小陀螺)
+# - top2 = SpinLevel::HIGH (超高速陀螺)
 [AutoAim.Predictor.Motion]
     # 陀螺等级阈值 (度/秒, 带迟滞消抖)
     #@double top_level 1 激活阈值 (°/s)
@@ -408,16 +412,22 @@
 
 [AutoAim.FireControl.PID]
     # 对齐 rm.cv.fans lmtd-top-model 的 top0/top1/top2 参数语义
-    # top0: direct-only；top1/top2: direct->indirect
+    # 分级来源: AutoAim.Predictor.Motion 的 SpinLevel
+    # - top0 (NONE): 仅 direct，不走 indirect
+    # - top1 (LOW):  先 direct(窗口内) 再 indirect
+    # - top2 (HIGH): 先 direct(窗口内) 再 indirect
+    # 备注:
+    # - max_orientation_angle 是“装甲板法向与视线夹角 z_to_v 的窗口半宽”(deg)
+    # - top1 若设为 0，慢速陀螺会更容易落入 indirect 等待点，观感上黄/橙点会在两板中间等待
 
     #@double top0 的朝向窗口 (4板车, deg)
     top0_max_orientation_angle_armors4 = 58.8888
     #@double top0 的朝向窗口 (非4板车, deg)
     top0_max_orientation_angle_armors_other = 75.0
 
-    #@double top1 的朝向窗口 (deg)
+    #@double top1 的朝向窗口 (deg, 慢速小陀螺建议 > 0，例如 30)
     top1_max_orientation_angle = 30.0
-    #@double top2 的朝向窗口 (deg)
+    #@double top2 的朝向窗口 (deg, 超高速陀螺常用 0 表示只在中心线附近 direct)
     top2_max_orientation_angle = 0.0
 
     #@double top0 的间接打击离场误差比例
