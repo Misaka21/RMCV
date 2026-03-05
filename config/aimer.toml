@@ -444,6 +444,7 @@
     #@double top2 的 hit-swing 门控误差比例（未配置时回退到 top2_max_out_error）
     top2_max_swing_error = 1.8
 
+
     #@double 回转耗时线性模型系数 a (s/deg), t = a * |delta_yaw_deg| + b
     angle_to_rotate_time_a = 1.79e-3
     #@double 回转耗时线性模型常数项 b (s)
