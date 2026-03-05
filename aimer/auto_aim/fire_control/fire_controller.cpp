@@ -558,9 +558,21 @@ FireCommand FireController::control(
         aim = last_aim_;
         plan = last_plan_;
     } else {
-        const int preferred_armor_idx = (!vehicle.spin.active)
-            ? vehicle.recommended_armor_idx
-            : -1;
+        int preferred_armor_idx = -1;
+        if (last_armor_id_ >= 0) {
+            for (int i = 0; i < vehicle.armor_count; ++i) {
+                if (vehicle.armors[i].id == last_armor_id_) {
+                    preferred_armor_idx = i;
+                    break;
+                }
+            }
+        }
+        if (preferred_armor_idx < 0
+            && vehicle.recommended_armor_idx >= 0
+            && vehicle.recommended_armor_idx < vehicle.armor_count)
+        {
+            preferred_armor_idx = vehicle.recommended_armor_idx;
+        }
 
         // 5. 装甲板瞄准
         armor_result = armor_aim_.compute(
