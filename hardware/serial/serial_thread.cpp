@@ -30,6 +30,11 @@ using namespace std::chrono_literals;
 
 void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
     try {
+        // 发送端与接收端共享 IMU 符号配置，保证“收->算->发”在同一约定下闭环一致
+        auto config = static_param::parse_file("hardware.toml");
+        const bool imu_yaw_negate = static_param::get_param<bool>(config, "Serial", "imu_yaw_negate");
+        const bool imu_pitch_negate = static_param::get_param<bool>(config, "Serial", "imu_pitch_negate");
+
         // 输出到下位机的数据源: fire_command (autoaim/autobuff 写入)
         auto fire_cmd = umt::BasicObjManager<::fire_control::FireCommand>::find_or_create("fire_command");
         // 兼容/调试: 暴露一个“最终将要发送”的 VisionData_t 供其他模块查看
@@ -39,6 +44,8 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
         auto debug_print = umt::BasicObjManager<bool>::find_or_create("serial_debug_print", false);
 
         debug::print(debug::PrintMode::INFO, "SerialSender", "Sender thread started");
+        debug::print(debug::PrintMode::INFO, "SerialSender",
+            "TX sign mapping: yaw_negate={} pitch_negate={}", imu_yaw_negate, imu_pitch_negate);
 
         // FPS 统计: FPS=循环次数, sent=实际发送成功次数
         stats::FpsStats fps_stats("SerialSender", "sent");
@@ -59,8 +66,8 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                 VisionData_t vision_data;
                 vision_data.control = cmd.control_enabled ? 1 : 0;
                 vision_data.shoot = (cmd.control_enabled && cmd.allow_fire && cmd.fire_now) ? 1 : 0;
-                vision_data.yaw = cmd.yaw;
-                vision_data.pitch = cmd.pitch;
+                vision_data.yaw = imu_yaw_negate ? -cmd.yaw : cmd.yaw;
+                vision_data.pitch = imu_pitch_negate ? -cmd.pitch : cmd.pitch;
 
                 // 写回调试对象
                 vision_transmit->get() = vision_data;

@@ -44,12 +44,12 @@
     #@bool 不接串口时使用虚拟数据
     use_fake_serial_data = false
 
-    #@bool IMU符号修正: 如果云台左转时yaw变小，需要设为true
+    #@bool IMU符号修正: 如果云台左转时yaw变小，需要设为true（接收与发送共用）
     imu_yaw_negate = false
-    #@bool IMU符号修正: 如果云台抬头时pitch变小，需要设为true
+    #@bool IMU符号修正: 如果云台抬头时pitch变小，需要设为true（接收与发送共用）
     imu_pitch_negate = true
 
-    #@bool IMU符号修正: 如果云台右倾时roll变小，需要设为true
+    #@bool IMU符号修正: 如果云台右倾时roll变小，需要设为true（仅接收使用）
     imu_roll_negate = false
 
 
