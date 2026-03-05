@@ -635,23 +635,33 @@ static void draw_pixel_markers(
         cv::circle(vis, cmd_px, 10, cv::Scalar(0, 255, 255), 4, cv::LINE_AA);
     }
 
-    // 红色箭头: 以 aim 角速度为方向（与 rm.cv.fans 的 ypd_v 箭头一致）
+    // 红色箭头: 用“角度前向一步后的像素位置”减“当前像素位置”得到方向。
+    // 这样可自动适配本项目 yaw(左正)/pitch(上正) 约定，避免与像素坐标(y下正)符号冲突。
     if (aim_valid) {
-        const float vx = static_cast<float>(dbg.aim_yaw_vel * 180.0 / M_PI * 3.0);
-        const float vy = static_cast<float>(dbg.aim_pitch_vel * 180.0 / M_PI * 3.0);
-        const float v_norm = std::hypot(vx, vy);
-        if (v_norm > 2.0f) {
-            const cv::Point2f arrow_end { aim_px.x + vx, aim_px.y + vy };
-            cv::arrowedLine(
-                vis,
-                aim_px,
-                arrow_end,
-                cv::Scalar(0, 0, 255),
-                2,
-                cv::LINE_AA,
-                0,
-                0.15
-            );
+        constexpr double arrow_dt = 0.06;  // 仅可视化缩放，不影响控制
+        bool next_valid = false;
+        cv::Point2f next_px = angle_to_pixel(
+            dbg.aim_yaw + dbg.aim_yaw_vel * arrow_dt,
+            dbg.aim_pitch + dbg.aim_pitch_vel * arrow_dt,
+            q_imu,
+            next_valid,
+            ref_dist
+        );
+        if (next_valid) {
+            cv::Point2f d = next_px - aim_px;
+            const float v_norm = std::hypot(d.x, d.y);
+            if (v_norm > 2.0f) {
+                cv::arrowedLine(
+                    vis,
+                    aim_px,
+                    next_px,
+                    cv::Scalar(0, 0, 255),
+                    2,
+                    cv::LINE_AA,
+                    0,
+                    0.15
+                );
+            }
         }
     }
 
