@@ -450,26 +450,47 @@
     angle_to_rotate_time_b = 0.093
 
 [AutoAim.FireControl.Trajectory]
-    #@string 求解器类型: 
-    #   "analytic_linear" (解析解+Ceres,快), 
-    #   "rk4_linear" (RK4+线性阻力), 
-    #   "rk4_quadratic" (RK4+二次阻力,吊射推荐)
+    #@string 弹道求解器
+    # 推荐:
+    # - 近中距离(常规 2~8m): "analytic_linear"（速度快，调参简单）
+    # - 远距离/吊射: "rk4_quadratic"（数值积分，更稳）
+    # 说明:
+    # - "rk4_linear" / "rk4_quadratic" 都走 RK4 分支
+    # - RK4 实际阻力模型由下方 drag_model 决定
     solver = "analytic_linear"
-    #@string 阻力模型 (仅RK4生效): "linear" 或 "quadratic"
-    drag_model = "quadratic"
+
+    #@string RK4 阻力模型（仅 solver=rk4_* 时生效）
+    # - "linear":   a = -k*v      (k 单位 1/s)
+    # - "quadratic":a = -k*v*|v|  (k 单位 1/m)
+    # 注意: 切换模型后必须重调 air_resistance_k
+    drag_model = "linear"
+
     #@double 重力加速度 (m/s²)
+    # 一般保持 9.8，不建议频繁改
     gravity = 9.8
-    #@double 空气阻力系数 k
-    # 线性模型: a = -k*v, 单位 1/s
-    # 二次模型: a = -k*v*|v|, 单位 1/m, 对于17mm弹丸约 0.001~0.005
+
+    #@double 空气阻力系数 k（核心调参项）
+    # 当前值 0.022928514188 对齐 rm.cv.fans 的线性阻力参数（17mm）
+    # 调参经验:
+    # - linear 模型(analytic_linear / rk4_linear): 常见 0.015 ~ 0.035 (1/s)
+    # - quadratic 模型(rk4_quadratic): 常见 0.001 ~ 0.006 (1/m)
+    # - 跟踪整体偏低(弹着偏下): 减小 k；整体偏高(弹着偏上): 增大 k
     air_resistance_k = 0.022928514188
-    #@int 弹道解算最大迭代次数 (Ceres)
+
+    #@int Ceres 最大迭代次数（仅 analytic_linear 生效）
+    # 调大更稳但更慢，常用 8~20
     max_iter = 10
-    #@double RK4积分步长 (s)
+
+    #@double RK4 积分步长 (s)（仅 rk4_* 生效）
+    # 常用 0.0005~0.002；越小越准但更耗时
     rk4_dt = 0.001
-    #@int RK4二分法最大迭代
+
+    #@int RK4 二分法最大迭代（仅 rk4_* 生效）
+    # 常用 30~80
     rk4_max_iter = 50
-    #@double RK4收敛阈值 (m)
+
+    #@double RK4 收敛阈值 (m)（仅 rk4_* 生效）
+    # 常用 1e-4~2e-3；越小越准但可能增加迭代次数
     rk4_tolerance = 0.001
 
 [AutoAim.FireControl.TargetSelector]
