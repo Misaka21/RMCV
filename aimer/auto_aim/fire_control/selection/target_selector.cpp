@@ -92,10 +92,11 @@ TargetSelection TargetSelector::select(
         }
     }
 
-    // ========== 2. 构造“最中心可见目标”候选 ==========
+    // ========== 2. 构造”最中心可见目标”候选 ==========
+    // 对齐 rmcvfans: 候选池只看当前帧检测到的目标 (sorted_armors 只来自当帧)
     VisibleCandidate best_candidate;
     snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
-        if (!vehicle.valid) return;
+        if (!snapshot.is_detected(id)) return;
         auto candidate = evaluate_visible_candidate(id, vehicle, gimbal, dt);
         if (!candidate.valid()) return;
         if (candidate.score < best_candidate.score) {
@@ -104,13 +105,14 @@ TargetSelection TargetSelector::select(
     });
 
     // ========== 3. 按 TargetCatcher 逻辑更新锁存目标 ==========
+    // 对齐 rmcvfans: 刷新条件用 is_detected (当帧有数据)，而非 is_trackable_target。
+    // credit bridge 只在 Step 4 输出层使用，不影响选车切换。
     const int tracked_target = latched_target(current_time);
     if (tracked_target < 0) {
         current_target_id_ = -1;
     }
     if (tracked_target >= 0 && snapshot.is_valid(tracked_target)) {
-        const auto& tracked_vehicle = snapshot.vehicles[tracked_target];
-        if (is_trackable_target(tracked_vehicle, dt, current_time)) {
+        if (snapshot.is_detected(tracked_target)) {
             target_caught_time_ = current_time;
         } else if (best_candidate.valid()) {
             try_catch_target(

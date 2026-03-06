@@ -598,9 +598,8 @@ FireCommand FireController::control(
     );
 
     // 3. 目标选择（同帧复用 target_id，避免 500Hz 下同帧反复切敌）
-    const double img_age = std::max(0.0, current_time - snapshot.timestamp);
-    const double prediction_dt_for_select =
-        img_age + latency.send_to_control + latency.fire_to_hit;
+    // 对齐 rmcvfans: 选敌评分基于当帧位置 (dt=0)，不做未来预测
+    constexpr double selection_dt = 0.0;
 
     TargetSelection selection;
     if (has_cached_solution_ && snapshot.frame_id == last_solution_frame_id_
@@ -608,7 +607,7 @@ FireCommand FireController::control(
     {
         selection = last_selection_;
     } else {
-        selection = target_selector_.select(snapshot, gimbal_state_, prediction_dt_for_select);
+        selection = target_selector_.select(snapshot, gimbal_state_, selection_dt);
     }
     last_selection_ = selection;
 
