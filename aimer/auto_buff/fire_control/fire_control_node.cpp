@@ -193,7 +193,7 @@ void fire_control_run(const std::string& /*config_path*/) {
 }
 
 void start_fire_control_node(const std::string& config_path) {
-    std::thread([config_path]() { fire_control_run(config_path); }).detach();
+    fire_control_run(config_path);
 }
 
 }  // namespace autobuff::fire_control

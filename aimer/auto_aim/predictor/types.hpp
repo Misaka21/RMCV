@@ -25,7 +25,6 @@
 #include "aimer/auto_aim/common/types.hpp"  // ArmorType, ArmorNumber, DetectedArmor
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/robot_state.hpp"
-#include "plugin/param/runtime_parameter.hpp"
 
 namespace autoaim::predictor {
 
@@ -196,45 +195,44 @@ struct SpinState {
     }
 
     /**
+     * @brief 陀螺等级消抖阈值 (°/s)
+     */
+    struct SpinThresholds {
+        double top1_activate = 60.0;
+        double top1_deactivate = 40.0;
+        double top2_activate = 200.0;
+        double top2_deactivate = 150.0;
+    };
+
+    /**
      * @brief 更新陀螺等级 (带迟滞消抖)
      *
-     * 阈值从运行时参数读取:
-     *   AutoAim.Predictor.Motion.top1_activate_w   (°/s)
-     *   AutoAim.Predictor.Motion.top1_deactivate_w (°/s)
-     *   AutoAim.Predictor.Motion.top2_activate_w   (°/s)
-     *   AutoAim.Predictor.Motion.top2_deactivate_w (°/s)
-     *
      * @param new_omega 新的角速度 (rad/s)
+     * @param thresholds 阈值 (°/s)，由调用者从运行时参数读取
      */
-    void update_level(double new_omega) {
+    void update_level(double new_omega, const SpinThresholds& thresholds) {
         omega = new_omega;
         double w_deg = std::abs(omega) * 180.0 / M_PI;  // 转换为度/秒
 
-        // 从运行时参数读取阈值 (°/s)
-        double top1_activate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top1_activate_w");
-        double top1_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top1_deactivate_w");
-        double top2_activate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top2_activate_w");
-        double top2_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top2_deactivate_w");
-
         switch (level) {
             case SpinLevel::NONE:
-                if (w_deg > top1_activate) {
+                if (w_deg > thresholds.top1_activate) {
                     level = SpinLevel::LOW;
                     active = true;
                 }
                 break;
 
             case SpinLevel::LOW:
-                if (w_deg < top1_deactivate) {
+                if (w_deg < thresholds.top1_deactivate) {
                     level = SpinLevel::NONE;
                     active = false;
-                } else if (w_deg > top2_activate) {
+                } else if (w_deg > thresholds.top2_activate) {
                     level = SpinLevel::HIGH;
                 }
                 break;
 
             case SpinLevel::HIGH:
-                if (w_deg < top2_deactivate) {
+                if (w_deg < thresholds.top2_deactivate) {
                     level = SpinLevel::LOW;
                 }
                 break;

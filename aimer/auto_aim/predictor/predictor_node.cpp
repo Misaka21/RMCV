@@ -116,9 +116,9 @@ void start_predictor_node() {
                 predictor.draw(debug_frame.image, detection.state.q_imu, timestamp);
             }
 
-            // [阶段4] 写入共享对象
-            battlefield->get() = snapshot;
-            predictor_debug->get() = debug_frame;
+            // [阶段4] 写入共享对象 (线程安全)
+            battlefield->store(snapshot);
+            predictor_debug->store(debug_frame);
 
             // Web 调试图像
             if (pub_debug.has_subscriber() && !debug_frame.image.empty()) {

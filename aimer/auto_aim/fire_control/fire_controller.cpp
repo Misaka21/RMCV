@@ -28,6 +28,9 @@ double get_param_or(const std::string& name, double default_value)
     return default_value;
 }
 
+}  // namespace
+
+// 公共工具函数 (需在匿名命名空间之后，因为依赖 get_param_or)
 double get_spin_window_rad(const predictor::VehicleState& vehicle)
 {
     const double top0_deg = (vehicle.armor_count == 4)
@@ -47,6 +50,7 @@ double get_spin_window_rad(const predictor::VehicleState& vehicle)
     }
 }
 
+namespace {
 double get_spin_out_error(const predictor::VehicleState& vehicle)
 {
     const double top0_out = get_param_or("AutoAim.FireControl.PID.top0_max_out_error", 1.8);

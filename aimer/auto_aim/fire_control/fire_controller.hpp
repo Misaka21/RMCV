@@ -26,6 +26,16 @@
 
 namespace autoaim::fire_control {
 
+// ==================== 公共工具函数 ====================
+
+/**
+ * @brief 获取陀螺 orientation 窗口角 (rad)
+ *
+ * 根据 SpinLevel 读取对应 top0/1/2 配置。
+ * 非陀螺目标调用者不应使用返回值。
+ */
+double get_spin_window_rad(const predictor::VehicleState& vehicle);
+
 /**
  * @brief 火控主类
  */

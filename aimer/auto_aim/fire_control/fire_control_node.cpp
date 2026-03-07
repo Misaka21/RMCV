@@ -211,8 +211,8 @@ void fire_control_run(const std::string& /* config_path */) {
     while (app_running->get()) {
         watchdog::heartbeat("autoaim_fire_control");
 
-        // 获取战场快照
-        const auto& snapshot = battlefield->get();
+        // 获取战场快照 (线程安全拷贝，避免 predictor 写入时读到半更新状态)
+        const auto snapshot = battlefield->load();
         double current_time = get_current_time();
         int64_t current_time_us = get_current_time_us();
 
@@ -231,8 +231,8 @@ void fire_control_run(const std::string& /* config_path */) {
                 && (current_time_us - last_snapshot_update_us) > SNAPSHOT_STALE_TIMEOUT_US);
 
         // aim_mode 从 hardware 实时共享对象读取，不依赖可能过期的 snapshot
-        aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->get());
-        int64_t aim_mode_time_us = aim_mode_time_obj->get();
+        aimer::AimMode mode = aimer::to_aim_mode(aim_mode_obj->load());
+        int64_t aim_mode_time_us = aim_mode_time_obj->load();
         if (aim_mode_time_us <= 0 ||
             (current_time_us - aim_mode_time_us) > AIM_MODE_STALE_TIMEOUT_US) {
             mode = aimer::AimMode::DISABLED;
@@ -398,7 +398,7 @@ void fire_control_run(const std::string& /* config_path */) {
                     last_predict_to_send_predict_ts = snapshot.predict_timestamp;
                 }
             }
-            fire_cmd->get() = cmd;
+            fire_cmd->store(cmd);
         }
 
         // 写入调试信息 (供 visualizer 绘制)
@@ -515,33 +515,10 @@ void fire_control_run(const std::string& /* config_path */) {
                     dbg.spin_level = static_cast<int>(v.spin.level);
                     dbg.spin_omega = v.spin.omega;
                     dbg.selected_armor_count = v.armor_count;
-                    const double top0_window_deg = (v.armor_count == 4)
-                        ? get_param_or(
-                            "AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888
-                        )
-                        : get_param_or(
-                            "AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0
-                        );
-                    const double top1_window_deg = get_param_or(
-                        "AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0
-                    );
-                    const double top2_window_deg = get_param_or(
-                        "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
-                    );
+                    const double window_rad = get_spin_window_rad(v);
+                    const double window_deg = aimer::math::rad2deg(window_rad);
                     if (v.spin.active) {
-                        switch (v.spin.level) {
-                            case predictor::SpinLevel::HIGH:
-                                dbg.orientation_window_deg = top2_window_deg;
-                                break;
-                            case predictor::SpinLevel::LOW:
-                                dbg.orientation_window_deg = top1_window_deg;
-                                break;
-                            case predictor::SpinLevel::NONE:
-                            default:
-                                // 预留兼容：若后续存在 active+NONE 组合，仍可退回 top0 配置。
-                                dbg.orientation_window_deg = top0_window_deg;
-                                break;
-                        }
+                        dbg.orientation_window_deg = window_deg;
                     } else {
                         // 非陀螺(ArmorModel)路径不使用 orientation window。
                         dbg.orientation_window_deg = 0.0;
@@ -558,7 +535,7 @@ void fire_control_run(const std::string& /* config_path */) {
                     }
                 }
             }
-            fire_debug->get() = dbg;
+            fire_debug->store(dbg);
         }
 
         // 轻量调试日志:
@@ -630,30 +607,8 @@ void fire_control_run(const std::string& /* config_path */) {
                     spin_active = v_dbg.spin.active;
                     spin_level = static_cast<int>(v_dbg.spin.level);
                     spin_omega = v_dbg.spin.omega;
-                    const double top0_window_deg = (v_dbg.armor_count == 4)
-                        ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
-                        : get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0);
-                    const double top1_window_deg = get_param_or(
-                        "AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0
-                    );
-                    const double top2_window_deg = get_param_or(
-                        "AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0
-                    );
                     if (spin_active) {
-                        switch (v_dbg.spin.level) {
-                            case predictor::SpinLevel::HIGH:
-                                orientation_window_deg = top2_window_deg;
-                                break;
-                            case predictor::SpinLevel::LOW:
-                                orientation_window_deg = top1_window_deg;
-                                break;
-                            case predictor::SpinLevel::NONE:
-                            default:
-                                orientation_window_deg = top0_window_deg;
-                                break;
-                        }
-                    } else {
-                        orientation_window_deg = 0.0;
+                        orientation_window_deg = aimer::math::rad2deg(get_spin_window_rad(v_dbg));
                     }
                     orientation_window_on = spin_active && std::abs(orientation_window_deg) > 1e-6;
                 }
@@ -778,9 +733,7 @@ void fire_control_run(const std::string& /* config_path */) {
 }
 
 void start_fire_control_node(const std::string& config_path) {
-    std::thread([config_path]() {
-        fire_control_run(config_path);
-    }).detach();
+    fire_control_run(config_path);
 }
 
 }  // namespace autoaim::fire_control

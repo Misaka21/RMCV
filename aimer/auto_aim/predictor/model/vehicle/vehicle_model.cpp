@@ -232,7 +232,12 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     spin_.radius = motion_->get_radius();
     spin_.radius_2 = motion_->get_another_radius();
     spin_.dz = motion_->get_dz();
-    spin_.update_level(motion_->get_omega());  // 更新陀螺等级 (带迟滞消抖)
+    SpinState::SpinThresholds spin_thresholds;
+    spin_thresholds.top1_activate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top1_activate_w");
+    spin_thresholds.top1_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top1_deactivate_w");
+    spin_thresholds.top2_activate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top2_activate_w");
+    spin_thresholds.top2_deactivate = runtime_param::get_param<double>("AutoAim.Predictor.Motion.top2_deactivate_w");
+    spin_.update_level(motion_->get_omega(), spin_thresholds);  // 更新陀螺等级 (带迟滞消抖)
     spin_.active = (spin_.level >= SpinLevel::LOW) && motion_->valid();
 
     // 6. 更新敌方颜色 (用于绘图)

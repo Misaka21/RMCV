@@ -24,6 +24,7 @@ public:
     template<typename... Args>
     explicit BasicTypeWrapper(Args&&... args): value(std::forward<Args>(args)...) {}
 
+    // 非线程安全访问 (仅限单线程场景，如初始化阶段)
     T& get() {
         return value;
     }
@@ -40,8 +41,25 @@ public:
         value = std::move(new_value);
     }
 
+    // 线程安全访问 (跨线程读写时使用)
+    T load() const {
+        std::lock_guard<std::mutex> lock(value_mtx_);
+        return value;
+    }
+
+    void store(const T& new_value) {
+        std::lock_guard<std::mutex> lock(value_mtx_);
+        value = new_value;
+    }
+
+    void store(T&& new_value) {
+        std::lock_guard<std::mutex> lock(value_mtx_);
+        value = std::move(new_value);
+    }
+
 private:
     T value;
+    mutable std::mutex value_mtx_;
 };
 
 /**

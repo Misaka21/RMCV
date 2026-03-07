@@ -339,8 +339,8 @@ void start_hardware_node() {
                 if (frame.serial_valid) {
                     frame.serial_data.enemy_color = injected_enemy_color;
                     frame.serial_data.allow_fire = injected_allow_fire;
-                    current_aim_mode->get() = frame.serial_data.aim_mode;
-                    current_aim_mode_time_us->get() = frame.timestamp_us;
+                    current_aim_mode->store(frame.serial_data.aim_mode);
+                    current_aim_mode_time_us->store(frame.timestamp_us);
                 }
 
                 // 应用IMU pitch/roll/yaw取反

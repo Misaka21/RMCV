@@ -836,10 +836,10 @@ void start_visualizer_node() {
                 vis = copy_to_reused_buffer(det_img, vis_buffer);
 
             } else {
-                // 默认: predictor / firecontrol 视图
-                const auto& snapshot = battlefield->get();
-                const auto& predictor_dbg = predictor_debug->get();
-                const auto& dbg = fire_debug->get();
+                // 默认: predictor / firecontrol 视图 (线程安全拷贝)
+                const auto snapshot = battlefield->load();
+                const auto predictor_dbg = predictor_debug->load();
+                const auto dbg = fire_debug->load();
 
                 // 只在新帧到来时重绘，避免同帧高频刷新导致抖动
                 if (predictor_dbg.frame_id == last_frame_id || predictor_dbg.image.empty()) {

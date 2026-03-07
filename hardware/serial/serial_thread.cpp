@@ -62,7 +62,7 @@ void serial_sender_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                 }
 
                 // fire_command -> VisionData_t (保持 32B 协议不变)
-                const auto cmd = fire_cmd->get();
+                const auto cmd = fire_cmd->load();
                 VisionData_t vision_data;
                 vision_data.control = cmd.control_enabled ? 1 : 0;
                 vision_data.shoot = (cmd.control_enabled && cmd.allow_fire && cmd.fire_now) ? 1 : 0;
@@ -161,8 +161,8 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                         // 设置时间戳
                         receive_data.recv_time_us = recv_time_us;
                         // 更新实时模式源（避免依赖可能停更的上游快照）
-                        current_aim_mode->get() = receive_data.aim_mode;
-                        current_aim_mode_time_us->get() = recv_time_us;
+                        current_aim_mode->store(receive_data.aim_mode);
+                        current_aim_mode_time_us->store(recv_time_us);
 
                         // 遥测数据
                         dashboard::set("serial.yaw", receive_data.yaw);
