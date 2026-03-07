@@ -244,9 +244,9 @@
     #@double 旋转中心速度过程噪声
     q_vel = 32.0
     #@double 朝向角θ过程噪声
-    q_theta = 0.5
+    q_theta = 10.5
     #@double 角速度ω过程噪声，较大值以更快响应陀螺加减速
-    q_omega = 900.0
+    q_omega = 500.0
     #@double 基础半径r过程噪声
     q_r = 0.003
     #@double 半径差l过程噪声 (不乘dt)
@@ -258,7 +258,7 @@
     #@double yaw/pitch角度观测噪声
     r_angle = 2.8
     #@double 距离观测噪声系数, R_dis = r_dis_k × distance⁴
-    r_dis_k = 8.0
+    r_dis_k = 18.0
     #@double 装甲板朝向角观测噪声 - 单块
     r_armor_yaw_single = 4.2
     #@double 装甲板朝向角观测噪声 - 双块
@@ -534,4 +534,4 @@
     #@bool 是否显示可视化窗口
     show_window = true
     #@string 显示视图: "predictor" / "firecontrol" / "detector"
-    view = "predictor"
+    view = "firecontrol"
