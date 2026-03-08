@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <string>
 
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
@@ -432,30 +433,36 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
 SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
     MatrixXX Q = MatrixXX::Zero();
 
-    double q_pos = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_pos");
-    double q_vel = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_vel");
-    double q_theta = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_theta");
-    double q_omega = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_omega");
-    double q_r = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_r");
-    double q_l = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_l");
-    double q_h = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_h");
+    const double q_acc = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_acc");
+    const double q_ang_acc = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_ang_acc");
+    const double q_r_rw = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_r_rw");
+    const double q_l_rw = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_l_rw");
+    const double q_h_rw = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.q_h_rw");
 
-    // 位置-速度块
-    Q(sp_model::XC, sp_model::XC) = q_pos * dt;
-    Q(sp_model::VX, sp_model::VX) = q_vel * dt;
-    Q(sp_model::YC, sp_model::YC) = q_pos * dt;
-    Q(sp_model::VY, sp_model::VY) = q_vel * dt;
-    Q(sp_model::ZC, sp_model::ZC) = q_pos * dt;
-    Q(sp_model::VZ, sp_model::VZ) = q_vel * dt;
+    const double dt2 = dt * dt;
+    const double dt3 = dt2 * dt;
+    const double dt4 = dt2 * dt2;
+    const double a = dt4 * 0.25;
+    const double b = dt3 * 0.5;
+    const double c = dt2;
 
-    // 朝向角-角速度块
-    Q(sp_model::THETA, sp_model::THETA) = q_theta * dt;
-    Q(sp_model::OMEGA, sp_model::OMEGA) = q_omega * dt;
+    auto fill_cv_block = [&](int pos_idx, int vel_idx, double var_acc) {
+        Q(pos_idx, pos_idx) = a * var_acc;
+        Q(pos_idx, vel_idx) = b * var_acc;
+        Q(vel_idx, pos_idx) = b * var_acc;
+        Q(vel_idx, vel_idx) = c * var_acc;
+    };
 
-    // 几何参数 (不乘 dt)
-    Q(sp_model::R, sp_model::R) = q_r;
-    Q(sp_model::L, sp_model::L) = q_l;
-    Q(sp_model::H, sp_model::H) = q_h;
+    // 线速度/角速度采用分块白噪声模型，增强 dt 变化时的一致性。
+    fill_cv_block(sp_model::XC, sp_model::VX, q_acc);
+    fill_cv_block(sp_model::YC, sp_model::VY, q_acc);
+    fill_cv_block(sp_model::ZC, sp_model::VZ, q_acc);
+    fill_cv_block(sp_model::THETA, sp_model::OMEGA, q_ang_acc);
+
+    // 几何参数按随机游走建模，噪声随时间线性增长。
+    Q(sp_model::R, sp_model::R) = q_r_rw * dt;
+    Q(sp_model::L, sp_model::L) = q_l_rw * dt;
+    Q(sp_model::H, sp_model::H) = q_h_rw * dt;
 
     return Q;
 }
@@ -463,11 +470,15 @@ SpMotion::MatrixXX SpMotion::build_Q(double dt) const {
 SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v, int observed_armor_count) const {
     MatrixZZ R = MatrixZZ::Zero();
 
-    double r_angle = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_angle");
-    double r_dis_k = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_k");
+    const double r_angle = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_angle");
+    const std::string r_dis_model = runtime_param::get_param<std::string>("AutoAim.Predictor.SpEKF.r_dis_model");
+    const double r_dis_base = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_base");
+    const double r_dis_log_k = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_log_k");
+    const double r_dis_quad_k = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_quad_k");
+    const double r_dis_pow4_k = runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_dis_pow4_k");
 
     // 基础朝向角噪声
-    double r_armor_yaw_base = (observed_armor_count >= 2)
+    const double r_armor_yaw_base = (observed_armor_count >= 2)
         ? runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_double")
         : runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_single");
 
@@ -483,20 +494,32 @@ SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v, int observe
     //   - 离群观测 z_to_v 异常大 → R 变大 → 马氏距离变小 → 反而通过 Gating！
 
     // 防止异常值: z_to_v 理论范围 [0, π/2]，clamp 到 [0, 1.5]
-    double z_to_v_clamped = std::clamp(std::abs(z_to_v), 0.0, 1.5);
+    const double z_to_v_clamped = std::clamp(std::abs(z_to_v), 0.0, 1.5);
 
     // 使用 log 函数平滑过渡
-    double adaptive_factor = std::log(z_to_v_clamped + 1.0) + 1.0;
+    const double adaptive_factor = std::log(z_to_v_clamped + 1.0) + 1.0;
     // z_to_v = 0.0 → factor = 1.0 (正对)
     // z_to_v = 0.5 → factor ≈ 1.4
     // z_to_v = 1.0 → factor ≈ 1.7 (侧对)
     // z_to_v = 1.5 → factor ≈ 1.9 (max)
 
-    double r_armor_yaw = r_armor_yaw_base * adaptive_factor;
+    const double r_armor_yaw = r_armor_yaw_base * adaptive_factor;
+    const double dis_abs = std::max(0.0, distance);
+
+    double r_dis = r_dis_base;
+    if (r_dis_model == "quadratic") {
+        r_dis += r_dis_quad_k * dis_abs * dis_abs;
+    } else if (r_dis_model == "pow4") {
+        r_dis += r_dis_pow4_k * std::pow(dis_abs, 4.0);
+    } else {
+        // 默认 log，兼顾远距离抑噪与近距离响应。
+        r_dis += r_dis_log_k * std::log(dis_abs + 1.0);
+    }
+    r_dis = std::max(r_dis, 1e-6);
 
     R(sp_model::YAW, sp_model::YAW) = r_angle;
     R(sp_model::PITCH, sp_model::PITCH) = r_angle;
-    R(sp_model::DIS, sp_model::DIS) = r_dis_k * std::pow(distance, 4.0);
+    R(sp_model::DIS, sp_model::DIS) = r_dis;
     R(sp_model::ARMOR_YAW, sp_model::ARMOR_YAW) = r_armor_yaw;
 
     return R;
