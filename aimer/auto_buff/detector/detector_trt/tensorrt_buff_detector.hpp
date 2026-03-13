@@ -1,10 +1,13 @@
 /**
  * @file tensorrt_buff_detector.hpp
- * @brief 基于 TensorRT 的能量机关 YOLO 检测器
+ * @brief 基于 TensorRT 的能量机关 YOLOX 检测器
  *
- * 模型: sp25 单类别扇叶检测模型
- * 输出格式: [1, 17, 8400] 或 [1, 8400, 17]
- *   17 = 4 box(cx,cy,w,h) + 1 score + 6*2 keypoints
+ * 模型: FYT yolox_rune_3.6m, 输入 480x480
+ * 输出格式: [1, N_anchors, 15]
+ *
+ * 注意: YOLOX 模型不需要 /255 归一化, 因此不使用 CUDA 预处理 kernel,
+ *       而是在 CPU 上完成 letterbox + blobFromImage (scale=1.0),
+ *       然后 memcpy 到 GPU.
  */
 
 #ifndef AIMER_AUTOBUFF_DETECTOR_TRT_TENSORRT_BUFF_DETECTOR_HPP
@@ -27,7 +30,7 @@
 #include "aimer/auto_buff/detector/common/detector_interface.hpp"
 #include "aimer/auto_buff/detector/common/preprocess.hpp"
 #include "aimer/auto_buff/detector/common/postprocess.hpp"
-#include "aimer/auto_buff/detector/decoder/buff_decoder.hpp"
+#include "aimer/auto_buff/detector/decoder/rune_decoder.hpp"
 
 namespace autobuff::detector {
 
@@ -44,28 +47,25 @@ public:
  */
 struct TrtBuffConfig {
     std::string model_path;         // ONNX 或 engine 文件路径
-    int input_size = 640;           // 输入尺寸 (正方形)
-    float conf_threshold = 0.45f;   // 置信度阈值
-    float nms_threshold  = 0.45f;   // NMS 阈值
+    int input_size = 480;           // 输入尺寸 (正方形)
+    float conf_threshold = 0.50f;   // 置信度阈值
+    float nms_threshold  = 0.30f;   // NMS 阈值
     bool fp16 = true;               // 使用 FP16 推理
     bool int8 = false;              // 使用 INT8 量化
     int workspace_mb = 256;         // 工作空间大小 (MB)
 };
 
 /**
- * @brief 异步推理资源槽位 (预分配，避免频繁分配)
- *
- * 每个槽位有独立的 IExecutionContext，实现真正的并行推理。
+ * @brief 异步推理资源槽位
  */
 struct TrtBuffSlot {
     nvinfer1::IExecutionContext* context = nullptr;
     cudaStream_t stream = nullptr;
     cudaEvent_t  event  = nullptr;
-    void* img_device    = nullptr;   // GPU 原图缓冲 (uint8, BGR)
-    void* input_device  = nullptr;   // GPU 输入张量 (float32 或 float16)
+    void* input_device  = nullptr;   // GPU 输入张量 (float32 NCHW)
     void* output_device = nullptr;   // GPU 输出张量
-    void* pinned_buffer = nullptr;   // 锁页内存暂存区 (H2D 加速)
-    void* pinned_output = nullptr;   // 锁页输出缓冲 (D2H 真异步)
+    void* pinned_input  = nullptr;   // 锁页输入缓冲 (CPU blob → H2D)
+    void* pinned_output = nullptr;   // 锁页输出缓冲 (D2H)
     bool in_use = false;
 };
 
@@ -83,13 +83,7 @@ struct TrtBuffTask {
 };
 
 /**
- * @brief 基于 TensorRT 的能量机关 YOLO 检测器
- *
- * 特点:
- *   - 使用 NVIDIA TensorRT 推理引擎
- *   - 支持 FP16/INT8 量化加速
- *   - 自动缓存编译后的 engine 文件
- *   - 支持异步推理 (push/pop 接口)
+ * @brief 基于 TensorRT 的能量机关 YOLOX 检测器
  */
 class TensorrtBuffDetector : public BuffDetectorInterface {
 public:
@@ -117,7 +111,6 @@ public:
               const serial::SerialReceiveData& serial_data) override;
     AsyncBuffDetectionResult pop() override;
     size_t queue_size() const override;
-
     void stop() override;
 
 private:
@@ -131,6 +124,9 @@ private:
     int  acquire_slot();
     void release_slot(int idx);
 
+    // CPU 预处理: letterbox + BGR→RGB + HWC→NCHW (不做 /255 归一化)
+    cv::Mat cpu_preprocess(const cv::Mat& image, LetterboxMeta& meta) const;
+
     TrtBuffConfig  config_;
     EnemyColor     color_;
 
@@ -141,12 +137,9 @@ private:
     std::unique_ptr<nvinfer1::IExecutionContext> context_;
 
     // CUDA 缓冲区 (同步模式)
-    void* img_device_    = nullptr;
     void* input_device_  = nullptr;
     void* output_device_ = nullptr;
     std::vector<float> output_buffer_;
-    size_t img_buffer_size_ = 0;
-    bool use_fp16_input_ = false;
 
     cudaStream_t stream_ = nullptr;
 
@@ -155,7 +148,7 @@ private:
     std::string output_name_;
     nvinfer1::Dims input_dims_;
     nvinfer1::Dims output_dims_;
-    std::vector<int64_t> output_shape_;  // 缓存 output_dims_ 转换结果
+    std::vector<int64_t> output_shape_;
     size_t input_size_  = 0;
     size_t output_size_ = 0;
     int input_binding_idx_  = 0;
@@ -172,7 +165,7 @@ private:
     std::atomic<bool>        stopped_{false};
 
     // 解码器和后处理器
-    Sp25Decoder   decoder_;
+    RuneDecoder   decoder_;
     Postprocessor postprocessor_;
 
     // 调试

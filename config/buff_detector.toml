@@ -4,82 +4,25 @@
 # 本文件严格区分参数的数据类型，比如 10.0 不能改成 10
 
 [Detector]
-    #@string 检测器类型: "traditional" 或 "yolo"
-    type = "yolo"
-    #@bool 是否开启调试模式 (显示 OpenCV 窗口)
+    #@bool 是否开启调试模式
     debug = false
 
-# ==================== 传统检测器配置 ====================
-
-[TraditionalDetector]
-    #@int 红色通道差阈值 (R - B)
-    gray_threshold_red = 80
-    #@int 蓝色通道差阈值 (B - R)
-    gray_threshold_blue = 80
-
-    # R标检测参数
-    #@double R标最小面积
-    r_area_min = 100.0
-    #@double R标最大面积
-    r_area_max = 5000.0
-    #@double R标最小圆度
-    r_circularity_min = 0.2
-    #@double R标最大圆度
-    r_circularity_max = 0.9
-
-    # 靶心检测参数
-    #@double 靶心最小面积
-    target_area_min = 60.0
-    #@double 靶心最大面积
-    target_area_max = 6000.0
-    #@double 靶心最小长宽比
-    target_aspect_min = 0.99
-    #@double 靶心最大长宽比
-    target_aspect_max = 1.55
-
-    # Lit(Active) 目标判定: 子轮廓面积比例
-    #@double Active目标: 单个子轮廓面积/外轮廓面积 最小比
-    active_min_sub_area_ratio = 0.10
-    #@double Active目标: (子轮廓面积总和)/外轮廓面积 最大比 (十环过滤)
-    active_max_total_sub_area_ratio = 0.65
-
-    # 缺口检测参数
-    #@double 缺口面积/靶心面积 最小比
-    gap_area_ratio_min = 0.025
-    #@double 缺口面积/靶心面积 最大比
-    gap_area_ratio_max = 0.20
-    #@double 缺口长宽比最小
-    gap_aspect_min = 1.55
-    #@double 缺口长宽比最大
-    gap_aspect_max = 8.0
-
-    # gap 椭圆矫正后的几何约束 (比例基于 correction_radius)
-    #@double gap中心到外椭圆中心的距离/修正半径 最小比
-    gap_min_center_dist_ratio = 0.10
-    #@double gap中心到外椭圆中心的距离/修正半径 最大比
-    gap_max_center_dist_ratio = 0.90
-    #@double 将gap角点投影到圆上的比例
-    gap_circle_radius_ratio = 0.85
-
-    # 调试选项
-    #@bool 是否显示 OpenCV 窗口
-    show_window = false
-    #@bool 是否保存调试图像
-    save_debug_image = false
-
-# ==================== YOLO 检测器配置 ====================
+# ==================== YOLOX 检测器配置 ====================
+# 模型: FYT yolox_rune_3.6m
+# 输出: 5 关键点 (r_center + 4 装甲板角点) + 颜色 + 类型
+# 注意: 模型不需要 /255 归一化, 内部处理
 
 [Detector.Yolo]
     #@string 推理后端: "openvino" 或 "tensorrt"
     backend = "openvino"
     #@string 模型文件路径 (相对于 asset 目录)
-    model_path = "buff_25_best.onnx"
+    model_path = "yolox_rune_3.6m.onnx"
     #@double 置信度阈值
-    conf_threshold = 0.45
+    conf_threshold = 0.50
     #@double NMS 阈值
-    nms_threshold = 0.45
+    nms_threshold = 0.30
     #@int 输入尺寸
-    input_size = 640
+    input_size = 480
 
 [Detector.Yolo.OpenVINO]
     #@string 推理设备: "GPU", "CPU", "AUTO"

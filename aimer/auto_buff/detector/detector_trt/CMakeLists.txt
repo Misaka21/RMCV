@@ -1,4 +1,4 @@
-# detector_trt - TensorRT 能量机关检测器模块
+# detector_trt - TensorRT 能量机关 YOLOX 检测器模块
 
 # 添加本地 CMake 模块路径 (包含 FindTensorRT.cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
@@ -29,17 +29,17 @@ endif()
 enable_language(CUDA)
 find_package(CUDAToolkit REQUIRED)
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --use_fast_math")
-
 if(NOT DEFINED RMCV_CUDA_ARCH)
     set(RMCV_CUDA_ARCH "72;75;86;87")
 endif()
 
+# 注意: 不需要 CUDA 预处理 kernel,
+# YOLOX 模型不做 /255 归一化, 预处理在 CPU 完成
 add_library(buff_detector_tensorrt STATIC
     tensorrt_buff_detector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/preprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/postprocess.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../decoder/buff_decoder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../decoder/rune_decoder.cpp
 )
 
 set_target_properties(buff_detector_tensorrt PROPERTIES
@@ -60,7 +60,6 @@ target_include_directories(buff_detector_tensorrt PUBLIC
 target_link_libraries(buff_detector_tensorrt PUBLIC
     auto_buff_common
     aimer_common
-    detector_tensorrt
     ${TensorRT_LIBS}
     ${OpenCV_LIBS}
     CUDA::cudart

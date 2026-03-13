@@ -1,10 +1,10 @@
 /**
  * @file openvino_buff_detector.hpp
- * @brief 基于 OpenVINO 的能量机关 YOLO 检测器
+ * @brief 基于 OpenVINO 的能量机关 YOLOX 检测器
  *
- * 模型: sp25 单类别扇叶检测模型
- * 输出格式: [1, 17, 8400]
- *   17 = 4 box(cx,cy,w,h) + 1 score + 6*2 keypoints
+ * 模型: FYT yolox_rune_3.6m, 输入 480x480
+ * 输出格式: [1, N_anchors, 15]
+ *   15 = 5*2 关键点 + 1 conf + 2 颜色 + 2 类型
  */
 
 #ifndef AIMER_AUTOBUFF_DETECTOR_OV_OPENVINO_BUFF_DETECTOR_HPP
@@ -25,7 +25,7 @@
 #include "aimer/auto_buff/detector/common/detector_interface.hpp"
 #include "aimer/auto_buff/detector/common/preprocess.hpp"
 #include "aimer/auto_buff/detector/common/postprocess.hpp"
-#include "aimer/auto_buff/detector/decoder/buff_decoder.hpp"
+#include "aimer/auto_buff/detector/decoder/rune_decoder.hpp"
 
 namespace autobuff::detector {
 
@@ -35,9 +35,9 @@ namespace autobuff::detector {
 struct OvBuffConfig {
     std::string model_path;           // ONNX 模型路径
     std::string device = "GPU";       // 推理设备 (CPU/GPU/AUTO)
-    int input_size = 640;             // 输入尺寸 (正方形)
-    float conf_threshold = 0.45f;     // 置信度阈值
-    float nms_threshold  = 0.45f;     // NMS 阈值
+    int input_size = 480;             // 输入尺寸 (正方形)
+    float conf_threshold = 0.50f;     // 置信度阈值
+    float nms_threshold  = 0.30f;     // NMS 阈值
 };
 
 /**
@@ -55,21 +55,17 @@ struct OvInferenceTask {
 };
 
 /**
- * @brief 基于 OpenVINO 的能量机关 YOLO 检测器
+ * @brief 基于 OpenVINO 的能量机关 YOLOX 检测器
  *
  * 特点:
- *   - 使用 Intel OpenVINO 推理引擎
- *   - 支持 CPU 和 GPU (Intel 核显) 推理
+ *   - 使用 YOLOX rune 模型 (无 /255 归一化, 模型内部处理)
  *   - 覆盖 push/pop 为真正的异步推理
- *   - 直接输出扇叶关键点，通过后处理计算 R 标和槽位
+ *   - 输出 5 关键点 (r_center + 4 装甲板角点)
  */
 class OpenvinoBuffDetector : public BuffDetectorInterface {
 public:
     OpenvinoBuffDetector(const OvBuffConfig& config, EnemyColor color);
 
-    /**
-     * @brief 从 buff_detector.toml 配置文件创建检测器
-     */
     static std::unique_ptr<OpenvinoBuffDetector> from_config(
         EnemyColor color,
         const std::string& config_file = "buff_detector.toml"
@@ -102,7 +98,7 @@ private:
     ov::InferRequest  infer_request_;  // 同步模式
 
     // 解码器和后处理器
-    Sp25Decoder  decoder_;
+    RuneDecoder   decoder_;
     Postprocessor postprocessor_;
 
     // 异步任务队列

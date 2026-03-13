@@ -1,5 +1,5 @@
-// 能量机关 YOLO 后处理实现
-// 将 Sp25Decoder 输出转换为 BuffDetectionResult
+// 能量机关 YOLOX 后处理实现
+// 将 RuneDecoder 输出转换为 BuffDetectionResult
 
 #include "postprocess.hpp"
 
@@ -11,21 +11,14 @@ namespace autobuff::detector {
 // 扇叶间角间距 (2π / 5 = 72°)
 static constexpr double BLADE_ANGLE_STEP = 2.0 * M_PI / autobuff::NUM_SLOTS;
 
-// R 标外推系数：kpt[5] 是内侧尖端，kpt[4] 是扇叶中心
-// R 中心 ≈ kpt[5] + (kpt[5] - kpt[4]) * 0.4
-// 即 R = kpt[5] * 1.4 - kpt[4] * 0.4
-// 等价 CLAUDE.md 中描述的 (kpt[5] - kpt[4]) * 1.4 + kpt[4]
-// = kpt[5] * 1.4 - kpt[4] * 1.4 + kpt[4] = kpt[5] * 1.4 - kpt[4] * 0.4 ✓
-static constexpr float R_EXTRAP_A = 1.4f;   // kpt[5] 系数
-static constexpr float R_EXTRAP_B = 0.4f;   // kpt[4] 系数 (减去)
-
 autobuff::BuffDetectionResult Postprocessor::build_result(
-    const std::vector<RawBuffObject>& raw_objects,
+    const std::vector<RawRuneObject>& raw_objects,
     const LetterboxMeta& /*meta*/,
     const aimer::RobotState& robot_state,
     int frame_id,
     double timestamp_s,
-    autobuff::DetectorBackend backend) const
+    autobuff::DetectorBackend backend,
+    autobuff::EnemyColor filter_color) const
 {
     autobuff::BuffDetectionResult result;
     result.robot_state = robot_state;
@@ -38,23 +31,33 @@ autobuff::BuffDetectionResult Postprocessor::build_result(
         return result;
     }
 
+    // 颜色过滤: 只保留匹配敌方颜色的检测 (UNKNOWN 不过滤)
+    std::vector<const RawRuneObject*> filtered;
+    filtered.reserve(raw_objects.size());
+    for (const auto& obj : raw_objects) {
+        if (filter_color == autobuff::EnemyColor::UNKNOWN ||
+            obj.color == filter_color) {
+            filtered.push_back(&obj);
+        }
+    }
+
+    if (filtered.empty()) {
+        result.update_summary();
+        return result;
+    }
+
     // 1. 估计 R 标中心 (置信度加权平均 + 离群值剔除)
     struct REstimate { cv::Point2f pt; float conf; };
     std::vector<REstimate> r_estimates;
-    r_estimates.reserve(raw_objects.size());
+    r_estimates.reserve(filtered.size());
 
-    for (const auto& obj : raw_objects) {
-        if (obj.kpt_count < 6) continue;
-        const cv::Point2f& kpt4 = obj.kpts[4];  // 扇叶中心
-        const cv::Point2f& kpt5 = obj.kpts[5];  // 内侧尖端 (指向 R 标)
-        cv::Point2f r_est = kpt5 * R_EXTRAP_A - kpt4 * R_EXTRAP_B;
-        r_estimates.push_back({r_est, obj.score});
+    for (const auto* obj : filtered) {
+        r_estimates.push_back({obj->r_center, obj->score});
     }
 
     if (!r_estimates.empty()) {
         // 离群值剔除: 先算中位数，再剔除距中位数过远的估计
         if (r_estimates.size() >= 3) {
-            // X/Y 中位数
             std::vector<float> xs, ys;
             xs.reserve(r_estimates.size());
             ys.reserve(r_estimates.size());
@@ -66,7 +69,6 @@ autobuff::BuffDetectionResult Postprocessor::build_result(
             std::nth_element(ys.begin(), ys.begin() + ys.size() / 2, ys.end());
             cv::Point2f median(xs[xs.size() / 2], ys[ys.size() / 2]);
 
-            // 剔除距中位数超过 80px 的估计
             constexpr float OUTLIER_THRESH_SQ = 80.f * 80.f;
             r_estimates.erase(
                 std::remove_if(r_estimates.begin(), r_estimates.end(),
@@ -93,13 +95,8 @@ autobuff::BuffDetectionResult Postprocessor::build_result(
     }
 
     // 2. 为每个检测分配槽位
-    //    角度: atan2(-(center.y - r.y), center.x - r.x)  (Y 轴翻转，像素坐标向下)
-    //    槽位: round(angle / (2π/5)) mod 5
-    //    冲突: 置信度更高者胜
-
-    // 临时槽位: 存储 (最高置信度, 对应的 raw_object 索引)
     struct SlotCandidate {
-        float best_score  = -1.f;
+        float best_score   = -1.f;
         int   best_obj_idx = -1;
         double angle       = 0.0;
     };
@@ -107,31 +104,28 @@ autobuff::BuffDetectionResult Postprocessor::build_result(
 
     const cv::Point2f& r_center = result.r_center.center;
 
-    for (int i = 0; i < static_cast<int>(raw_objects.size()); ++i) {
-        const auto& obj = raw_objects[i];
-        if (obj.kpt_count < 6) {
-            continue;
+    for (int i = 0; i < static_cast<int>(filtered.size()); ++i) {
+        const auto& obj = *filtered[i];
+
+        // 装甲板中心 = 四角平均
+        cv::Point2f armor_center(0.f, 0.f);
+        for (const auto& corner : obj.armor_corners) {
+            armor_center += corner;
         }
+        armor_center *= 0.25f;
 
-        // 扇叶中心为 kpt[4]
-        const cv::Point2f& fan_center = obj.kpts[4];
-
-        // 计算角度 (数学坐标系，Y 轴向上 → 对像素 Y 取反)
-        double dx = fan_center.x - r_center.x;
-        double dy = -(fan_center.y - r_center.y);
+        // 计算角度 (数学坐标系, Y 轴向上 → 对像素 Y 取反)
+        double dx = armor_center.x - r_center.x;
+        double dy = -(armor_center.y - r_center.y);
         double angle = std::atan2(dy, dx);
 
         // 归一化到 [0, 2π)
-        if (angle < 0.0) {
-            angle += 2.0 * M_PI;
-        }
+        if (angle < 0.0) angle += 2.0 * M_PI;
 
         // 槽位编号
         int slot_id = static_cast<int>(std::round(angle / BLADE_ANGLE_STEP))
                       % autobuff::NUM_SLOTS;
-        if (slot_id < 0) {
-            slot_id += autobuff::NUM_SLOTS;
-        }
+        if (slot_id < 0) slot_id += autobuff::NUM_SLOTS;
 
         // 置信度竞争
         if (obj.score > slot_cands[slot_id].best_score) {
@@ -143,33 +137,46 @@ autobuff::BuffDetectionResult Postprocessor::build_result(
 
     // 3. 构造 DetectedTarget
     for (int s = 0; s < autobuff::NUM_SLOTS; ++s) {
-        if (slot_cands[s].best_obj_idx < 0) {
-            continue;
+        if (slot_cands[s].best_obj_idx < 0) continue;
+
+        const auto& obj = *filtered[slot_cands[s].best_obj_idx];
+        auto& tgt = result.targets[s];
+
+        // 装甲板中心
+        cv::Point2f armor_center(0.f, 0.f);
+        for (const auto& corner : obj.armor_corners) {
+            armor_center += corner;
         }
+        armor_center *= 0.25f;
 
-        const auto& obj = raw_objects[slot_cands[s].best_obj_idx];
-        auto& tgt       = result.targets[s];
-
-        tgt.center     = obj.kpts[4];
+        tgt.center     = armor_center;
         tgt.slot_id    = s;
         tgt.angle      = slot_cands[s].angle;
-        tgt.is_lit     = true;    // YOLO 只识别点亮扇叶
         tgt.valid      = true;
         tgt.confidence = obj.score;
 
-        // 填充关键点
-        tgt.keypoints = obj.kpts;
-        tgt.keypoint_count = obj.kpt_count;
+        // is_lit: INACTIVATED = 当前目标 (需要打击) = lit
+        tgt.is_lit = (obj.type == RuneType::INACTIVATED);
 
-        // 填充 landmarks (四角，调试用)
+        // 填充关键点: 4 个装甲板角点
+        // keypoints[0] = bottom_left  (靠近R, 左)
+        // keypoints[1] = top_left     (远离R, 左)
+        // keypoints[2] = top_right    (远离R, 右)
+        // keypoints[3] = bottom_right (靠近R, 右)
+        for (int k = 0; k < 4; ++k) {
+            tgt.keypoints[k] = obj.armor_corners[k];
+        }
+        tgt.keypoint_count = 4;
+
+        // landmarks (调试用, 与 keypoints 相同)
         tgt.landmarks.clear();
         tgt.landmarks.reserve(4);
         for (int k = 0; k < 4; ++k) {
-            tgt.landmarks.push_back(obj.kpts[k]);
+            tgt.landmarks.push_back(obj.armor_corners[k]);
         }
     }
 
-    // 4. 更新统计摘要 (target_count, lit_count, lit_mask, status)
+    // 4. 更新统计摘要
     result.update_summary();
 
     return result;

@@ -1,6 +1,10 @@
 /**
  * @file tensorrt_buff_detector.cpp
- * @brief TensorRT 能量机关检测器实现
+ * @brief TensorRT 能量机关 YOLOX 检测器实现
+ *
+ * 与 auto_aim 的 TRT 检测器不同，此处不使用 CUDA 预处理 kernel,
+ * 因为 YOLOX 模型不需要 /255 归一化。预处理在 CPU 上完成:
+ *   letterbox → BGR→RGB → HWC→NCHW (scale=1.0)
  */
 
 #include "tensorrt_buff_detector.hpp"
@@ -13,12 +17,9 @@
 #include <stdexcept>
 
 #include <opencv2/imgproc.hpp>
+#include <opencv2/dnn.hpp>
 #include <NvOnnxParser.h>
 #include <NvInferVersion.h>
-#include <cuda_fp16.h>
-
-// 复用 auto_aim 的 CUDA 预处理 kernel
-#include "aimer/auto_aim/detector/detector_trt/cuda_preprocess.hpp"
 
 #include "plugin/param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
@@ -45,7 +46,8 @@ void TrtBuffLogger::log(Severity severity, const char* msg) noexcept {
 TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyColor color)
     : config_(config)
     , color_(color)
-    , decoder_(config.conf_threshold, config.nms_threshold)
+    , decoder_(config.conf_threshold, config.nms_threshold, 128,
+               config.input_size, config.input_size)
 {
     // TRT builder 不是线程安全的，串行化所有 TRT 初始化
     std::lock_guard<std::mutex> init_lock(aimer::trt_init_mutex());
@@ -57,7 +59,7 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
             "Failed to set blocking sync mode: {}", cudaGetErrorString(flags_err));
     }
 
-    debug::print("info", "TensorRT-Buff", "Loading model: {}", config_.model_path);
+    debug::print("info", "TensorRT-Buff", "Loading YOLOX rune model: {}", config_.model_path);
 
     std::string engine_path = get_engine_path();
     debug::print("info", "TensorRT-Buff", "Looking for engine: {}", engine_path);
@@ -83,7 +85,7 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
                                  std::string(cudaGetErrorString(stream_err)));
     }
 
-    // 解析 binding 信息 (旧版 API，兼容 TRT 8.2+)
+    // 解析 binding 信息
     int num_bindings = engine_->getNbBindings();
     debug::print("info", "TensorRT-Buff", "Number of bindings: {}", num_bindings);
 
@@ -111,7 +113,6 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
             input_name_        = name;
             input_dims_        = dims;
             input_binding_idx_ = i;
-            use_fp16_input_    = (dtype == nvinfer1::DataType::kHALF);
         } else {
             output_name_        = name;
             output_dims_        = dims;
@@ -133,27 +134,22 @@ TensorrtBuffDetector::TensorrtBuffDetector(const TrtBuffConfig& config, EnemyCol
         output_size_ *= static_cast<size_t>(output_dims_.d[i]);
     }
 
-    size_t input_elem_size = use_fp16_input_ ? sizeof(__half) : sizeof(float);
-
     debug::print("info", "TensorRT-Buff",
-        "Buffer sizes: input={} elements ({}KB, {}), output={} floats ({}KB)",
-        input_size_, input_size_ * input_elem_size / 1024,
-        use_fp16_input_ ? "FP16" : "FP32",
+        "Buffer sizes: input={} floats ({}KB), output={} floats ({}KB)",
+        input_size_, input_size_ * sizeof(float) / 1024,
         output_size_, output_size_ * sizeof(float) / 1024);
 
-    // 预分配原图缓冲区 (最大 1920x1200)
-    img_buffer_size_ = 1920 * 1200 * 3;
-    cudaError_t err0 = cudaMalloc(&img_device_,    img_buffer_size_);
-    cudaError_t err1 = cudaMalloc(&input_device_,  input_size_ * input_elem_size);
+    // GPU 缓冲区 (同步模式)
+    cudaError_t err1 = cudaMalloc(&input_device_,  input_size_ * sizeof(float));
     cudaError_t err2 = cudaMalloc(&output_device_, output_size_ * sizeof(float));
 
-    if (err0 != cudaSuccess || err1 != cudaSuccess || err2 != cudaSuccess) {
+    if (err1 != cudaSuccess || err2 != cudaSuccess) {
         throw std::runtime_error("Failed to allocate CUDA memory");
     }
 
     output_buffer_.resize(output_size_);
 
-    // 缓存 output shape (避免每帧分配)
+    // 缓存 output shape
     output_shape_.reserve(output_dims_.nbDims);
     for (int i = 0; i < output_dims_.nbDims; ++i) {
         output_shape_.push_back(output_dims_.d[i]);
@@ -205,9 +201,28 @@ std::unique_ptr<TensorrtBuffDetector> TensorrtBuffDetector::from_config(
 TensorrtBuffDetector::~TensorrtBuffDetector() {
     destroy_async_slots();
     if (stream_)        cudaStreamDestroy(stream_);
-    if (img_device_)    cudaFree(img_device_);
     if (input_device_)  cudaFree(input_device_);
     if (output_device_) cudaFree(output_device_);
+}
+
+// ============================================================================
+// CPU 预处理
+// ============================================================================
+
+cv::Mat TensorrtBuffDetector::cpu_preprocess(const cv::Mat& image, LetterboxMeta& meta) const
+{
+    auto [letterboxed, m] = letterbox_resize(image, config_.input_size);
+    meta = m;
+
+    // BGR → RGB, HWC → NCHW, scale=1.0 (不做归一化)
+    cv::Mat blob = cv::dnn::blobFromImage(
+        letterboxed,
+        1.0,                         // scalefactor (不归一化)
+        cv::Size(config_.input_size, config_.input_size),
+        cv::Scalar(0, 0, 0),         // mean
+        true                         // swapRB: BGR → RGB
+    );
+    return blob;
 }
 
 // ============================================================================
@@ -306,64 +321,29 @@ std::string TensorrtBuffDetector::get_engine_path() const {
 
 BuffDetectionResult TensorrtBuffDetector::detect(const cv::Mat& image, double timestamp)
 {
-    cv::Mat continuous = image.isContinuous() ? image : image.clone();
-    size_t img_size = continuous.total() * continuous.elemSize();
-    if (img_size > img_buffer_size_) {
-        debug::print("error", "TensorRT-Buff",
-            "Image too large: {} > {}", img_size, img_buffer_size_);
-        return {};
-    }
-
-    // 计算 letterbox 参数（GPU kernel 自行完成 letterbox，这里只需 meta）
-    float scale = std::min(
-        static_cast<float>(config_.input_size) / continuous.cols,
-        static_cast<float>(config_.input_size) / continuous.rows
-    );
-    int new_w = static_cast<int>(continuous.cols * scale);
-    int new_h = static_cast<int>(continuous.rows * scale);
     LetterboxMeta meta;
-    meta.src_w  = continuous.cols;
-    meta.src_h  = continuous.rows;
-    meta.net_w  = config_.input_size;
-    meta.net_h  = config_.input_size;
-    meta.scale  = scale;
-    meta.pad_x  = static_cast<float>((config_.input_size - new_w) / 2);
-    meta.pad_y  = static_cast<float>((config_.input_size - new_h) / 2);
+    cv::Mat blob = cpu_preprocess(image, meta);
 
-    cudaMemcpyAsync(img_device_, continuous.data, img_size,
-                    cudaMemcpyHostToDevice, stream_);
+    // H2D
+    cudaMemcpyAsync(input_device_, blob.ptr<float>(),
+                    input_size_ * sizeof(float), cudaMemcpyHostToDevice, stream_);
 
-    float gpu_scale;
-    int gpu_dx, gpu_dy;
-    if (use_fp16_input_) {
-        autoaim::detector::cuda_preprocess_fp16(
-            static_cast<uint8_t*>(img_device_),
-            static_cast<__half*>(input_device_),
-            continuous.cols, continuous.rows,
-            config_.input_size, &gpu_scale, &gpu_dx, &gpu_dy, stream_, false);
-    } else {
-        autoaim::detector::cuda_preprocess(
-            static_cast<uint8_t*>(img_device_),
-            static_cast<float*>(input_device_),
-            continuous.cols, continuous.rows,
-            config_.input_size, &gpu_scale, &gpu_dx, &gpu_dy, stream_, false);
-    }
-
+    // 推理
     void* bindings[2];
     bindings[input_binding_idx_]  = input_device_;
     bindings[output_binding_idx_] = output_device_;
     context_->enqueueV2(bindings, stream_, nullptr);
 
+    // D2H
     cudaMemcpyAsync(output_buffer_.data(), output_device_,
                     output_size_ * sizeof(float), cudaMemcpyDeviceToHost, stream_);
     cudaStreamSynchronize(stream_);
 
-    // 构建 shape (解码器需要)
     auto raw_objects = decoder_.decode(output_buffer_.data(), output_shape_, meta);
 
     aimer::RobotState dummy_state;
     auto result = postprocessor_.build_result(
-        raw_objects, meta, dummy_state, 0, timestamp, DetectorBackend::TENSORRT);
+        raw_objects, meta, dummy_state, 0, timestamp, DetectorBackend::TENSORRT, color_);
 
     debug_img_ = image.clone();
     return result;
@@ -374,8 +354,6 @@ BuffDetectionResult TensorrtBuffDetector::detect(const cv::Mat& image, double ti
 // ============================================================================
 
 void TensorrtBuffDetector::init_async_slots() {
-    size_t input_elem_size = use_fp16_input_ ? sizeof(__half) : sizeof(float);
-
     for (int i = 0; i < NUM_ASYNC_SLOTS; ++i) {
         auto& slot = async_slots_[i];
 
@@ -387,20 +365,17 @@ void TensorrtBuffDetector::init_async_slots() {
 
         cudaStreamCreate(&slot.stream);
         cudaEventCreateWithFlags(&slot.event, cudaEventBlockingSync);
-        cudaMalloc(&slot.img_device,    img_buffer_size_);
-        cudaMalloc(&slot.input_device,  input_size_ * input_elem_size);
+        cudaMalloc(&slot.input_device,  input_size_ * sizeof(float));
         cudaMalloc(&slot.output_device, output_size_ * sizeof(float));
 
-        // 锁页内存暂存区：让 H2D 变成真正的异步 DMA
-        cudaMallocHost(&slot.pinned_buffer, img_buffer_size_);
-        // 锁页输出缓冲：让 D2H 变成真正的异步 DMA
+        // 锁页缓冲: 输入 blob (float NCHW) 和输出
+        cudaMallocHost(&slot.pinned_input,  input_size_ * sizeof(float));
         cudaMallocHost(&slot.pinned_output, output_size_ * sizeof(float));
 
         slot.in_use = false;
     }
     debug::print("info", "TensorRT-Buff",
-        "Initialized {} async slots ({})", NUM_ASYNC_SLOTS,
-        use_fp16_input_ ? "FP16" : "FP32");
+        "Initialized {} async slots (CPU preprocess)", NUM_ASYNC_SLOTS);
 }
 
 void TensorrtBuffDetector::destroy_async_slots() {
@@ -411,10 +386,9 @@ void TensorrtBuffDetector::destroy_async_slots() {
             cudaStreamDestroy(slot.stream);
         }
         if (slot.event)         cudaEventDestroy(slot.event);
-        if (slot.img_device)    cudaFree(slot.img_device);
         if (slot.input_device)  cudaFree(slot.input_device);
         if (slot.output_device) cudaFree(slot.output_device);
-        if (slot.pinned_buffer) cudaFreeHost(slot.pinned_buffer);
+        if (slot.pinned_input)  cudaFreeHost(slot.pinned_input);
         if (slot.pinned_output) cudaFreeHost(slot.pinned_output);
         if (slot.context) {
             delete slot.context;
@@ -450,63 +424,30 @@ void TensorrtBuffDetector::push(const cv::Mat& image, int frame_id,
     {
         std::lock_guard lock(task_mutex_);
         constexpr size_t MAX_QUEUE_SIZE = 2;
-        if (task_queue_.size() >= MAX_QUEUE_SIZE) {
-            return;
-        }
+        if (task_queue_.size() >= MAX_QUEUE_SIZE) return;
     }
 
     int slot_idx = acquire_slot();
-    if (slot_idx < 0) {
-        return;
-    }
+    if (slot_idx < 0) return;
 
     auto& slot = async_slots_[slot_idx];
 
-    cv::Mat continuous = image.isContinuous() ? image : image.clone();
-    size_t img_size = continuous.total() * continuous.elemSize();
-
-    // 计算 meta (同步版)
-    float scale = std::min(
-        static_cast<float>(config_.input_size) / continuous.cols,
-        static_cast<float>(config_.input_size) / continuous.rows
-    );
-    int new_w = static_cast<int>(continuous.cols * scale);
-    int new_h = static_cast<int>(continuous.rows * scale);
+    // CPU 预处理: letterbox + BGR→RGB + HWC→NCHW (scale=1.0)
     LetterboxMeta meta;
-    meta.src_w  = continuous.cols;
-    meta.src_h  = continuous.rows;
-    meta.net_w  = config_.input_size;
-    meta.net_h  = config_.input_size;
-    meta.scale  = scale;
-    meta.pad_x  = static_cast<float>((config_.input_size - new_w) / 2);
-    meta.pad_y  = static_cast<float>((config_.input_size - new_h) / 2);
+    cv::Mat blob = cpu_preprocess(image, meta);
 
-    // 拷贝到锁页内存暂存区，然后异步 DMA 到 GPU
-    std::memcpy(slot.pinned_buffer, continuous.data, img_size);
-    cudaMemcpyAsync(slot.img_device, slot.pinned_buffer, img_size,
-                    cudaMemcpyHostToDevice, slot.stream);
+    // 拷贝 blob 到锁页内存 → 异步 DMA 到 GPU
+    std::memcpy(slot.pinned_input, blob.ptr<float>(), input_size_ * sizeof(float));
+    cudaMemcpyAsync(slot.input_device, slot.pinned_input,
+                    input_size_ * sizeof(float), cudaMemcpyHostToDevice, slot.stream);
 
-    float gpu_scale;
-    int gpu_dx, gpu_dy;
-    if (use_fp16_input_) {
-        autoaim::detector::cuda_preprocess_fp16(
-            static_cast<uint8_t*>(slot.img_device),
-            static_cast<__half*>(slot.input_device),
-            continuous.cols, continuous.rows,
-            config_.input_size, &gpu_scale, &gpu_dx, &gpu_dy, slot.stream, false);
-    } else {
-        autoaim::detector::cuda_preprocess(
-            static_cast<uint8_t*>(slot.img_device),
-            static_cast<float*>(slot.input_device),
-            continuous.cols, continuous.rows,
-            config_.input_size, &gpu_scale, &gpu_dx, &gpu_dy, slot.stream, false);
-    }
-
+    // TRT 推理
     void* bindings[2];
     bindings[input_binding_idx_]  = slot.input_device;
     bindings[output_binding_idx_] = slot.output_device;
     slot.context->enqueueV2(bindings, slot.stream, nullptr);
 
+    // D2H
     cudaMemcpyAsync(slot.pinned_output, slot.output_device,
                     output_size_ * sizeof(float), cudaMemcpyDeviceToHost, slot.stream);
     cudaEventRecord(slot.event, slot.stream);
@@ -528,9 +469,7 @@ AsyncBuffDetectionResult TensorrtBuffDetector::pop()
     {
         std::unique_lock lock(task_mutex_);
         task_cv_.wait(lock, [this] { return !task_queue_.empty() || stopped_.load(); });
-        if (stopped_.load() && task_queue_.empty()) {
-            return {};
-        }
+        if (stopped_.load() && task_queue_.empty()) return {};
         task = std::move(task_queue_.front());
         task_queue_.pop();
     }
@@ -549,10 +488,10 @@ AsyncBuffDetectionResult TensorrtBuffDetector::pop()
     double timestamp_s = task.timestamp_us / 1e6;
     auto detection = postprocessor_.build_result(
         raw_objects, task.meta, dummy_state,
-        task.frame_id, timestamp_s, DetectorBackend::TENSORRT);
+        task.frame_id, timestamp_s, DetectorBackend::TENSORRT, color_);
 
     release_slot(task.slot_idx);
-    debug_img_ = task.image;  // 浅拷贝，按需 clone 由调用方决定
+    debug_img_ = task.image;
 
     return AsyncBuffDetectionResult{
         std::move(detection),

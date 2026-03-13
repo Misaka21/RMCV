@@ -13,20 +13,28 @@ namespace autobuff::predictor {
 
 namespace {
 
-// YOLO 关键点 3D 物理坐标 (能量机关坐标系, 单位: m)
-// kpt[0-3]: 扇叶四角, kpt[4]: 扇叶中心, kpt[5]: R标区域
-// 这是 slot_id=0 (θ=0, 即 +Y 方向) 的坐标
-// 对于其他 slot，需要绕 Z 轴旋转 slot_id * 72°
-const std::array<cv::Point3f, 6> BLADE_OBJECT_POINTS_BASE = {{
-    {0.f, 0.f,    0.827f},   // kpt[0] 顶部
-    {0.f, 0.127f, 0.700f},   // kpt[1] 右侧
-    {0.f, 0.f,    0.573f},   // kpt[2] 底部
-    {0.f, -0.127f, 0.700f},  // kpt[3] 左侧
-    {0.f, 0.f,    0.700f},   // kpt[4] 扇叶中心 (= RUNE_RADIUS)
-    {0.f, 0.f,    0.220f},   // kpt[5] R 标区域
+// YOLOX 装甲板角点 3D 物理坐标 (能量机关坐标系, 单位: m)
+//
+// FYT yolox_rune_3.6m 模型输出 4 个装甲板角点:
+//   kpt[0] = bottom_left  (靠近R标, 左侧, 半径 541.5mm, 水平偏移 186mm)
+//   kpt[1] = top_left     (远离R标, 左侧, 半径 858.5mm, 水平偏移 160mm)
+//   kpt[2] = top_right    (远离R标, 右侧, 半径 858.5mm, 水平偏移 160mm)
+//   kpt[3] = bottom_right (靠近R标, 右侧, 半径 541.5mm, 水平偏移 186mm)
+//
+// 坐标约定 (base, slot_id=0):
+//   x = 0 (法向, 始终为 0)
+//   y = 水平偏移 (+y = 右侧)
+//   z = 径向距离 (+z = 远离 R 标)
+//
+// 对于其他 slot, 需要绕原点旋转 slot_id * 72°
+const std::array<cv::Point3f, 4> ARMOR_OBJECT_POINTS_BASE = {{
+    {0.f, -0.186f, 0.5415f},   // kpt[0] bottom_left  (内侧, 左)
+    {0.f, -0.160f, 0.8585f},   // kpt[1] top_left     (外侧, 左)
+    {0.f,  0.160f, 0.8585f},   // kpt[2] top_right    (外侧, 右)
+    {0.f,  0.186f, 0.5415f},   // kpt[3] bottom_right (内侧, 右)
 }};
 
-// 将 base keypoint 绕原点旋转 theta (在 XY 平面的 2D 旋转)
+// 将 base keypoint 绕原点旋转 theta (在 YZ 平面的 2D 旋转)
 // pt.y, pt.z 构成扇叶平面内的坐标, pt.x = 0 (法向偏移)
 inline cv::Point3f rotate_blade_point(const cv::Point3f& pt, double theta) {
     float cos_t = static_cast<float>(std::cos(theta));
@@ -46,8 +54,8 @@ RuneObservation RuneObserver::observe(const BuffDetectionResult& det) const {
     // 收集 PnP 点对
     std::vector<cv::Point2f> img_pts;
     std::vector<cv::Point3f> obj_pts;
-    img_pts.reserve(6 * NUM_SLOTS + 1);
-    obj_pts.reserve(6 * NUM_SLOTS + 1);
+    img_pts.reserve(4 * NUM_SLOTS + 1);
+    obj_pts.reserve(4 * NUM_SLOTS + 1);
 
     // R 中心作为原点 (可选)
     if (det.r_center.valid) {
@@ -60,12 +68,12 @@ RuneObservation RuneObserver::observe(const BuffDetectionResult& det) const {
 
         double theta = i * 2.0 * M_PI / NUM_SLOTS;
 
-        if (det.targets[i].keypoint_count >= 6) {
-            // YOLO 路径: 每个扇叶贡献 6 个关键点
-            for (int k = 0; k < 6; ++k) {
+        if (det.targets[i].keypoint_count >= 4) {
+            // YOLOX 路径: 每个扇叶贡献 4 个装甲板角点
+            for (int k = 0; k < 4; ++k) {
                 img_pts.push_back(det.targets[i].keypoints[k]);
                 obj_pts.push_back(
-                    rotate_blade_point(BLADE_OBJECT_POINTS_BASE[k], theta));
+                    rotate_blade_point(ARMOR_OBJECT_POINTS_BASE[k], theta));
             }
         } else {
             // 传统路径: 仅用扇叶中心

@@ -29,33 +29,11 @@ endif()
 option(ENABLE_BUFF_OPENVINO_DETECTOR "Enable OpenVINO YOLO buff detector" ${_BUFF_OV_DEFAULT})
 option(ENABLE_BUFF_TENSORRT_DETECTOR "Enable TensorRT YOLO buff detector" ${_BUFF_TRT_DEFAULT})
 
-# 传统检测器库 (始终编译)
-add_library(buff_detector_traditional STATIC
-    traditional/traditional_detector.cpp
-)
-
-target_include_directories(buff_detector_traditional PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/traditional
-    ${PROJECT_SOURCE_DIR}
-)
-
-target_link_libraries(buff_detector_traditional PUBLIC
-    auto_buff_common
-    plugin
-    ${OpenCV_LIBS}
-    Eigen3::Eigen
-    fmt::fmt
-)
-
-# YOLO 通用库 (preprocess + postprocess + decoder)
-# 这些源文件被 OV/TRT 子目录各自编译进自己的静态库，
-# 此处额外创建一个独立库供 buff_detector_node 在纯传统模式下也能链接
+# YOLOX 通用库 (preprocess + postprocess + rune_decoder)
 add_library(buff_detector_core STATIC
     common/preprocess.cpp
     common/postprocess.cpp
-    decoder/buff_decoder.cpp
+    decoder/rune_decoder.cpp
 )
 
 target_include_directories(buff_detector_core PUBLIC
@@ -101,7 +79,6 @@ target_include_directories(buff_detector_node PUBLIC
 )
 
 target_link_libraries(buff_detector_node PUBLIC
-    buff_detector_traditional
     buff_detector_core
     auto_buff_common
     aimer_common
@@ -131,6 +108,5 @@ target_include_directories(buff_detector INTERFACE
 )
 
 target_link_libraries(buff_detector INTERFACE
-    buff_detector_traditional
     buff_detector_node
 )
