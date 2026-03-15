@@ -21,7 +21,7 @@
 [Rerun]
     #@bool 主开关
     enable = false
-    #@string 模式: "serve" (远程连接) / "file" (内录) / "spawn" (本地弹窗)
+    #@string 模式: "serve" (远程连接) / "spawn" (本地弹窗)
     mode = "serve"
     #@int gRPC 端口 (serve 模式)
     port = 9876

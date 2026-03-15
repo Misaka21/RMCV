@@ -18,7 +18,6 @@
 
 #include "plugin/param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
-#include "umt/BasicObjManager.hpp"
 
 namespace rr {
 
@@ -95,8 +94,6 @@ void init() {
 
     g_rec = std::make_unique<rerun::RecordingStream>("RMCV2026");
 
-    bool primary_ok = false;
-
     if (mode == "serve") {
         auto result = g_rec->serve_grpc(
             "0.0.0.0",
@@ -109,19 +106,6 @@ void init() {
         }
         debug::print(debug::PrintMode::INFO, "Rerun",
             "gRPC server started on port {}", port);
-        primary_ok = true;
-    } else if (mode == "file") {
-        std::string path = debug::get_session_path() + "/rerun.rrd";
-        auto result = g_rec->save(path);
-        if (result.is_err()) {
-            debug::print(debug::PrintMode::ERROR, "Rerun",
-                "Failed to save to {}: {}", path, result.description);
-            g_rec.reset();
-            return;
-        }
-        debug::print(debug::PrintMode::INFO, "Rerun",
-            "Recording to {}", path);
-        primary_ok = true;
     } else if (mode == "spawn") {
         auto result = g_rec->spawn();
         if (result.is_err()) {
@@ -131,29 +115,11 @@ void init() {
             return;
         }
         debug::print(debug::PrintMode::INFO, "Rerun", "Spawned viewer");
-        primary_ok = true;
     } else {
         debug::print(debug::PrintMode::ERROR, "Rerun",
-            "Unknown mode: {}", mode);
+            "Unknown mode: {} (supported: serve, spawn)", mode);
         g_rec.reset();
         return;
-    }
-
-    // 比赛模式: 额外保存 .rrd 文件 (serve 或 spawn 模式下同时内录)
-    if (primary_ok && mode != "file") {
-        auto match_flag = umt::BasicObjManager<bool>::find("match_mode");
-        bool match_mode = match_flag && match_flag->get();
-        if (match_mode) {
-            std::string path = debug::get_session_path() + "/rerun.rrd";
-            auto result = g_rec->save(path);
-            if (result.is_err()) {
-                debug::print(debug::PrintMode::WARNING, "Rerun",
-                    "Failed to save .rrd in match mode: {}", result.description);
-            } else {
-                debug::print(debug::PrintMode::INFO, "Rerun",
-                    "Match mode: also recording to {}", path);
-            }
-        }
     }
 
     // 启动图像编码后台线程
