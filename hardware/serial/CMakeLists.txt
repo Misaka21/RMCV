@@ -12,8 +12,8 @@ target_include_directories(hardware_serial PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# 依赖: fmt (logger / hex dump)
-target_link_libraries(hardware_serial PUBLIC fmt::fmt)
+# 依赖: fmt (logger / hex dump), plugin (rerun 可视化)
+target_link_libraries(hardware_serial PUBLIC fmt::fmt plugin)
 
 # 查找并链接libusb-1.0依赖
 find_path(LIBUSB_INCLUDE_DIR

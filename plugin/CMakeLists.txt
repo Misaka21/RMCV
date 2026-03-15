@@ -30,4 +30,5 @@ add_subdirectory(rmcv_bag)
 # 添加 Rerun 可视化子模块
 if(ENABLE_RERUN)
     add_subdirectory(rerun)
+    target_link_libraries(${lib_name} PUBLIC rerun_plugin)
 endif()

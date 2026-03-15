@@ -69,11 +69,11 @@ void image_worker() {
             cv::resize(img, half, cv::Size(), 0.5, 0.5, cv::INTER_NEAREST);
 
             std::vector<uint8_t> jpeg_buf;
-            cv::imencode(".jpg", half, jpeg_buf, jpeg_params);
+            if (!cv::imencode(".jpg", half, jpeg_buf, jpeg_params)) continue;
 
             g_rec->log(path, rerun::EncodedImage::from_bytes(
-                rerun::borrow(jpeg_buf.data(), jpeg_buf.size()),
-                rerun::MediaType::jpeg()));
+                std::move(jpeg_buf),
+                rerun::components::MediaType::jpeg()));
         }
     }
 }
@@ -100,7 +100,7 @@ void init() {
             static_cast<uint16_t>(port));
         if (result.is_err()) {
             debug::print(debug::PrintMode::ERROR, "Rerun",
-                "Failed to start gRPC server: {}", result.description);
+                "Failed to start gRPC server: {}", result.error.description);
             g_rec.reset();
             return;
         }
@@ -144,7 +144,11 @@ void shutdown() {
     }
 
     if (g_rec) {
-        g_rec->flush_blocking();
+        auto err = g_rec->flush_blocking();
+        if (err.is_err()) {
+            debug::print(debug::PrintMode::WARNING, "Rerun",
+                "Flush failed: {}", err.description);
+        }
         g_rec.reset();
     }
     debug::print(debug::PrintMode::INFO, "Rerun", "Shutdown complete");
@@ -156,32 +160,34 @@ bool enabled() {
 
 void scalar(const std::string& path, double value) {
     if (!g_enabled.load(std::memory_order_relaxed)) return;
-    g_rec->log(path, rerun::Scalar(value));
+    g_rec->log(path, rerun::Scalars(value));
 }
 
 void scalar(const std::string& path, int value) {
     if (!g_enabled.load(std::memory_order_relaxed)) return;
-    g_rec->log(path, rerun::Scalar(static_cast<double>(value)));
+    g_rec->log(path, rerun::Scalars(static_cast<double>(value)));
 }
 
 void scalar(const std::string& path, bool value) {
     if (!g_enabled.load(std::memory_order_relaxed)) return;
-    g_rec->log(path, rerun::Scalar(value ? 1.0 : 0.0));
+    g_rec->log(path, rerun::Scalars(value ? 1.0 : 0.0));
 }
 
 void set_time(double timestamp_s) {
     if (!g_enabled.load(std::memory_order_relaxed)) return;
-    g_rec->set_time_seconds("timestamp", timestamp_s);
+    g_rec->set_time_duration_secs("timestamp", timestamp_s);
 }
 
 void set_time_us(int64_t timestamp_us) {
     if (!g_enabled.load(std::memory_order_relaxed)) return;
-    g_rec->set_time_seconds("timestamp", timestamp_us / 1e6);
+    g_rec->set_time_duration_secs("timestamp", timestamp_us / 1e6);
 }
 
 void image(const std::string& path, const cv::Mat& img, int skip_factor) {
     if (!g_enabled.load(std::memory_order_relaxed)) return;
     if (img.empty()) return;
+
+    if (skip_factor <= 0) skip_factor = 1;
 
     // 跳帧检查仍在调用线程（几乎零开销）
     thread_local std::unordered_map<std::string, int> counters;

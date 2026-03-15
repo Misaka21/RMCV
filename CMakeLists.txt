@@ -103,9 +103,6 @@ add_subdirectory(simulator)
 
 add_executable(RMCV2026 main.cpp)
 target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control buff_detector buff_predictor buff_fire_control rmcv_bag)
-if(ENABLE_RERUN)
-    target_link_libraries(RMCV2026 rerun_plugin)
-endif()
 
 add_executable(test_param test/test_param.cpp)
 target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin Threads::Threads)
