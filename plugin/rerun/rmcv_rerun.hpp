@@ -6,9 +6,7 @@
 
 #include <Eigen/Core>
 
-#ifdef ENABLE_RERUN
 #include <opencv2/core.hpp>
-#endif
 
 namespace rr {
 
@@ -59,8 +57,9 @@ inline void scalar([[maybe_unused]] const std::string& path, [[maybe_unused]] bo
 inline void set_time([[maybe_unused]] double timestamp_s) {}
 inline void set_time_us([[maybe_unused]] int64_t timestamp_us) {}
 
-// image: 不定义 cv::Mat 重载，避免不必要的 OpenCV 头文件依赖
-// 调用点都在 #ifdef ENABLE_RERUN 保护内
+inline void image([[maybe_unused]] const std::string& path,
+                  [[maybe_unused]] const cv::Mat& img,
+                  [[maybe_unused]] int skip_factor = 2) {}
 
 inline void points3d([[maybe_unused]] const std::string& path,
                      [[maybe_unused]] const std::vector<Eigen::Vector3d>& positions,
