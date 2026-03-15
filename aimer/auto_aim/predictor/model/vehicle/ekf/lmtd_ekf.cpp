@@ -18,7 +18,7 @@
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
-#include "plugin/plotter/plotter.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 
 namespace autoaim::predictor {
 
@@ -496,22 +496,22 @@ std::vector<Eigen::Vector3d> LmtdMotion::compute_all_armors(double dt) const {
     return result;
 }
 
-void LmtdMotion::output_to_plotter(const std::string& prefix) const {
+void LmtdMotion::log_state(const std::string& prefix) const {
     VectorX x = ekf_.get_x();
 
-    plotter::add(prefix + "/xc", x[lmtd_model::XC]);
-    plotter::add(prefix + "/yc", x[lmtd_model::YC]);
-    plotter::add(prefix + "/za", x[lmtd_model::ZA]);
-    plotter::add(prefix + "/vx", x[lmtd_model::VX]);
-    plotter::add(prefix + "/vy", x[lmtd_model::VY]);
-    plotter::add(prefix + "/vz", x[lmtd_model::VZ]);
-    plotter::add(prefix + "/theta", x[lmtd_model::THETA] * 57.3);  // 转换为度
-    plotter::add(prefix + "/omega", x[lmtd_model::OMEGA]);
-    plotter::add(prefix + "/r", x[lmtd_model::R]);
-    plotter::add(prefix + "/another_r", another_r_);
-    plotter::add(prefix + "/dz", dz_);
-    plotter::add(prefix + "/tracked_id", tracked_state_id_);
-    plotter::add(prefix + "/tracked_detector_id", tracked_detector_id_);
+    rr::scalar(prefix + "/xc", x[lmtd_model::XC]);
+    rr::scalar(prefix + "/yc", x[lmtd_model::YC]);
+    rr::scalar(prefix + "/za", x[lmtd_model::ZA]);
+    rr::scalar(prefix + "/vx", x[lmtd_model::VX]);
+    rr::scalar(prefix + "/vy", x[lmtd_model::VY]);
+    rr::scalar(prefix + "/vz", x[lmtd_model::VZ]);
+    rr::scalar(prefix + "/theta", x[lmtd_model::THETA] * 57.3);
+    rr::scalar(prefix + "/omega", x[lmtd_model::OMEGA]);
+    rr::scalar(prefix + "/r", x[lmtd_model::R]);
+    rr::scalar(prefix + "/another_r", another_r_);
+    rr::scalar(prefix + "/dz", dz_);
+    rr::scalar(prefix + "/tracked_id", tracked_state_id_);
+    rr::scalar(prefix + "/tracked_detector_id", tracked_detector_id_);
 }
 
 void LmtdMotion::reset() {

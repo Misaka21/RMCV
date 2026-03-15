@@ -15,7 +15,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
-#include "plugin/webview/dashboard.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/umt.hpp"
 
 namespace autobuff::predictor {
@@ -84,14 +84,14 @@ void start_predictor_node() {
             snapshot_obj->get() = snap;
 
             stats.update(latency_ms, snap.valid);
-            dashboard::set("buff_predictor.latency_ms", latency_ms);
-            dashboard::set("buff_predictor.fps", stats.last_fps);
-            dashboard::set("buff_predictor.valid", snap.valid ? 1 : 0);
-            dashboard::set("buff_predictor.lit_count", snap.lit_count);
-            dashboard::set("buff_predictor.omega", snap.motion.omega_signed);
-            dashboard::set("buff_predictor.model", static_cast<int>(snap.motion.model));
-            dashboard::set("buff_predictor.mode", static_cast<int>(snap.mode));
-            dashboard::set("buff_predictor.direction", static_cast<int>(snap.direction));
+            rr::scalar("buff_predictor/latency_ms", static_cast<double>(latency_ms));
+            rr::scalar("buff_predictor/fps", stats.last_fps);
+            rr::scalar("buff_predictor/valid", snap.valid ? 1 : 0);
+            rr::scalar("buff_predictor/lit_count", snap.lit_count);
+            rr::scalar("buff_predictor/omega", snap.motion.omega_signed);
+            rr::scalar("buff_predictor/model", static_cast<int>(snap.motion.model));
+            rr::scalar("buff_predictor/mode", static_cast<int>(snap.mode));
+            rr::scalar("buff_predictor/direction", static_cast<int>(snap.direction));
 
         } catch (const umt::MessageError_Timeout&) {
             mark_inactive(now_seconds());

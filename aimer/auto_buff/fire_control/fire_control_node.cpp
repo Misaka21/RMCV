@@ -16,7 +16,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
-#include "plugin/webview/dashboard.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/BasicObjManager.hpp"
 
 namespace autobuff::fire_control {
@@ -177,11 +177,11 @@ void fire_control_run(const std::string& /*config_path*/) {
                     }
                 }
             }
-            dashboard::set("buff_fire.selected_slot", cmd.target_id);
-            dashboard::set("buff_fire.selected_rank", selected_rank);
-            dashboard::set("buff_fire.tracking_error", static_cast<double>(cmd.tracking_error));
-            dashboard::set("buff_fire.fire_now", cmd.fire_now);
-            dashboard::set("buff_fire.coop_role",
+            rr::scalar("buff_fire/selected_slot", cmd.target_id);
+            rr::scalar("buff_fire/selected_rank", selected_rank);
+            rr::scalar("buff_fire/tracking_error", static_cast<double>(cmd.tracking_error));
+            rr::scalar("buff_fire/fire_now", cmd.fire_now);
+            rr::text("buff_fire/coop_role",
                            runtime_param::get_param<std::string>("AutoBuff.FireControl.coop_role"));
         }
 

@@ -18,10 +18,10 @@
     #@int 采样间隔，录制帧率 = camera_fps / sample_interval
     sample_interval = 4
 
-[Plotter]
+[Rerun]
     #@bool 主开关
-    enable_plotter = false
-    #@string PlotJuggler 地址
-    host = "192.168.1.102"
-    #@int PlotJuggler 端口
-    port = 9870
+    enable = false
+    #@string 模式: "serve" (远程连接) / "file" (内录) / "spawn" (本地弹窗)
+    mode = "serve"
+    #@int gRPC 端口 (serve 模式)
+    port = 9876

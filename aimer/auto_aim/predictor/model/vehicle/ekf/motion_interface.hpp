@@ -141,13 +141,13 @@ public:
      */
     virtual std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const = 0;
 
-    // ==================== PlotJuggler 输出 ====================
+    // ==================== 可视化输出 ====================
 
     /**
-     * @brief 输出内部状态到 PlotJuggler
-     * @param prefix 变量名前缀 (例如 "/target_1/vehicle")
+     * @brief 输出内部状态到 Rerun
+     * @param prefix 变量名前缀 (例如 "target_1/vehicle")
      */
-    virtual void output_to_plotter(const std::string& prefix) const = 0;
+    virtual void log_state(const std::string& prefix) const = 0;
 
     // ==================== 模型信息 ====================
 

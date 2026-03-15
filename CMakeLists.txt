@@ -60,7 +60,6 @@ endif ()
 set(ASSET_DIR "${CMAKE_SOURCE_DIR}/asset")
 set(CONFIG_DIR "${CMAKE_SOURCE_DIR}/config")
 set(LOG_DIR "${CMAKE_SOURCE_DIR}/log")
-set(WEB_DIR "${CMAKE_SOURCE_DIR}/web")
 
 
 # 添加全局编译定义 - 所有目标都会自动继承
@@ -68,7 +67,6 @@ add_compile_definitions(
     ASSET_DIR="${ASSET_DIR}"
     CONFIG_DIR="${CONFIG_DIR}"
     LOG_DIR="${LOG_DIR}"
-    WEB_DIR="${WEB_DIR}"
 )
 
 message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}--------------------")
@@ -80,29 +78,22 @@ find_package(Eigen3 REQUIRED)
 find_package(Threads REQUIRED)
 # tomlplusplus: 使用内嵌的 header-only 版本 (plugin/param/thirdparty/toml.hpp)
 
-# Python/pybind11 可选 - 用于 Web UI (--web 参数)
-option(ENABLE_WEBVIEW "Enable Web UI (requires Python and pybind11)" ON)
-if(ENABLE_WEBVIEW)
-    find_package(Python 3.6 QUIET COMPONENTS Development Interpreter)
-    find_package(pybind11 QUIET)
-    if(pybind11_FOUND AND Python_FOUND)
-        add_compile_definitions(ENABLE_WEBVIEW)
-        message(STATUS "Web UI: ENABLED (Python ${Python_VERSION}, pybind11 found)")
-    else()
-        set(ENABLE_WEBVIEW OFF)
-        message(STATUS "Web UI: DISABLED (pybind11 or Python not found)")
-    endif()
+# Rerun 可视化 (替代 PlotJuggler + Web UI)
+option(ENABLE_RERUN "Enable Rerun visualization" OFF)
+if(ENABLE_RERUN)
+    include(FetchContent)
+    FetchContent_Declare(rerun_sdk URL
+        https://github.com/rerun-io/rerun/releases/latest/download/rerun_cpp_sdk.zip)
+    FetchContent_MakeAvailable(rerun_sdk)
+    add_compile_definitions(ENABLE_RERUN)
+    message(STATUS "Rerun: ENABLED")
 else()
-    message(STATUS "Web UI: DISABLED (by option)")
+    message(STATUS "Rerun: DISABLED")
 endif()
 
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR})
-if(ENABLE_WEBVIEW)
-    include_directories(${Python_INCLUDE_DIRS})
-    include_directories(${pybind11_INCLUDE_DIRS})
-endif()
 include_directories(umt)
 
 add_subdirectory(plugin)
@@ -111,18 +102,10 @@ add_subdirectory(aimer)
 add_subdirectory(simulator)
 
 add_executable(RMCV2026 main.cpp)
-# 使用 whole-archive 确保 pybind11 嵌入模块不被链接器优化掉
-if(ENABLE_WEBVIEW)
-	    target_link_libraries(RMCV2026
-	        ${OpenCV_LIBS} fmt::fmt
-	        -Wl,--whole-archive plugin -Wl,--no-whole-archive
-	        hardware detector predictor autoaim_fire_control buff_detector rmcv_bag
-	        buff_predictor buff_fire_control
-	        ${Python_LIBRARIES}
-	    )
-	else()
-	    target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control buff_detector buff_predictor buff_fire_control rmcv_bag)
-	endif()
+target_link_libraries(RMCV2026 ${OpenCV_LIBS} fmt::fmt plugin hardware detector predictor autoaim_fire_control buff_detector buff_predictor buff_fire_control rmcv_bag)
+if(ENABLE_RERUN)
+    target_link_libraries(RMCV2026 rerun_plugin)
+endif()
 
 add_executable(test_param test/test_param.cpp)
 target_link_libraries(test_param ${OpenCV_LIBS} fmt::fmt plugin Threads::Threads)
@@ -242,12 +225,5 @@ endif()
 
 # --- tomlplusplus ---
 message(STATUS "tomlplusplus: using embedded header-only version")
-
-# --- Python ---
-if(ENABLE_WEBVIEW)
-    message(STATUS "Python Include Dirs: ${Python_INCLUDE_DIRS}")
-    message(STATUS "Python Libraries: ${Python_LIBRARIES}")
-    message(STATUS "pybind11 Include Dirs: ${pybind11_INCLUDE_DIRS}")
-endif()
 
 message(STATUS "-------------------------------------------------------------------")

@@ -10,7 +10,7 @@
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
-#include "plugin/plotter/plotter.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 
 namespace autoaim::predictor {
 
@@ -571,23 +571,23 @@ std::vector<Eigen::Vector3d> SpinMotion::compute_all_armors(double dt) const {
     return result;
 }
 
-void SpinMotion::output_to_plotter(const std::string& prefix) const {
+void SpinMotion::log_state(const std::string& prefix) const {
     VectorX x = ekf_.get_x();
 
-    plotter::add(prefix + "/xc", x[spin_model::XC]);
-    plotter::add(prefix + "/yc", x[spin_model::YC]);
-    plotter::add(prefix + "/zc", x[spin_model::ZC]);
-    plotter::add(prefix + "/vx", x[spin_model::VX]);
-    plotter::add(prefix + "/vy", x[spin_model::VY]);
-    plotter::add(prefix + "/vz", x[spin_model::VZ]);
-    plotter::add(prefix + "/theta", x[spin_model::THETA] * 57.3);  // 转换为度
-    plotter::add(prefix + "/omega", x[spin_model::OMEGA]);
-    plotter::add(prefix + "/r", x[spin_model::R]);
-    plotter::add(prefix + "/dz", x[spin_model::DZ]);
-    plotter::add(prefix + "/another_r", another_r_);
-    plotter::add(prefix + "/another_dz", another_dz_);
-    plotter::add(prefix + "/tracked_id", tracked_state_id_);
-    plotter::add(prefix + "/tracked_detector_id", tracked_detector_id_);
+    rr::scalar(prefix + "/xc", x[spin_model::XC]);
+    rr::scalar(prefix + "/yc", x[spin_model::YC]);
+    rr::scalar(prefix + "/zc", x[spin_model::ZC]);
+    rr::scalar(prefix + "/vx", x[spin_model::VX]);
+    rr::scalar(prefix + "/vy", x[spin_model::VY]);
+    rr::scalar(prefix + "/vz", x[spin_model::VZ]);
+    rr::scalar(prefix + "/theta", x[spin_model::THETA] * 57.3);
+    rr::scalar(prefix + "/omega", x[spin_model::OMEGA]);
+    rr::scalar(prefix + "/r", x[spin_model::R]);
+    rr::scalar(prefix + "/dz", x[spin_model::DZ]);
+    rr::scalar(prefix + "/another_r", another_r_);
+    rr::scalar(prefix + "/another_dz", another_dz_);
+    rr::scalar(prefix + "/tracked_id", tracked_state_id_);
+    rr::scalar(prefix + "/tracked_detector_id", tracked_detector_id_);
 }
 
 void SpinMotion::reset() {

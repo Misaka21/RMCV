@@ -19,7 +19,7 @@
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
-#include "plugin/webview/dashboard.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim {
@@ -48,9 +48,9 @@ std::string get_runtime_string_or(const std::string& name, std::string default_v
 
 // 更新 Dashboard 数据
 void update_dashboard(float latency_ms, size_t armor_count, float fps) {
-    dashboard::set("detector.latency_ms", latency_ms);
-    dashboard::set("detector.armor_count", static_cast<int>(armor_count));
-    dashboard::set("detector.fps", fps);
+    rr::scalar("detector/latency_ms", static_cast<double>(latency_ms));
+    rr::scalar("detector/armor_count", static_cast<int>(armor_count));
+    rr::scalar("detector/fps", static_cast<double>(fps));
 }
 
 bool should_generate_overlay(umt::Publisher<cv::Mat>& pub_debug, bool debug_mode) {
@@ -124,6 +124,7 @@ void run_sync_loop(detector::DetectorInterface* det) {
             // 调试图像数据流:
             // 1) 发布到 /detector/debug (web 调试/订阅方)
             // 2) 写入 detector_debug_img (visualizer detector 视图)
+            // 3) 发送到 Rerun (跳帧 + 缩放)
             if (should_generate_overlay(pub_debug, debug_mode) && !frame.image.empty()) {
                 cv::Mat overlay = detector::draw_debug_overlay(
                     frame.image, result.armors, stats.last_fps, latency_ms);
@@ -131,6 +132,7 @@ void run_sync_loop(detector::DetectorInterface* det) {
                 if (pub_debug.has_subscriber()) {
                     pub_debug.push(overlay);
                 }
+                rr::image("detector/preview", overlay, 2);
             }
 
         } catch (const umt::MessageError_Timeout&) {
@@ -231,6 +233,7 @@ void run_async_loop(detector::DetectorInterface* det) {
                 // 调试图像数据流:
                 // 1) 发布到 /detector/debug (web 调试/订阅方)
                 // 2) 写入 detector_debug_img (visualizer detector 视图)
+                // 3) 发送到 Rerun (跳帧 + 缩放)
                 if (should_generate_overlay(pub_debug, debug_mode) && !async_result.image.empty()) {
                     cv::Mat overlay = detector::draw_debug_overlay(
                         async_result.image, result.armors, pop_stats.last_fps,
@@ -239,6 +242,7 @@ void run_async_loop(detector::DetectorInterface* det) {
                     if (pub_debug.has_subscriber()) {
                         pub_debug.push(overlay);
                     }
+                    rr::image("detector/preview", overlay, 2);
                 }
 
             } catch (const std::exception& e) {

@@ -12,7 +12,7 @@
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
-#include "plugin/plotter/plotter.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 
 namespace autoaim::predictor {
 
@@ -600,21 +600,21 @@ std::vector<Eigen::Vector3d> SpMotion::compute_all_armors(double dt) const {
     return result;
 }
 
-void SpMotion::output_to_plotter(const std::string& prefix) const {
+void SpMotion::log_state(const std::string& prefix) const {
     VectorX x = ekf_.get_x();
 
-    plotter::add(prefix + "/xc", x[sp_model::XC]);
-    plotter::add(prefix + "/yc", x[sp_model::YC]);
-    plotter::add(prefix + "/zc", x[sp_model::ZC]);
-    plotter::add(prefix + "/vx", x[sp_model::VX]);
-    plotter::add(prefix + "/vy", x[sp_model::VY]);
-    plotter::add(prefix + "/vz", x[sp_model::VZ]);
-    plotter::add(prefix + "/theta", x[sp_model::THETA] * 57.3);  // 转换为度
-    plotter::add(prefix + "/omega", x[sp_model::OMEGA]);
-    plotter::add(prefix + "/r", x[sp_model::R]);
-    plotter::add(prefix + "/l", x[sp_model::L]);
-    plotter::add(prefix + "/h", x[sp_model::H]);
-    plotter::add(prefix + "/tracked_id", tracked_armor_id_);
+    rr::scalar(prefix + "/xc", x[sp_model::XC]);
+    rr::scalar(prefix + "/yc", x[sp_model::YC]);
+    rr::scalar(prefix + "/zc", x[sp_model::ZC]);
+    rr::scalar(prefix + "/vx", x[sp_model::VX]);
+    rr::scalar(prefix + "/vy", x[sp_model::VY]);
+    rr::scalar(prefix + "/vz", x[sp_model::VZ]);
+    rr::scalar(prefix + "/theta", x[sp_model::THETA] * 57.3);
+    rr::scalar(prefix + "/omega", x[sp_model::OMEGA]);
+    rr::scalar(prefix + "/r", x[sp_model::R]);
+    rr::scalar(prefix + "/l", x[sp_model::L]);
+    rr::scalar(prefix + "/h", x[sp_model::H]);
+    rr::scalar(prefix + "/tracked_id", tracked_armor_id_);
 }
 
 void SpMotion::reset() {

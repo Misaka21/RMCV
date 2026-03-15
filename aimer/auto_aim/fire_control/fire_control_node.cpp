@@ -24,7 +24,7 @@
 #include "plugin/debug/logger.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
-#include "plugin/webview/dashboard.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 
 namespace autoaim::fire_control {
 
@@ -719,10 +719,10 @@ void fire_control_run(const std::string& /* config_path */) {
         }
 
         // 遥测数据
-        dashboard::set("fire.yaw", cmd.yaw);
-        dashboard::set("fire.pitch", cmd.pitch);
-        dashboard::set("fire.control", cmd.control_enabled ? 1 : 0);
-        dashboard::set("fire.fire_now", cmd.fire_now ? 1 : 0);
+        rr::scalar("fire/yaw", static_cast<double>(cmd.yaw));
+        rr::scalar("fire/pitch", static_cast<double>(cmd.pitch));
+        rr::scalar("fire/control", cmd.control_enabled ? 1 : 0);
+        rr::scalar("fire/fire_now", cmd.fire_now ? 1 : 0);
 
         // 等待下一周期
         next_time += period;

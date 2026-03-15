@@ -12,6 +12,7 @@
 
 // Project headers
 #include "plugin/debug/logger.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/ObjManager.hpp"
 
 namespace runtime_param {
@@ -118,6 +119,18 @@ namespace runtime_param {
                         std::visit(PARAM_VISITOR, tmp),
                         std::visit(PARAM_VISITOR, res)
                     );
+                    // 记录参数变化到 Rerun 时间线
+                    std::visit([&prefix](auto&& v) {
+                        using T = std::decay_t<decltype(v)>;
+                        if constexpr (std::is_same_v<T, double>) {
+                            rr::scalar("params/" + prefix, v);
+                        } else if constexpr (std::is_same_v<T, int64_t>) {
+                            rr::scalar("params/" + prefix, static_cast<int>(v));
+                        } else if constexpr (std::is_same_v<T, bool>) {
+                            rr::scalar("params/" + prefix, v);
+                        }
+                        // string/vector 忽略
+                    }, res);
                 }
             }
         }

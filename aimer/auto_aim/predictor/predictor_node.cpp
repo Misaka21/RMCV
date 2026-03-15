@@ -21,8 +21,7 @@
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
-#include "plugin/webview/dashboard.hpp"
-#include "plugin/plotter/plotter.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/umt.hpp"
 
 namespace autoaim::predictor {
@@ -125,27 +124,25 @@ void start_predictor_node() {
                 pub_debug.push(debug_frame.image);
             }
 
-            // [阶段5] 输出云台状态到 PlotJuggler
+            // [阶段5] 输出云台状态到 Rerun
             {
                 const auto& R_g2i = aimer::tf::Transform<
                     aimer::tf::Frame::Gimbal, aimer::tf::Frame::Imu>::R_;
                 Eigen::Quaterniond q_gimbal(snapshot.self_state.q_imu.toRotationMatrix() * R_g2i);
                 auto [yaw, pitch] = aimer::math::quat_to_yaw_pitch(q_gimbal);
-                plotter::begin();
-                plotter::add("/gimbal/yaw", yaw * 57.3);
-                plotter::add("/gimbal/pitch", pitch * 57.3);
-                plotter::end();
+                rr::scalar("gimbal/yaw", yaw * 57.3);
+                rr::scalar("gimbal/pitch", pitch * 57.3);
             }
 
-            // [阶段6] 统计 + Dashboard
+            // [阶段6] 统计 + Rerun 遥测
             int tracked = 0;
             for (int i = 1; i < MAX_TARGETS; ++i) {
                 if (snapshot.is_valid(i)) tracked++;
             }
             stats.update(latency, tracked > 0);
-            dashboard::set("predictor.latency_ms", latency);
-            dashboard::set("predictor.tracked_count", tracked);
-            dashboard::set("predictor.fps", stats.last_fps);
+            rr::scalar("predictor/latency_ms", static_cast<double>(latency));
+            rr::scalar("predictor/tracked_count", tracked);
+            rr::scalar("predictor/fps", stats.last_fps);
 
         } catch (const umt::MessageError_Timeout&) {
             // 超时，继续

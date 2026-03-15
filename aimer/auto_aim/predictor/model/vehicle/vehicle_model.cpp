@@ -17,7 +17,7 @@
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
-#include "plugin/plotter/plotter.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/BasicObjManager.hpp"
 
 namespace autoaim::predictor {
@@ -248,36 +248,34 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     prev_armors_ = filtered;
     prev_timestamp_ = timestamp;
 
-    // ========== 输出到 PlotJuggler ==========
-    if (plotter::enabled()) {
-        std::string prefix = fmt::format("/target_{}", target_id_);
-
-        plotter::begin();
+    // ========== 输出到 Rerun ==========
+    if (rr::enabled()) {
+        std::string prefix = fmt::format("target_{}", target_id_);
 
         // ========== 1. 观测层 obs ==========
-        plotter::add(prefix + "/obs_num", static_cast<int>(filtered.size()));
+        rr::scalar(prefix + "/obs_num", static_cast<int>(filtered.size()));
         for (size_t i = 0; i < filtered.size(); ++i) {
             const auto& o = filtered[i];
             std::string obs_prefix = fmt::format("{}/obs/armor_{}", prefix, i);
-            plotter::add(obs_prefix + "/x", o.pos.x());
-            plotter::add(obs_prefix + "/y", o.pos.y());
-            plotter::add(obs_prefix + "/z", o.pos.z());
-            plotter::add(obs_prefix + "/yaw", o.z[obs::ARMOR_YAW] * 57.3);
-            plotter::add(obs_prefix + "/z_to_v", o.z_to_v * 57.3);
+            rr::scalar(obs_prefix + "/x", o.pos.x());
+            rr::scalar(obs_prefix + "/y", o.pos.y());
+            rr::scalar(obs_prefix + "/z", o.pos.z());
+            rr::scalar(obs_prefix + "/yaw", o.z[obs::ARMOR_YAW] * 57.3);
+            rr::scalar(obs_prefix + "/z_to_v", o.z_to_v * 57.3);
         }
 
         // ========== 2. 单装甲板滤波 armor_model ==========
         auto armor_states = armor_motion_.get_armor_states(timestamp);
-        plotter::add(prefix + "/armor_num", static_cast<int>(armor_states.size()));
+        rr::scalar(prefix + "/armor_num", static_cast<int>(armor_states.size()));
         for (size_t i = 0; i < armor_states.size(); ++i) {
             const auto& state = armor_states[i];
             std::string armor_prefix = fmt::format("{}/armor_model/armor_{}", prefix, i);
-            plotter::add(armor_prefix + "/x", state.position.x());
-            plotter::add(armor_prefix + "/y", state.position.y());
-            plotter::add(armor_prefix + "/z", state.position.z());
-            plotter::add(armor_prefix + "/vx", state.velocity.x());
-            plotter::add(armor_prefix + "/vy", state.velocity.y());
-            plotter::add(armor_prefix + "/vz", state.velocity.z());
+            rr::scalar(armor_prefix + "/x", state.position.x());
+            rr::scalar(armor_prefix + "/y", state.position.y());
+            rr::scalar(armor_prefix + "/z", state.position.z());
+            rr::scalar(armor_prefix + "/vx", state.velocity.x());
+            rr::scalar(armor_prefix + "/vy", state.velocity.y());
+            rr::scalar(armor_prefix + "/vz", state.velocity.z());
         }
 
         // ========== 3. 整车滤波 vehicle ==========
@@ -297,21 +295,40 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
             dz = motion_->get_dz();
         }
 
-        plotter::add(veh_prefix + "/valid", vehicle_valid ? 1 : 0);
-        plotter::add(veh_prefix + "/x", center.x());
-        plotter::add(veh_prefix + "/y", center.y());
-        plotter::add(veh_prefix + "/z", center.z());
-        plotter::add(veh_prefix + "/vx", velocity.x());
-        plotter::add(veh_prefix + "/vy", velocity.y());
-        plotter::add(veh_prefix + "/vz", velocity.z());
-        plotter::add(veh_prefix + "/theta", theta * 57.3);
-        plotter::add(veh_prefix + "/omega", omega);
-        plotter::add(veh_prefix + "/r", radius);
-        plotter::add(veh_prefix + "/r2", radius_2);
-        plotter::add(veh_prefix + "/dz", dz);
-        plotter::add(veh_prefix + "/spin_level", static_cast<int>(spin_.level));
+        rr::scalar(veh_prefix + "/valid", vehicle_valid);
+        rr::scalar(veh_prefix + "/x", center.x());
+        rr::scalar(veh_prefix + "/y", center.y());
+        rr::scalar(veh_prefix + "/z", center.z());
+        rr::scalar(veh_prefix + "/vx", velocity.x());
+        rr::scalar(veh_prefix + "/vy", velocity.y());
+        rr::scalar(veh_prefix + "/vz", velocity.z());
+        rr::scalar(veh_prefix + "/theta", theta * 57.3);
+        rr::scalar(veh_prefix + "/omega", omega);
+        rr::scalar(veh_prefix + "/r", radius);
+        rr::scalar(veh_prefix + "/r2", radius_2);
+        rr::scalar(veh_prefix + "/dz", dz);
+        rr::scalar(veh_prefix + "/spin_level", static_cast<int>(spin_.level));
 
-        plotter::end();
+        // ========== 4. EKF 内部状态 ==========
+        motion_->log_state(veh_prefix + "/ekf");
+
+        // ========== 5. 3D 可视化 ==========
+        // 观测装甲板
+        std::vector<Eigen::Vector3d> obs_positions;
+        for (const auto& o : filtered) {
+            obs_positions.push_back(o.pos);
+        }
+        if (!obs_positions.empty()) {
+            rr::points3d(prefix + "/obs_3d", obs_positions, 0, 255, 0, 0.03f);
+        }
+
+        // 预测装甲板 + 旋转中心
+        if (vehicle_valid) {
+            auto predicted_armors = motion_->compute_all_armors(0);
+            rr::points3d(prefix + "/predicted_3d", predicted_armors, 0, 128, 255, 0.03f);
+            rr::points3d(prefix + "/center", {center}, 255, 0, 0, 0.05f);
+            rr::arrows3d(prefix + "/velocity", {center}, {velocity}, 255, 255, 0);
+        }
     }
 }
 

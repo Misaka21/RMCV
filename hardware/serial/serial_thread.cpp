@@ -17,8 +17,8 @@
 // FireCommand -> VisionData_t bridge
 #include "aimer/common/fire_control_types.hpp"
 
-// Dashboard 遥测
-#include "plugin/webview/dashboard.hpp"
+// Rerun 遥测
+#include "plugin/rerun/rmcv_rerun.hpp"
 
 // UMT相关头文件
 #include "umt/umt.hpp"
@@ -165,10 +165,10 @@ void serial_receiver_run(std::shared_ptr<TransceiverManager<32>> transceiver) {
                         current_aim_mode_time_us->store(recv_time_us);
 
                         // 遥测数据
-                        dashboard::set("serial.yaw", receive_data.yaw);
-                        dashboard::set("serial.pitch", receive_data.pitch);
-                        dashboard::set("serial.bullet_speed", receive_data.bullet_speed);
-                        dashboard::set("serial.aim_mode", (int)receive_data.aim_mode);
+                        rr::scalar("serial/yaw", static_cast<double>(receive_data.yaw));
+                        rr::scalar("serial/pitch", static_cast<double>(receive_data.pitch));
+                        rr::scalar("serial/bullet_speed", static_cast<double>(receive_data.bullet_speed));
+                        rr::scalar("serial/aim_mode", static_cast<int>(receive_data.aim_mode));
 
                         // 通过 Message 发布（线程安全，Subscriber 自动管理缓冲区）
                         publisher.push(receive_data);

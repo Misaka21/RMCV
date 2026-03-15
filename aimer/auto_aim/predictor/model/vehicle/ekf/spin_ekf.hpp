@@ -219,7 +219,7 @@ public:
     int get_tracked_id() const override { return tracked_state_id_; }
 
     std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
-    void output_to_plotter(const std::string& prefix) const override;
+    void log_state(const std::string& prefix) const override;
     const char* name() const override { return "spin"; }
     int armor_num() const override { return armor_num_; }
 

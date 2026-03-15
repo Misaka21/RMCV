@@ -15,7 +15,7 @@
 #include "plugin/param/static_config.hpp"
 #include "plugin/stats/fps_stats.hpp"
 #include "plugin/watchdog/watchdog_node.hpp"
-#include "plugin/webview/dashboard.hpp"
+#include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/umt.hpp"
 
 #include "hardware/hardware_node.hpp"
@@ -42,10 +42,10 @@ EnemyColor serial_to_enemy_color(uint8_t serial_color) {
 
 // 更新 Dashboard 数据
 void update_dashboard(float latency_ms, int target_count, float fps, DetectionStatus status) {
-    dashboard::set("buff_detector.latency_ms", latency_ms);
-    dashboard::set("buff_detector.target_count", target_count);
-    dashboard::set("buff_detector.fps", fps);
-    dashboard::set("buff_detector.status", static_cast<int>(status));
+    rr::scalar("buff_detector/latency_ms", static_cast<double>(latency_ms));
+    rr::scalar("buff_detector/target_count", target_count);
+    rr::scalar("buff_detector/fps", static_cast<double>(fps));
+    rr::scalar("buff_detector/status", static_cast<int>(status));
 }
 
 // 构建 RobotState
