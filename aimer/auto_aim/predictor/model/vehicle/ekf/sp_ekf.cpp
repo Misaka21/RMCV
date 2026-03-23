@@ -70,7 +70,7 @@ void SpMotion::init(const ArmorData& armor, double timestamp) {
 }
 
 int SpMotion::match_armor(const ArmorData& armor) const {
-    // ⭐ 利用 armor.id 的稳定性：
+    //  利用 armor.id 的稳定性：
     // 如果是同一个物理装甲板（detector ID 相同），帧间 state_id 不会变
     // 帧间时间 ~5ms，即使高速陀螺 500°/s 也只旋转 2.5°，不会跨越 90° 边界
     if (armor.id == last_detector_id_ && armor.id >= 0) {
@@ -176,7 +176,7 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
 
     const auto& obs = armor.observation;
 
-    // ⭐ 前置过滤: z_to_v 异常值检测
+    //  前置过滤: z_to_v 异常值检测
     // z_to_v 理论范围 [0, π/2] ≈ [0, 1.57]，超出说明 PnP 有问题
     constexpr double Z_TO_V_MAX = 1.6;  // 略大于 π/2
     if (std::abs(armor.z_to_v()) > Z_TO_V_MAX) {
@@ -240,7 +240,7 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
-    // ⭐ 关键修正: 自适应因子要与 sp_vision 的定义保持一致
+    //  关键修正: 自适应因子要与 sp_vision 的定义保持一致
     // sp_vision 使用的是 INWARD 装甲板朝向:
     //   delta = armor_yaw_inward - position_yaw
     // 当前状态里 inner_z[ARMOR_YAW] 是 OUTWARD，需要先转回 INWARD 再比较，
@@ -285,7 +285,7 @@ void SpMotion::update(const ArmorData& armor, double timestamp) {
 void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
     if (armors.empty()) return;
 
-    // ⭐ 追踪目标选择
+    //  追踪目标选择
     // 规则：
     // 1) 已追踪 detector id 存在且面积满足 keep_ratio，保持
     // 2) 否则切换到最大面积（与 rm.cv.fans 的主观测策略一致）
@@ -328,7 +328,7 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         return;
     }
 
-    // ⭐ 前置过滤: z_to_v 异常值检测
+    //  前置过滤: z_to_v 异常值检测
     constexpr double Z_TO_V_MAX = 1.6;
     if (std::abs(primary.z_to_v()) > Z_TO_V_MAX) {
         debug::print(debug::PrintMode::WARNING, "SpMotion",
@@ -393,7 +393,7 @@ void SpMotion::update(const std::vector<ArmorData>& armors, double timestamp) {
         reset_state[sp_model::R] = init_r;
     }
 
-    // ⭐ 与单板更新保持一致：OUTWARD -> INWARD 后再计算自适应角差
+    //  与单板更新保持一致：OUTWARD -> INWARD 后再计算自适应角差
     double predicted_armor_yaw_inward = inner_z[sp_model::ARMOR_YAW] - M_PI;
     double predicted_z_to_v = std::abs(aimer::math::angle_diff(
         predicted_armor_yaw_inward, inner_z[sp_model::YAW]));
@@ -482,7 +482,7 @@ SpMotion::MatrixZZ SpMotion::build_R(double distance, double z_to_v, int observe
         ? runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_double")
         : runtime_param::get_param<double>("AutoAim.Predictor.SpEKF.r_armor_yaw_single");
 
-    // ⭐ 自适应噪声 (来自 sp_vision_25)
+    //  自适应噪声 (来自 sp_vision_25)
     // 重要: z_to_v 应该是 EKF 预测的角度，不是观测值！
     //
     // 原理: 侧对时 PnP 朝向角精度下降，需要增大 R

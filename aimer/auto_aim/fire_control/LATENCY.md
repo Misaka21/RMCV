@@ -113,7 +113,7 @@ img_to_predict = predict_timestamp - snapshot.timestamp
 - 正常情况下自动估计，无需调整
 - 如果观察到抖动，可以增大滤波器的 R 值 (观测噪声)
 
-### 3.3 send_to_control (默认 3ms) ⭐ 重要
+### 3.3 send_to_control (默认 3ms)  重要
 
 **含义**：串口传输 + 下位机解析 + 控制器响应延迟
 
@@ -132,7 +132,7 @@ img_to_predict = predict_timestamp - snapshot.timestamp
 - `+` 调大：跟踪更超前，适合延迟大的系统
 - `-` 调小：跟踪更保守
 
-### 3.4 control_to_fire (默认 20ms) ⭐ 反陀螺关键
+### 3.4 control_to_fire (默认 20ms)  反陀螺关键
 
 **含义**：从云台收到指令到子弹出膛的时间
 
