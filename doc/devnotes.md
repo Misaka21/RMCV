@@ -1,3 +1,8 @@
+# 3.23
+职责问题：firecontrol是不是可以提到autoaim/下，作为通用的火控逻辑？
+BattlefieldSnapshot内容过多
+可视化职责不清
+
 # 1.17
  修复 predict_armor_position 陀螺分支语义错误。原代码用 armor_idx % 2 判断物理属性来选择半径，但 armors[] 是按相对顺序填充的（armors[0] = tracked），索引和物理奇偶性无关。改为用存储位置 + 绕 z 轴旋转 的方式预测，添加 SpinState::dz 字段支持高度差。
 重组 predictor 目录结构，使命名更清晰：
