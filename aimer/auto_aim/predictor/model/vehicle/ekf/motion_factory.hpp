@@ -21,7 +21,8 @@ namespace autoaim::predictor {
 enum class MotionType {
     SPIN,   // SpinMotion (10维, 旧版)
     LMTD,   // LmtdMotion (9维, rm.cv.fans)
-    SP      // SpMotion (11维, sp_vision_25)
+    SP,     // SpMotion (11维, sp_vision_25)
+    INEKF   // SpInekfMotion (11维, SE2 左不变)
 };
 
 /**

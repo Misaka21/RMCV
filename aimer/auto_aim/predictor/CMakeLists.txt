@@ -19,6 +19,7 @@ add_library(predictor STATIC
     model/vehicle/ekf/spin_ekf.cpp
     model/vehicle/ekf/lmtd_ekf.cpp
     model/vehicle/ekf/sp_ekf.cpp
+    model/vehicle/inekf/sp_inekf.cpp
     model/outpost/outpost_model.cpp
     model/outpost/outpost_ekf.cpp
     model/base/base_model.cpp
