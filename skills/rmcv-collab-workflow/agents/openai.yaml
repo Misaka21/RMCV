@@ -1,0 +1,4 @@
+interface:
+  display_name: "RMCV 协作规范"
+  short_description: "执行 RMCV2026 分支、模块、提交、PR 和验证规范"
+  default_prompt: "Use $rmcv-collab-workflow to handle this RMCV2026 repository task with the required module boundary, branch, commit, PR, build, and test rules."
