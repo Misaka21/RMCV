@@ -1,0 +1,4 @@
+interface:
+  display_name: "RMCV 提交规范"
+  short_description: "生成或执行 RMCV2026 中文 emoji commit message"
+  default_prompt: "Use $rmcv-git-commit to prepare or create a RMCV2026 commit with the required emoji, type, scope, Chinese description, and no AI attribution."
