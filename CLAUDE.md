@@ -122,14 +122,22 @@ hardware/serial -> hardware::SyncFrame -> aimer/common::RobotState -> detector/p
 `hardware/serial` 中的 `aim_mode` 是 `uint8_t` 原始字节。
 业务含义在 `aimer/common/robot_state.hpp` 中转换为 `aimer::AimMode`。
 
-## 协作分支建议
+## 协作流程简版
 
-- `master`: 稳定版本，只通过 PR/MR 合并。
-- `dev`: 大改集成分支。
-- `feat/<name>` / `fix/<name>` / `refactor/<name>`: 个人工作分支。
-
-公共接口、`config/*.toml`、`CMakeLists.txt`、`main.cpp`、`plugin/param`、`umt`
-改动前先同步改动范围。
+- 开始改动前先明确主模块边界，如 `auto_buff`、`predictor`、`fire_control`、
+  `hardware`、`serial`、`plugin`、`param`、`umt`、`config`、`test`。能只改一个模块
+  就不要跨模块。
+- 跨模块改动按顺序推进：公共类型/协议或共享工具 -> 生产者 -> 消费者 -> 配置和测试
+  -> 文档说明。串口模式含义保持边界：
+  `hardware/serial uint8_t -> hardware::SyncFrame -> aimer::RobotState -> 业务模块`。
+- 分支命名使用 `<type>/<scope>-<short-desc>`，例如
+  `fix/auto-buff-thread-safety`、`refactor/predictor-battlefield-snapshot`、
+  `docs/ai-instruction-split`。`master` 保持稳定，`dev` 用于集成，不要强推这两个分支。
+- 公共接口、`config/*.toml`、`CMakeLists.txt`、`main.cpp`、`plugin/param`、`umt`
+  或协议改动前先同步影响范围；PR 中说明触及模块、行为变化、风险点、验证命令和结果。
+- 合并前至少执行 `cmake --build build -j$(nproc)`；按改动范围补充运行
+  `test_param`、`test_transformer`、`test_serial`、`test_camera`、`test_hardware`、
+  `test_fire_control`、`test_ballistic`、`test_playback` 等目标。无法运行时说明具体阻塞。
 
 ## 提交信息
 
