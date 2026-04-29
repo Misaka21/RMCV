@@ -22,6 +22,8 @@ namespace autoaim::predictor {
 
 namespace {
 
+constexpr double OUTPOST_ARMOR_PITCH = 15.0 * M_PI / 180.0;
+
 double get_param_or(const std::string& name, double default_value)
 {
     auto ptr = runtime_param::find_param(name);
@@ -56,16 +58,15 @@ void draw_armor_rect(
 ) {
     const double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
     const double h = 0.050;
-    constexpr double pitch = -15.0 * M_PI / 180.0;
 
     const double cos_yaw = std::cos(yaw);
     const double sin_yaw = std::sin(yaw);
 
     const Eigen::Vector3d x_axis(-sin_yaw, cos_yaw, 0.0);
     const Eigen::Vector3d y_axis(
-        -cos_yaw * std::sin(pitch),
-        -sin_yaw * std::sin(pitch),
-        std::cos(pitch)
+        -cos_yaw * std::sin(OUTPOST_ARMOR_PITCH),
+        -sin_yaw * std::sin(OUTPOST_ARMOR_PITCH),
+        std::cos(OUTPOST_ARMOR_PITCH)
     );
 
     const std::array<Eigen::Vector3d, 4> corners = {
@@ -100,7 +101,6 @@ void draw_armor_by_z_to_v(
 ) {
     const double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
     const double h = 0.055;
-    constexpr double pitch = -15.0 * M_PI / 180.0;
 
     Eigen::Vector3d camera_z_world =
         aimer::tf::vector<aimer::tf::Frame::Camera, aimer::tf::Frame::World>(
@@ -117,9 +117,9 @@ void draw_armor_by_z_to_v(
     const Eigen::Vector2d x_2d = aimer::math::rotate(normal_2d, M_PI / 2.0);
     const Eigen::Vector3d x_axis(x_2d.x(), x_2d.y(), 0.0);
     const Eigen::Vector3d y_axis(
-        -normal_2d.x() * std::sin(pitch),
-        -normal_2d.y() * std::sin(pitch),
-        std::cos(pitch)
+        -normal_2d.x() * std::sin(OUTPOST_ARMOR_PITCH),
+        -normal_2d.y() * std::sin(OUTPOST_ARMOR_PITCH),
+        std::cos(OUTPOST_ARMOR_PITCH)
     );
 
     const std::array<Eigen::Vector3d, 4> corners = {
