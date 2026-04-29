@@ -35,6 +35,7 @@ public:
     void reset() override;
     int target_id() const override { return target_id_; }
     const char* type_name() const override { return "Outpost"; }
+    void draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const override;
 
 private:
     int target_id_;
