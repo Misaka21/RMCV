@@ -93,6 +93,27 @@ inline std::string armor_number_to_string(ArmorNumber n) {
     return (it != ARMOR_NUMBER_TO_STR.end()) ? it->second : "unknown";
 }
 
+// 比赛规则: 各目标装甲板俯仰角 (rad)。
+// 负值表示装甲板上沿向后倾斜；前哨站与车体装甲板方向相反。
+inline constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
+    0.0,                       // UNKNOWN
+    aimer::math::deg2rad(-15.0),  // HERO
+    aimer::math::deg2rad(-15.0),  // ENGINEER
+    aimer::math::deg2rad(-15.0),  // INFANTRY_3
+    aimer::math::deg2rad(-15.0),  // INFANTRY_4
+    aimer::math::deg2rad(-15.0),  // INFANTRY_5
+    aimer::math::deg2rad(15.0),   // OUTPOST
+    aimer::math::deg2rad(-15.0),  // SENTRY
+    aimer::math::deg2rad(-15.0)   // BASE
+};
+
+inline constexpr double armor_pitch_by_rule(ArmorNumber number) {
+    const int idx = static_cast<int>(number);
+    return (idx >= 0 && idx < static_cast<int>(ARMOR_PITCH_BY_RULE.size()))
+        ? ARMOR_PITCH_BY_RULE[idx]
+        : 0.0;
+}
+
 /**
  * @brief 根据数字识别结果修正装甲板类型
  *

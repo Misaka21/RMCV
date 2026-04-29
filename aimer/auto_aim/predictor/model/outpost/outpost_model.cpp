@@ -56,7 +56,7 @@ void draw_armor_rect(
 ) {
     const double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
     const double h = 0.050;
-    constexpr double pitch = -15.0 * M_PI / 180.0;
+    const double pitch = armor_pitch_by_rule(ArmorNumber::OUTPOST);
 
     const double cos_yaw = std::cos(yaw);
     const double sin_yaw = std::sin(yaw);
@@ -100,7 +100,7 @@ void draw_armor_by_z_to_v(
 ) {
     const double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
     const double h = 0.055;
-    constexpr double pitch = -15.0 * M_PI / 180.0;
+    const double pitch = armor_pitch_by_rule(ArmorNumber::OUTPOST);
 
     Eigen::Vector3d camera_z_world =
         aimer::tf::vector<aimer::tf::Frame::Camera, aimer::tf::Frame::World>(
