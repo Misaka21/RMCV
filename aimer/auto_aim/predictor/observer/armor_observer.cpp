@@ -32,21 +32,6 @@ bool get_param_or(const std::string& name, bool default_value) {
     return default_value;
 }
 
-// 比赛规则: 各车型装甲板俯仰角 (弧度)
-// 索引对应 ArmorNumber 枚举值 (0-8)
-// 注意: 负值表示装甲板上沿向后倾斜 (与 rm.cv.fans 一致)
-constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
-    0.0, // 0: UNKNOWN
-    -15.0 * M_PI / 180.0, // 1: HERO
-    -15.0 * M_PI / 180.0, // 2: ENGINEER
-    -15.0 * M_PI / 180.0, // 3: INFANTRY_3
-    -15.0 * M_PI / 180.0, // 4: INFANTRY_4
-    -15.0 * M_PI / 180.0, // 5: INFANTRY_5
-    15.0 * M_PI / 180.0, // 6: OUTPOST (前哨站相反)
-    -15.0 * M_PI / 180.0, // 7: SENTRY
-    -15.0 * M_PI / 180.0 // 8: BASE
-};
-
 // PnP 解算的俯仰角超过此阈值时，不使用三分法优化
 constexpr double ARMOR_PITCH_MAX_FOR_FIT = 30.0 * M_PI / 180.0;
 
@@ -303,10 +288,7 @@ ArmorObservation ArmorObserver::solve_pnp(
     std::array<cv::Point2f, 4> pus = undistort_points(armor.landmarks);
 
     // 获取该车型的装甲板俯仰角 (比赛规则)
-    int armor_number_idx = static_cast<int>(armor.number);
-    double armor_pitch = (armor_number_idx >= 0 && armor_number_idx < 9)
-        ? ARMOR_PITCH_BY_RULE[armor_number_idx]
-        : 0.0;
+    const double armor_pitch = armor_pitch_by_rule(armor.number);
 
     // 计算 PnP 解算的俯仰角 (用于判断是否需要跳过三分法)
     double horizontal = std::sqrt(normal_cam.x() * normal_cam.x() + normal_cam.z() * normal_cam.z());
