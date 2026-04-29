@@ -75,10 +75,12 @@ int main(int argc, char* argv[]) {
 
     // 初始化日志系统
     // watchdog 模式: 传入 --log-dir，直接使用
-    // 直接运行模式: 自动创建带时间戳的目录
+    // 直接运行模式: 自动创建带时间戳的目录，比赛模式附加 match 后缀
     std::string session_path;
     if (!log_dir.empty()) {
         session_path = debug::init_session(log_dir);
+    } else if (match_mode) {
+        session_path = debug::init_session("match");
     } else {
         session_path = debug::init_session();
     }
