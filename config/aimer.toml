@@ -450,7 +450,7 @@
     #@double top1 的朝向窗口 (deg, 慢速小陀螺建议 > 0，例如 30)
     top1_max_orientation_angle = 30.0
     #@double top2 的朝向窗口 (deg, 超高速陀螺常用 0 表示只在中心线附近 direct)
-    top2_max_orientation_angle = 0.0
+    top2_max_orientation_angle = 60.0
 
     #@double top0 的间接打击离场误差比例
     top0_max_out_error = 1.8

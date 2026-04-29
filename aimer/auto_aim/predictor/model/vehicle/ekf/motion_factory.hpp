@@ -21,8 +21,7 @@ namespace autoaim::predictor {
 enum class MotionType {
     SPIN,   // SpinMotion (10维, 旧版)
     LMTD,   // LmtdMotion (9维, rm.cv.fans)
-    SP,     // SpMotion (11维, sp_vision_25)
-    INEKF   // SpInekfMotion (11维, SE2 左不变)
+    SP      // SpMotion (11维, sp_vision_25)
 };
 
 /**
@@ -39,7 +38,7 @@ std::unique_ptr<MotionInterface> create_motion(MotionType type, int armor_num);
  * @param armor_num 装甲板数量 (3 或 4)
  * @return 模型实例的 unique_ptr
  *
- * 如果字符串无法识别，默认返回 SpMotion
+ * 如果字符串无法识别，默认返回 SpinMotion
  */
 std::unique_ptr<MotionInterface> create_motion(const std::string& type_str, int armor_num);
 
