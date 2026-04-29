@@ -67,6 +67,13 @@ public:
     const ArmorObservationTable& table() const { return table_; }
     double timestamp() const { return table_.timestamp(); }
 
+    /**
+     * @brief 对同车双装甲板执行基于重投影误差的 90° 联合拟合
+     *
+     * VehicleModel 在确认目标类型后调用，避免对前哨站/基地做错误约束。
+     */
+    static void apply_double_z_fit(std::vector<ArmorObservation>& observations);
+
 private:
     /**
      * @brief 对单个装甲板做 PnP 解算并转换到世界系
@@ -98,7 +105,7 @@ private:
      * @param pts 原始四角点
      * @return 畸变矫正后的四角点
      */
-    std::array<cv::Point2f, 4> undistort_points(
+    static std::array<cv::Point2f, 4> undistort_points(
         const std::vector<cv::Point2f>& pts
     );
 
@@ -107,7 +114,7 @@ private:
      *
      * 参考 rm.cv.fans: converter->get_camera_z_i2()
      */
-    Eigen::Vector2d get_camera_z_i2(const Eigen::Quaterniond& q_imu);
+    static Eigen::Vector2d get_camera_z_i2(const Eigen::Quaterniond& q_imu);
 
     /**
      * @brief 给定 z_to_v 计算装甲板四角点在图像上的投影 (世界坐标系方法)
@@ -121,7 +128,7 @@ private:
      * @param q_imu IMU 四元数
      * @return 投影的四角点 (像素坐标)
      */
-    std::array<cv::Point2f, 4> project_armor_corners(
+    static std::array<cv::Point2f, 4> project_armor_corners(
         const Eigen::Vector3d& pos_world,
         ArmorType type,
         double pitch,
@@ -136,7 +143,7 @@ private:
      * @param z_to_v 当前的 z_to_v (用于权重调整)
      * @return 代价值
      */
-    double compute_reprojection_cost(
+    static double compute_reprojection_cost(
         const std::array<cv::Point2f, 4>& projected,
         const std::array<cv::Point2f, 4>& detected,
         double z_to_v
@@ -158,7 +165,7 @@ private:
      * @param q_imu IMU 四元数
      * @return 优化后的 z_to_v
      */
-    double fit_z_to_v(
+    static double fit_z_to_v(
         const Eigen::Vector3d& pos_world,
         ArmorType type,
         double pitch,
@@ -179,7 +186,7 @@ private:
      * @param q_imu IMU 四元数
      * @return 优化后的 z_to_l (左边装甲板的 z_to_v)
      */
-    double fit_double_z_to_l(
+    static double fit_double_z_to_l(
         const ArmorObservation& obs0,
         const ArmorObservation& obs1,
         double z_to_l_init,

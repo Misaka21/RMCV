@@ -16,6 +16,7 @@
 #include "aimer/common/fire_control_types.hpp"
 #include "aimer/common/math/math.hpp"
 #include "aimer/common/transformer/transformer.hpp"
+#include "aimer/auto_aim/predictor/observer/armor_observer.hpp"
 #include "plugin/param/runtime_parameter.hpp"
 #include "plugin/rerun/rmcv_rerun.hpp"
 #include "umt/BasicObjManager.hpp"
@@ -100,56 +101,6 @@ bool get_use_double_z_fit() {
     return true;
 }
 
-// 车辆模型专用双板朝向约束:
-// 仅在两块装甲板同时可见时，将 z_to_v 约束到相差 90°，再同步更新 armor_yaw。
-void apply_vehicle_double_fit(std::vector<ArmorObservation>& observations) {
-    if (observations.size() != 2) return;
-
-    int left_idx = observations[0].z_to_v <= observations[1].z_to_v ? 0 : 1;
-    int right_idx = 1 - left_idx;
-
-    auto& left = observations[left_idx];
-    auto& right = observations[right_idx];
-
-    double z_left = left.z_to_v;
-    double z_right = right.z_to_v;
-    double diff = std::abs(aimer::math::angle_diff(z_left, z_right));
-
-    // 先做几何一致性检查，避免错误配对强行拟合
-    constexpr double MIN_PAIR_ANGLE = 60.0 * M_PI / 180.0;
-    constexpr double MAX_PAIR_ANGLE = 120.0 * M_PI / 180.0;
-    if (diff < MIN_PAIR_ANGLE || diff > MAX_PAIR_ANGLE) {
-        return;
-    }
-
-    // 最小化 (zL'-zL)^2 + (zR'-(zL'+90°))^2 的闭式解
-    double z_right_near = aimer::math::get_closest_angle(z_right, z_left + M_PI / 2.0);
-    double z_left_fit = 0.5 * (z_left + z_right_near - M_PI / 2.0);
-    double z_right_fit = z_left_fit + M_PI / 2.0;
-
-    // 限制单次修正量，防止离群观测引发大跳变
-    constexpr double MAX_CORRECTION = 35.0 * M_PI / 180.0;
-    if (std::abs(aimer::math::angle_diff(z_left, z_left_fit)) > MAX_CORRECTION
-        || std::abs(aimer::math::angle_diff(z_right, z_right_fit)) > MAX_CORRECTION)
-    {
-        return;
-    }
-
-    left.z_to_v = aimer::math::reduced_angle(z_left_fit);
-    right.z_to_v = aimer::math::reduced_angle(z_right_fit);
-
-    // camera_yaw = armor_yaw - z_to_v，左右各自估计后取平均再回写
-    double cam_yaw_l = left.z[obs::ARMOR_YAW] - z_left;
-    double cam_yaw_r = right.z[obs::ARMOR_YAW] - z_right;
-    cam_yaw_r = aimer::math::get_closest_angle(cam_yaw_r, cam_yaw_l);
-    double cam_yaw = 0.5 * (cam_yaw_l + cam_yaw_r);
-
-    left.z[obs::ARMOR_YAW] = aimer::math::get_closest_angle(
-        cam_yaw + left.z_to_v, left.z[obs::ARMOR_YAW]);
-    right.z[obs::ARMOR_YAW] = aimer::math::get_closest_angle(
-        cam_yaw + right.z_to_v, right.z[obs::ARMOR_YAW]);
-}
-
 }  // namespace
 
 // ============================================================================
@@ -185,9 +136,9 @@ void VehicleModel::update(const std::vector<ArmorObservation>& observations, dou
     auto filtered = filter(observations, prev_armors_);
 
     // 1.5 车辆模型专用双板拟合:
-    // observer 不再做联合拟合，这里只对 vehicle 链路启用 90° 约束。
+    // observer 不做目标类型约束，这里只对 vehicle 链路启用重投影联合拟合。
     if (get_use_double_z_fit()) {
-        apply_vehicle_double_fit(filtered);
+        ArmorObserver::apply_double_z_fit(filtered);
         std::sort(filtered.begin(), filtered.end(), [](const auto& a, const auto& b) {
             return std::abs(a.z_to_v) < std::abs(b.z_to_v);
         });

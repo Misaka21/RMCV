@@ -30,7 +30,7 @@
     motion_model = "sp"
 
     #@bool 是否使用双装甲板联合三分法优化 (fit_double_z_to_l)
-    # true: 利用 90° 几何约束联合优化两块装甲板朝向角
+    # true: 利用 90° 几何约束和重投影误差联合优化两块装甲板朝向角
     # false: 各自独立优化
     use_double_z_fit = true
 
@@ -61,6 +61,10 @@
     armor_credit_time = 0.1
     #@double 装甲板“可见”时间窗口 (s)，超过窗口仅保留预测不视为可见
     visible_time_window = 0.04
+
+[AutoAim.Predictor.PnP]
+    #@double PnP 测距二次修正系数: fixed_dis = dis + a2 * dis * dis
+    distance_fixer_a2 = 0.0
 
 [AutoAim.Predictor.IDDebounce]
     # 新 target_id 需连续出现达到阈值才创建模型，抑制 T2/T3/T7 抖动分裂
