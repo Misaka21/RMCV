@@ -6,6 +6,7 @@
 #include "outpost_ekf.hpp"
 
 #include <cmath>
+#include <limits>
 
 #include "aimer/common/math/math.hpp"
 #include "plugin/debug/logger.hpp"
@@ -159,7 +160,6 @@ void OutpostMotion::init(const ArmorData& armor, double timestamp) {
     // 快速收敛：方向待判断
     omega_sign_determined_ = false;
 
-    tracking_armor_id_ = armor.id;
     last_update_time_ = timestamp;
     initialized_ = true;
 }
@@ -175,9 +175,6 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
     double dt = timestamp - last_update_time_;
     if (dt <= 0) return;
 
-    // 处理装甲板切换
-    handle_armor_switch(armor);
-
     // 预测 (使用自适应缩放的过程噪声)
     OutpostCVPredict predict_func(dt);
     MatrixXX Q = build_Q(dt);
@@ -185,18 +182,27 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
 
     // 观测
     double armor_yaw = obs.z[obs::ARMOR_YAW];
-
-    // 连续化 yaw (必须在门限检查之前)
     VectorX x = ekf_.get_x();
-    double theta_pred = x[outpost_model::THETA];
-    double yaw_continuous = theta_pred + aimer::math::angle_diff(theta_pred, armor_yaw);
+    const int observed_slot = match_observed_slot(armor_yaw);
+    const double slot_offset = observed_slot * (2.0 * M_PI / 3.0);
+    const double predicted_slot_yaw = x[outpost_model::THETA] + slot_offset;
+    const double slot_yaw_continuous =
+        predicted_slot_yaw + aimer::math::angle_diff(predicted_slot_yaw, armor_yaw);
+    const double base_theta_continuous = slot_yaw_continuous - slot_offset;
+
+    OutpostMeasure measure_func(slot_dz_[observed_slot], slot_offset);
+    VectorZ inner_z;
+    double x_arr[outpost_model::N_X], z_arr[outpost_model::N_Z];
+    for (int i = 0; i < outpost_model::N_X; ++i) x_arr[i] = x[i];
+    measure_func(x_arr, z_arr);
+    for (int i = 0; i < outpost_model::N_Z; ++i) inner_z[i] = z_arr[i];
 
     // 构建观测向量
     VectorZ z;
-    z[outpost_model::YAW] = obs.z[obs::YAW];
+    z[outpost_model::YAW] = aimer::math::get_closest_angle(obs.z[obs::YAW], inner_z[outpost_model::YAW]);
     z[outpost_model::PITCH] = obs.z[obs::PITCH];
     z[outpost_model::DIS] = obs.z[obs::DIST];
-    z[outpost_model::ARMOR_YAW] = yaw_continuous;
+    z[outpost_model::ARMOR_YAW] = slot_yaw_continuous;
 
     // 构建重置状态
     double xa = obs.pos.x();
@@ -210,11 +216,10 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
     reset_state[outpost_model::XC] = xc;
     reset_state[outpost_model::YC] = yc;
     reset_state[outpost_model::ZC] = zc;
-    reset_state[outpost_model::THETA] = armor_yaw;
+    reset_state[outpost_model::THETA] = base_theta_continuous;
     reset_state[outpost_model::OMEGA] = 0;
 
     // 带门限检查的观测更新
-    OutpostMeasure measure_func(current_dz_);
     MatrixZZ R = build_R(obs.z[obs::DIST], armor.z_to_v());
     auto status = ekf_.update_forward_gated(
         measure_func, z, R, reset_state,
@@ -226,9 +231,9 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
         // EKF 已重置，同时重置外部状态
         slot_dz_.fill(0);
         slot_known_.fill(false);
-        slot_dz_[0] = 0;
-        slot_known_[0] = true;
-        current_slot_ = 0;
+        slot_dz_[observed_slot] = 0;
+        slot_known_[observed_slot] = true;
+        current_slot_ = observed_slot;
         current_dz_ = 0;
         omega_sign_determined_ = false;  // 需要重新判断方向
         debug::print(debug::PrintMode::WARNING, "OutpostMotion",
@@ -244,8 +249,9 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
     // 更新当前槽位的高度差 (持续学习)
     x = ekf_.get_x();
     double new_dz = obs.pos.z() - x[outpost_model::ZC];
-    slot_dz_[current_slot_] = new_dz;
-    slot_known_[current_slot_] = true;
+    slot_dz_[observed_slot] = new_dz;
+    slot_known_[observed_slot] = true;
+    current_slot_ = observed_slot;
     current_dz_ = new_dz;
 
     // 强制速度清零 (前哨站定点旋转)
@@ -258,59 +264,20 @@ void OutpostMotion::update(const ArmorData& armor, double timestamp) {
     last_update_time_ = timestamp;
 }
 
-bool OutpostMotion::handle_armor_switch(const ArmorData& armor) {
-    if (armor.id == tracking_armor_id_ || tracking_armor_id_ < 0) {
-        tracking_armor_id_ = armor.id;
-        return false;
-    }
-
-    // 装甲板切换了
-    const auto& obs = armor.observation;
-    VectorX x = ekf_.get_x();
-    double theta_pred = x[outpost_model::THETA];
-    double armor_yaw = obs.z[obs::ARMOR_YAW];
-
-    // 计算角度差，判断槽位变化方向
-    double theta_diff = aimer::math::angle_diff(theta_pred, armor_yaw);
-
-    // 更新相位
-    x[outpost_model::THETA] = theta_pred + theta_diff;
-
-    // 通过角度差判断槽位变化 (相隔约120度)
-    int new_slot = current_slot_;
-    int direction = 0;  // +1: 下一个槽位, -1: 上一个槽位
-    if (theta_diff > M_PI / 3) {
-        new_slot = (current_slot_ + 1) % 3;
-        direction = 1;
-    } else if (theta_diff < -M_PI / 3) {
-        new_slot = (current_slot_ + 2) % 3;
-        direction = -1;
-    }
-
-    // 记录新槽位的高度差
-    double new_dz = obs.pos.z() - x[outpost_model::ZC];
-    slot_dz_[new_slot] = new_dz;
-    slot_known_[new_slot] = true;
-
-    // 利用 Δz = 10cm 约束，推算第三个槽位的高度差
-    if (direction != 0) {
-        double delta_z = new_dz - current_dz_;  // 本次切换的高度变化
-        int third_slot = (new_slot + direction + 3) % 3;
-
-        if (!slot_known_[third_slot]) {
-            // 第三个槽位未知，推算它
-            // 如果 delta_z > 0，说明顺着这个方向是递增的
-            slot_dz_[third_slot] = new_dz + delta_z;
-            slot_known_[third_slot] = true;
+int OutpostMotion::match_observed_slot(double armor_yaw) const {
+    const VectorX x = ekf_.get_x();
+    int best_slot = 0;
+    double best_diff = std::numeric_limits<double>::max();
+    for (int slot = 0; slot < 3; ++slot) {
+        const double predicted_yaw =
+            x[outpost_model::THETA] + slot * (2.0 * M_PI / 3.0);
+        const double diff = std::abs(aimer::math::angle_diff(predicted_yaw, armor_yaw));
+        if (diff < best_diff) {
+            best_diff = diff;
+            best_slot = slot;
         }
     }
-
-    current_slot_ = new_slot;
-    current_dz_ = new_dz;
-
-    ekf_.set_x(x);
-    tracking_armor_id_ = armor.id;
-    return true;
+    return best_slot;
 }
 
 void OutpostMotion::constrain_omega() {
@@ -426,7 +393,6 @@ void OutpostMotion::reset() {
     initialized_ = false;
     slot_dz_.fill(0);
     slot_known_.fill(false);
-    tracking_armor_id_ = -1;
     current_slot_ = 0;
     current_dz_ = 0;
 }

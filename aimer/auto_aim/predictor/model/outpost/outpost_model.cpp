@@ -149,12 +149,54 @@ OutpostModel::OutpostModel(int target_id, EnemyType enemy_type)
     : target_id_(target_id)
     , enemy_type_(enemy_type) {}
 
+std::vector<ArmorObservation> OutpostModel::filter_observations(
+    const std::vector<ArmorObservation>& observations,
+    double timestamp
+) {
+    if (observations.empty()) return {};
+
+    const double z_threshold = get_param_or(
+        "AutoAim.Predictor.OutpostFilter.z_that_distinguishes_two_types", 0.16);
+    const double active_lasting_time = get_param_or(
+        "AutoAim.Predictor.OutpostFilter.active_lasting_time", 0.59233333);
+
+    auto get_low_z = [](const std::vector<ArmorObservation>& armors) {
+        double low_z = 1e9;
+        for (const auto& armor : armors) {
+            low_z = std::min(low_z, armor.pos.z());
+        }
+        return low_z;
+    };
+
+    if (last_active_filter_time_ + active_lasting_time < timestamp) {
+        last_active_filter_z_ = get_low_z(observations);
+        last_active_filter_time_ = timestamp;
+    }
+
+    std::vector<ArmorObservation> filtered;
+    filtered.reserve(observations.size());
+    for (const auto& obs : observations) {
+        if (obs.pos.z() <= last_active_filter_z_ + z_threshold) {
+            filtered.push_back(obs);
+        }
+    }
+
+    if (!filtered.empty()) {
+        last_active_filter_z_ = get_low_z(filtered);
+        last_active_filter_time_ = timestamp;
+    }
+
+    return filtered;
+}
+
 void OutpostModel::update(const std::vector<ArmorObservation>& observations, double timestamp) {
     ++frame_count_;
 
+    const auto filtered_observations = filter_observations(observations, timestamp);
+
     // 盲区处理: 没有观测也更新时间戳 (用于 alive() 判断)
     // 但不 reset，让 motion_ 继续预测
-    if (observations.empty()) {
+    if (filtered_observations.empty()) {
         if (initialized_ && (timestamp - last_update_time_) > LOST_TIMEOUT) {
             reset();
         }
@@ -164,18 +206,14 @@ void OutpostModel::update(const std::vector<ArmorObservation>& observations, dou
     last_update_time_ = timestamp;
 
     // ArmorIdentifier 分配 ID
-    identifier_.update(observations, timestamp, frame_count_);
+    identifier_.update(filtered_observations, timestamp, frame_count_);
     auto armors_with_id = identifier_.get_active_armors(frame_count_);
     if (armors_with_id.empty()) return;
 
-    // 选择最正对的装甲板 (过滤顶部装甲板)
+    // 选择最正对的腰部装甲板
     const ArmorData* best = nullptr;
     double best_abs_z_to_v = 1e9;
     for (const auto& armor : armors_with_id) {
-        // 过滤顶部装甲板: pitch > 45° (朝上)
-        if (armor.observation.z[obs::PITCH] > outpost_model::TOP_ARMOR_PITCH_THRESHOLD) {
-            continue;
-        }
         double abs_z_to_v = std::abs(armor.z_to_v());
         if (abs_z_to_v < best_abs_z_to_v) {
             best_abs_z_to_v = abs_z_to_v;
@@ -207,7 +245,8 @@ VehicleState OutpostModel::predict(double timestamp) const {
     Eigen::Vector3d center = motion_.predict_center(dt);
     Eigen::Vector3d velocity = motion_.get_velocity();
     double omega = motion_.get_omega();
-    double theta = motion_.get_theta() + omega * dt;
+    const double theta_inward = motion_.get_theta() + omega * dt;
+    const double theta_outward = theta_inward + M_PI;
 
     vs.center = center;
     vs.velocity = velocity;
@@ -217,7 +256,7 @@ VehicleState OutpostModel::predict(double timestamp) const {
     // 陀螺状态
     vs.spin.active = true;
     vs.spin.omega = omega;
-    vs.spin.phase = theta;
+    vs.spin.phase = theta_outward;
     vs.spin.radius = outpost_model::RADIUS;
     vs.spin.level = SpinLevel::HIGH;  // 前哨站始终高速
 
@@ -232,12 +271,14 @@ VehicleState OutpostModel::predict(double timestamp) const {
         vs.armors[i].visible = visible_fresh;
         vs.armors[i].last_seen = last_update_time_;
 
-        // 装甲板朝向 = 中心到装甲板的方向
-        double armor_theta = theta + i * (2.0 * M_PI / 3.0);
-        vs.armors[i].yaw = armor_theta;
+        const double armor_yaw_inward = theta_inward + i * (2.0 * M_PI / 3.0);
+        const double armor_yaw_outward = armor_yaw_inward + M_PI;
+        vs.armors[i].yaw = armor_yaw_outward;
 
-        // 评分: 当前槽位得分最高
-        vs.armors[i].score = (i == motion_.get_current_slot()) ? 1.0 : 0.5;
+        const double view_yaw = std::atan2(armor_pos.y(), armor_pos.x());
+        const double z_to_v = aimer::math::reduced_angle(armor_yaw_outward - view_yaw - M_PI);
+        vs.armors[i].z_to_v = z_to_v;
+        vs.armors[i].score = std::cos(std::abs(z_to_v));
     }
 
     // 推荐装甲板 = 当前追踪的槽位
@@ -255,6 +296,8 @@ void OutpostModel::reset() {
     motion_.reset();
     identifier_.reset();
     frame_count_ = 0;
+    last_active_filter_z_ = 1e9;
+    last_active_filter_time_ = -1e9;
 }
 
 void OutpostModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
@@ -382,9 +425,22 @@ void OutpostModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         const auto& obs = armor.observation;
         if (obs.pts.size() < 4) continue;
 
+        int observed_slot = 0;
+        double best_slot_diff = 1e9;
+        for (int slot = 0; slot < ARMOR_NUM; ++slot) {
+            const double predicted_yaw =
+                motion_.get_theta() + slot * (2.0 * M_PI / ARMOR_NUM);
+            const double diff = std::abs(
+                aimer::math::angle_diff(predicted_yaw, obs.z[obs::ARMOR_YAW]));
+            if (diff < best_slot_diff) {
+                best_slot_diff = diff;
+                observed_slot = slot;
+            }
+        }
+
         const double area_k = aimer::math::get_area(obs.pts) / 1000.0;
         const std::array<std::string, 5> lines = {
-            fmt::format("outpost obs:{} | id:{}", idx, armor.id),
+            fmt::format("outpost obs:{} | track:{} | slot:{}", idx, armor.id, observed_slot),
             fmt::format("z_to_v:{:.1f} | area:{:.1f}k", obs.z_to_v * 57.3, area_k),
             fmt::format("x:{:.2f} | y:{:.2f} | z:{:.2f}", obs.pos.x(), obs.pos.y(), obs.pos.z()),
             fmt::format("yaw:{:.1f} | pitch:{:.1f}", obs.z[obs::YAW] * 57.3, obs.z[obs::PITCH] * 57.3),
