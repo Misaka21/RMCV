@@ -50,6 +50,13 @@ constexpr std::array<double, 9> ARMOR_PITCH_BY_RULE = {
 // PnP 解算的俯仰角超过此阈值时，不使用三分法优化
 constexpr double ARMOR_PITCH_MAX_FOR_FIT = 30.0 * M_PI / 180.0;
 
+double armor_pitch_by_rule(ArmorNumber number) {
+    int idx = static_cast<int>(number);
+    if (idx >= 0 && idx < static_cast<int>(ARMOR_PITCH_BY_RULE.size())) {
+        return ARMOR_PITCH_BY_RULE[idx];
+    }
+    return 0.0;
+}
 
 const ArmorObservationTable& ArmorObserver::observe(
     const DetectionResult& detection,
@@ -277,8 +284,20 @@ ArmorObservation ArmorObserver::solve_pnp(
         return obs;
     }
 
-    // 提取位置 (相机坐标系)
-    Eigen::Vector3d pos_cam(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
+    // 提取位置 (相机坐标系)，沿用 rm.cv.fans 的距离二次修正链路。
+    Eigen::Vector3d raw_pos_cam(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
+    const auto raw_ypd_cam = aimer::math::camera_xyz_to_ypd(raw_pos_cam);
+    const double distance_a2 = runtime_param::get_param<double>(
+        "AutoAim.Predictor.PnP.distance_fixer_a2");
+    const double fixed_distance = std::max(
+        0.0,
+        raw_ypd_cam.dis + distance_a2 * raw_ypd_cam.dis * raw_ypd_cam.dis
+    );
+    const Eigen::Vector3d pos_cam = aimer::math::camera_ypd_to_xyz({
+        raw_ypd_cam.yaw,
+        raw_ypd_cam.pitch,
+        fixed_distance
+    });
 
     // 计算装甲板法向量 (相机坐标系)
     // 物体坐标系: x水平(右), y垂直(上), z=0平面
@@ -303,10 +322,7 @@ ArmorObservation ArmorObserver::solve_pnp(
     std::array<cv::Point2f, 4> pus = undistort_points(armor.landmarks);
 
     // 获取该车型的装甲板俯仰角 (比赛规则)
-    int armor_number_idx = static_cast<int>(armor.number);
-    double armor_pitch = (armor_number_idx >= 0 && armor_number_idx < 9)
-        ? ARMOR_PITCH_BY_RULE[armor_number_idx]
-        : 0.0;
+    double armor_pitch = armor_pitch_by_rule(armor.number);
 
     // 计算 PnP 解算的俯仰角 (用于判断是否需要跳过三分法)
     double horizontal = std::sqrt(normal_cam.x() * normal_cam.x() + normal_cam.z() * normal_cam.z());
@@ -363,6 +379,7 @@ ArmorObservation ArmorObserver::solve_pnp(
     // 构建观测结果 (世界系)
     // 注意: z_to_v 是世界坐标系下的角度 (相对于相机前向)
     obs = ArmorObservation::from_detection(armor, pos_world, z, z_to_v, z_to_v_raw, timestamp, pus);
+    obs.q_imu = q_imu;
 
     return obs;
 }
@@ -611,15 +628,14 @@ double ArmorObserver::fit_double_z_to_l(
     double z_to_l_init,
     const Eigen::Quaterniond& q_imu
 ) {
-    // 搜索范围 (rm.cv.fans: M_PI - must_not_see_angle 到 M_PI + must_not_see_angle - angle_between_armors)
-    // 简化: ±60度范围
+    // 搜索范围: 两块相邻装甲板同时可见时，左板 z_to_v 一般在 [-90°, 0°]。
     constexpr double SEARCH_MARGIN = M_PI / 3;  // 60度
     double z_min = z_to_l_init - SEARCH_MARGIN;
     double z_max = z_to_l_init + SEARCH_MARGIN;
 
     // 限制在合理范围
     z_min = std::max(-M_PI / 2, z_min);
-    z_max = std::min(M_PI / 2, z_max);
+    z_max = std::min(0.0, z_max);
 
     if (z_max <= z_min + 0.02) {
         return z_to_l_init;
@@ -629,18 +645,18 @@ double ArmorObserver::fit_double_z_to_l(
     ArmorType type0 = obs0.type;
     ArmorType type1 = obs1.type;
 
-    // 假设两块装甲板俯仰角相同 (同一辆车)
-    double pitch = -15.0 * M_PI / 180.0;  // 默认俯仰角
+    double pitch0 = armor_pitch_by_rule(static_cast<ArmorNumber>(obs0.target_id));
+    double pitch1 = armor_pitch_by_rule(static_cast<ArmorNumber>(obs1.target_id));
 
     // 代价函数: 两块装甲板的总重投影误差
     auto cost_func = [&](double z_to_l) {
         // 左边装甲板
-        auto projected0 = project_armor_corners(obs0.pos, type0, pitch, z_to_l, q_imu);
+        auto projected0 = project_armor_corners(obs0.pos, type0, pitch0, z_to_l, q_imu);
         double cost0 = compute_reprojection_cost(projected0, obs0.pus, std::abs(z_to_l_init));
 
         // 右边装甲板 (相差 90°)
         double z_to_r = z_to_l + M_PI / 2;
-        auto projected1 = project_armor_corners(obs1.pos, type1, pitch, z_to_r, q_imu);
+        auto projected1 = project_armor_corners(obs1.pos, type1, pitch1, z_to_r, q_imu);
         double cost1 = compute_reprojection_cost(projected1, obs1.pus, std::abs(z_to_l_init + M_PI / 2));
 
         return cost0 + cost1;
@@ -675,6 +691,51 @@ double ArmorObserver::fit_double_z_to_l(
     }
 
     return (left + right) / 2.0;
+}
+
+void ArmorObserver::apply_double_z_fit(std::vector<ArmorObservation>& observations) {
+    if (observations.size() != 2) return;
+
+    int left_idx = observations[0].z_to_v <= observations[1].z_to_v ? 0 : 1;
+    int right_idx = 1 - left_idx;
+
+    auto& left = observations[left_idx];
+    auto& right = observations[right_idx];
+
+    const double z_left = left.z_to_v;
+    const double z_right = right.z_to_v;
+    const double diff = std::abs(aimer::math::angle_diff(z_left, z_right));
+
+    constexpr double MIN_PAIR_ANGLE = 60.0 * M_PI / 180.0;
+    constexpr double MAX_PAIR_ANGLE = 120.0 * M_PI / 180.0;
+    if (diff < MIN_PAIR_ANGLE || diff > MAX_PAIR_ANGLE) {
+        return;
+    }
+
+    const double z_right_near = aimer::math::get_closest_angle(z_right, z_left + M_PI / 2.0);
+    const double z_left_init = 0.5 * (z_left + z_right_near - M_PI / 2.0);
+    const double z_left_fit = fit_double_z_to_l(left, right, z_left_init, left.q_imu);
+    const double z_right_fit = z_left_fit + M_PI / 2.0;
+
+    constexpr double MAX_CORRECTION = 35.0 * M_PI / 180.0;
+    if (std::abs(aimer::math::angle_diff(z_left, z_left_fit)) > MAX_CORRECTION
+        || std::abs(aimer::math::angle_diff(z_right, z_right_fit)) > MAX_CORRECTION)
+    {
+        return;
+    }
+
+    left.z_to_v = aimer::math::reduced_angle(z_left_fit);
+    right.z_to_v = aimer::math::reduced_angle(z_right_fit);
+
+    double camera_yaw_l = left.z[obs::ARMOR_YAW] - z_left;
+    double camera_yaw_r = right.z[obs::ARMOR_YAW] - z_right;
+    camera_yaw_r = aimer::math::get_closest_angle(camera_yaw_r, camera_yaw_l);
+    const double camera_yaw = 0.5 * (camera_yaw_l + camera_yaw_r);
+
+    left.z[obs::ARMOR_YAW] = aimer::math::get_closest_angle(
+        camera_yaw + left.z_to_v, left.z[obs::ARMOR_YAW]);
+    right.z[obs::ARMOR_YAW] = aimer::math::get_closest_angle(
+        camera_yaw + right.z_to_v, right.z[obs::ARMOR_YAW]);
 }
 
 }  // namespace autoaim::predictor

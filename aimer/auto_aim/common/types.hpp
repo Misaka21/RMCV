@@ -118,10 +118,10 @@ inline ArmorType correct_armor_type(ArmorType detected, ArmorNumber number) {
 // 3. 装甲板尺寸常量 (单位: m)
 // ============================================================================
 
-constexpr double SMALL_ARMOR_WIDTH  = 0.133;  // 小装甲板宽度
-constexpr double SMALL_ARMOR_HEIGHT = 0.050;  // 小装甲板高度
-constexpr double LARGE_ARMOR_WIDTH  = 0.225;  // 大装甲板宽度
-constexpr double LARGE_ARMOR_HEIGHT = 0.050;  // 大装甲板高度
+constexpr double SMALL_ARMOR_WIDTH  = 0.136;  // 小装甲板灯条外沿宽度
+constexpr double SMALL_ARMOR_HEIGHT = 0.055;  // 小装甲板灯条外沿高度
+constexpr double LARGE_ARMOR_WIDTH  = 0.230;  // 大装甲板灯条外沿宽度
+constexpr double LARGE_ARMOR_HEIGHT = 0.053;  // 大装甲板灯条外沿高度
 
 // ============================================================================
 // 4. 检测结果结构体
