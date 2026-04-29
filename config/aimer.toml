@@ -368,10 +368,12 @@
     q_scale_decay = 0.9
 
 [AutoAim.Predictor.OutpostFilter]
-    #@double 前哨站高/低两类观测的 z 分离阈值 (m)，用于过滤顶部干扰板
-    z_that_distinguishes_two_types = 0.16
-    #@double 低处有效观测保持时间 (s)，对齐 rm.cv.fans outpost-fixer
-    active_lasting_time = 0.59233333
+    #@bool 是否按装甲板法向 pitch 过滤前哨站顶部固定干扰板
+    orientation_pitch_enabled = true
+    #@double 顶部固定板法向 pitch (rad): 板面 27.5° -> 法向 62.5°
+    top_orientation_pitch = 1.09083
+    #@double 顶部固定板法向 pitch 过滤半宽 (rad): 10°
+    top_orientation_pitch_tolerance = 0.17453
 
 # ==================== 火控配置 ====================
 

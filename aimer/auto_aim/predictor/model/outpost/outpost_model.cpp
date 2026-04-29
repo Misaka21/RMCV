@@ -33,6 +33,17 @@ double get_param_or(const std::string& name, double default_value)
     return default_value;
 }
 
+bool get_bool_param_or(const std::string& name, bool default_value)
+{
+    auto ptr = runtime_param::find_param(name);
+    if (ptr != nullptr) {
+        if (auto* val = std::get_if<bool>(&*ptr)) {
+            return *val;
+        }
+    }
+    return default_value;
+}
+
 double get_draw_predict_dt()
 {
     auto fd = umt::BasicObjManager<::fire_control::FireDebugInfo>::find("fire_debug");
@@ -150,40 +161,30 @@ OutpostModel::OutpostModel(int target_id, EnemyType enemy_type)
     , enemy_type_(enemy_type) {}
 
 std::vector<ArmorObservation> OutpostModel::filter_observations(
-    const std::vector<ArmorObservation>& observations,
-    double timestamp
+    const std::vector<ArmorObservation>& observations
 ) {
     if (observations.empty()) return {};
 
-    const double z_threshold = get_param_or(
-        "AutoAim.Predictor.OutpostFilter.z_that_distinguishes_two_types", 0.16);
-    const double active_lasting_time = get_param_or(
-        "AutoAim.Predictor.OutpostFilter.active_lasting_time", 0.59233333);
-
-    auto get_low_z = [](const std::vector<ArmorObservation>& armors) {
-        double low_z = 1e9;
-        for (const auto& armor : armors) {
-            low_z = std::min(low_z, armor.pos.z());
-        }
-        return low_z;
-    };
-
-    if (last_active_filter_time_ + active_lasting_time < timestamp) {
-        last_active_filter_z_ = get_low_z(observations);
-        last_active_filter_time_ = timestamp;
+    if (!get_bool_param_or("AutoAim.Predictor.OutpostFilter.orientation_pitch_enabled", true)) {
+        return observations;
     }
 
+    const double top_pitch = get_param_or(
+        "AutoAim.Predictor.OutpostFilter.top_orientation_pitch",
+        aimer::math::deg2rad(62.5));
+    const double top_pitch_tolerance = get_param_or(
+        "AutoAim.Predictor.OutpostFilter.top_orientation_pitch_tolerance",
+        aimer::math::deg2rad(10.0));
+
+    // 板面角 75° 对应法向 pitch 15°；固定顶部板 27.5° 对应法向 pitch 62.5°。
     std::vector<ArmorObservation> filtered;
     filtered.reserve(observations.size());
     for (const auto& obs : observations) {
-        if (obs.pos.z() <= last_active_filter_z_ + z_threshold) {
+        const bool near_top_fixed =
+            std::abs(obs.orientation_pitch - top_pitch) <= top_pitch_tolerance;
+        if (!near_top_fixed) {
             filtered.push_back(obs);
         }
-    }
-
-    if (!filtered.empty()) {
-        last_active_filter_z_ = get_low_z(filtered);
-        last_active_filter_time_ = timestamp;
     }
 
     return filtered;
@@ -192,7 +193,7 @@ std::vector<ArmorObservation> OutpostModel::filter_observations(
 void OutpostModel::update(const std::vector<ArmorObservation>& observations, double timestamp) {
     ++frame_count_;
 
-    const auto filtered_observations = filter_observations(observations, timestamp);
+    const auto filtered_observations = filter_observations(observations);
 
     // 盲区处理: 没有观测也更新时间戳 (用于 alive() 判断)
     // 但不 reset，让 motion_ 继续预测
@@ -296,8 +297,6 @@ void OutpostModel::reset() {
     motion_.reset();
     identifier_.reset();
     frame_count_ = 0;
-    last_active_filter_z_ = 1e9;
-    last_active_filter_time_ = -1e9;
 }
 
 void OutpostModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const {
@@ -443,7 +442,12 @@ void OutpostModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
             fmt::format("outpost obs:{} | track:{} | slot:{}", idx, armor.id, observed_slot),
             fmt::format("z_to_v:{:.1f} | area:{:.1f}k", obs.z_to_v * 57.3, area_k),
             fmt::format("x:{:.2f} | y:{:.2f} | z:{:.2f}", obs.pos.x(), obs.pos.y(), obs.pos.z()),
-            fmt::format("yaw:{:.1f} | pitch:{:.1f}", obs.z[obs::YAW] * 57.3, obs.z[obs::PITCH] * 57.3),
+            fmt::format(
+                "yaw:{:.1f} | pos_p:{:.1f} | ori_p:{:.1f}",
+                obs.z[obs::YAW] * 57.3,
+                obs.z[obs::PITCH] * 57.3,
+                obs.orientation_pitch * 57.3
+            ),
             fmt::format("dist:{:.2f} | slot:{}", obs.z[obs::DIST], current_slot)
         };
 

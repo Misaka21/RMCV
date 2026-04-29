@@ -345,6 +345,8 @@ ArmorObservation ArmorObserver::solve_pnp(
     // 参考 rm.cv.fans: armor_yaw = z_to_v + camera_z_i_yaw
     double camera_yaw = std::atan2(camera_z_i2.y(), camera_z_i2.x());
     double armor_yaw = z_to_v + camera_yaw;
+    double orientation_pitch = std::atan2(
+        normal_world.z(), normal_world.head<2>().norm());
 
     // 计算观测向量 (世界系)
     double dist = pos_world.norm();
@@ -357,6 +359,7 @@ ArmorObservation ArmorObserver::solve_pnp(
     // 注意: z_to_v 是世界坐标系下的角度 (相对于相机前向)
     obs = ArmorObservation::from_detection(armor, pos_world, z, z_to_v, z_to_v_raw, timestamp, pus);
     obs.q_imu = q_imu;
+    obs.orientation_pitch = orientation_pitch;
 
     return obs;
 }
