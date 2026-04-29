@@ -99,6 +99,7 @@ struct ArmorObservation {
     Eigen::Quaterniond q_imu = Eigen::Quaterniond::Identity();  // 当前帧 IMU 姿态
     double z_to_v = 0;      // 装甲板法向与视线夹角 (三分法优化后)
     double z_to_v_raw = 0;  // 装甲板法向与视线夹角 (三分法优化前)
+    double orientation_pitch = 0;  // 装甲板法向在世界系下的 pitch
 
     // 图像信息 (可选，调试用)
     std::vector<cv::Point2f> pts;  // 四角点 (原始像素坐标)
