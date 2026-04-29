@@ -16,7 +16,7 @@
  *   - ω: 角速度 (rad/s)，约束 |ω| ≈ 0.8π
  *
  * 外部维护:
- *   - 每个 armor_id 对应的高度差 dz
+ *   - 每个物理槽位对应的高度差 dz
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_MOTION_OUTPOST_MOTION_MODEL_HPP__
@@ -44,9 +44,6 @@ namespace outpost_model {
 constexpr double OMEGA_ABS = 0.8 * M_PI;  // 角速度绝对值 (rad/s)
 constexpr double RADIUS = 0.2765;          // 旋转半径 (m), 直径 0.553m
 constexpr double DZ_STEP = 0.10;           // 高度差间隔 (m)
-
-// 顶部装甲板过滤 (pitch 阈值)
-constexpr double TOP_ARMOR_PITCH_THRESHOLD = 45.0 * M_PI / 180.0;  // 45°
 
 // 状态维度
 constexpr int N_X = 7;
@@ -108,21 +105,23 @@ struct OutpostCVPredict {
  * @brief 状态 → 观测 (YPD + armor_yaw)
  *
  * 装甲板位置:
- *   xa = xc - r·cos(θ)
- *   ya = yc - r·sin(θ)
+ *   xa = xc - r·cos(θ + slot_offset)
+ *   ya = yc - r·sin(θ + slot_offset)
  *   za = zc + dz
  */
 struct OutpostMeasure {
     double dz;  // 当前装甲板高度差
+    double slot_offset;
 
-    explicit OutpostMeasure(double height_diff = 0) : dz(height_diff) {}
+    explicit OutpostMeasure(double height_diff = 0, double offset = 0)
+        : dz(height_diff), slot_offset(offset) {}
 
     template<typename T>
     void operator()(const T x[outpost_model::N_X], T y[outpost_model::N_Z]) const {
         T xc = x[outpost_model::XC];
         T yc = x[outpost_model::YC];
         T zc = x[outpost_model::ZC];
-        T theta = x[outpost_model::THETA];
+        T theta = x[outpost_model::THETA] + T(slot_offset);
 
         // 固定半径
         T r = T(outpost_model::RADIUS);
@@ -233,9 +232,9 @@ public:
 
 private:
     /**
-     * @brief 处理装甲板切换
+     * @brief 根据观测朝向匹配物理槽位
      */
-    bool handle_armor_switch(const ArmorData& armor);
+    int match_observed_slot(double armor_yaw) const;
 
     /**
      * @brief 约束角速度
@@ -264,7 +263,6 @@ private:
     std::array<bool, 3> slot_known_ = {false, false, false};  // 是否已观测到
 
     // 当前追踪
-    int tracking_armor_id_ = -1;
     int current_slot_ = 0;          // 当前槽位 (0, 1, 2)
     double current_dz_ = 0;         // 当前装甲板高度差
 

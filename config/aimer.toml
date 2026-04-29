@@ -367,6 +367,12 @@
     #@double 接受后过程噪声衰减倍数 (最小为1.0)
     q_scale_decay = 0.9
 
+[AutoAim.Predictor.OutpostFilter]
+    #@double 前哨站高/低两类观测的 z 分离阈值 (m)，用于过滤顶部干扰板
+    z_that_distinguishes_two_types = 0.16
+    #@double 低处有效观测保持时间 (s)，对齐 rm.cv.fans outpost-fixer
+    active_lasting_time = 0.59233333
+
 # ==================== 火控配置 ====================
 
 [AutoAim.FireControl]

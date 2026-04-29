@@ -38,10 +38,17 @@ public:
     void draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double timestamp) const override;
 
 private:
+    std::vector<ArmorObservation> filter_observations(
+        const std::vector<ArmorObservation>& observations,
+        double timestamp
+    );
+
     int target_id_;
     EnemyType enemy_type_;
     bool initialized_ = false;
     double last_update_time_ = 0;
+    double last_active_filter_z_ = 1e9;
+    double last_active_filter_time_ = -1e9;
 
     // EKF 运动模型
     OutpostMotion motion_;
