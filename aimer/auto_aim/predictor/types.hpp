@@ -3,7 +3,7 @@
  * @brief 预测器模块的类型定义
  *
  * 数据流:
- *   检测器 → ArmorObservation → EnemyState(筛选) → EKF → VehicleState → BattlefieldSnapshot → 火控
+ *   检测器 → ArmorObservation → EnemyState(筛选) → EKF → TargetState → BattlefieldSnapshot → 火控
  *
  * 火控插值:
  *   double dt = now - snapshot.timestamp;
@@ -14,9 +14,12 @@
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_TYPES_HPP__
 #define __AIMER_AUTO_AIM_PREDICTOR_TYPES_HPP__
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 #include <Eigen/Core>
@@ -151,15 +154,15 @@ struct ArmorObservation {
 // ============================================================================
 
 /**
- * @brief 单个装甲板滤波状态 (EKF 输出)
+ * @brief 单个装甲板滤波状态 (ArmorMotion 内部输出)
  *
- * 作为 VehicleState 的组成部分
+ * 仅作为单装甲板滤波器的中间结果；对火控输出使用 TargetState。
  */
 struct ArmorState {
     Eigen::Vector3d position = Eigen::Vector3d::Zero();
     Eigen::Vector3d velocity = Eigen::Vector3d::Zero();  // 用于火控插值
 
-    double yaw = 0;            // 装甲板朝向 (rad)
+    double yaw = 0;            // 装甲板朝向 (INWARD, 从装甲板指向车心/旋转中心)
     double z_to_v = 0;         // 相对相机的夹角，越小越正对
 
     int id = 0;                // 装甲板编号 0-3
@@ -257,27 +260,62 @@ struct SpinState {
 };
 
 /**
- * @brief 单车整体状态 (火控需要的完整信息)
+ * @brief 单个目标的紧凑火控状态 (RV 风格目标包 + 最小火控元数据)
+ *
+ * yaw 统一为 INWARD yaw:
+ * - yaw 表示 slot 0 装甲板“从装甲板指向车心/旋转中心”的方向。
+ * - 预测装甲板位置使用 armor = center - r * dir(inward_yaw)。
+ * - z_to_v 使用 inward_yaw - view_yaw，不再做 OUTWARD 的 π 修正。
+ *
+ * armors[] 不再存完整 ArmorState；火控通过 helper 按预测时刻计算装甲板位置、
+ * 速度、朝向和可见性。这样 BattlefieldSnapshot 只携带有效目标 vector，
+ * 避免每帧固定携带 9 辆车 × 4 块板的大结构。
  */
-struct VehicleState {
+struct TargetState {
     // ==================== 基础信息 ====================
 
     int target_id = -1;
     EnemyType enemy_type = EnemyType::UNKNOWN;
     bool valid = false;
+    bool tracking = false;
 
-    // ==================== 运动状态 ====================
+    // ==================== RV 风格核心状态 ====================
 
-    // 旋转中心
-    Eigen::Vector3d center = Eigen::Vector3d::Zero();
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();  // 目标中心
     Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
+
+    double yaw = 0;       // slot 0 装甲板 INWARD yaw
+    double v_yaw = 0;     // 角速度 (rad/s)
+    double radius_1 = 0;  // 主半径
+    double radius_2 = 0;  // 次半径
+    double dz = 0;        // 高度差
+    int armor_count = 4;  // RV armors_num
 
     // 陀螺状态
     SpinState spin;
 
-    // 装甲板 (最多4块)
-    std::array<ArmorState, MAX_ARMORS_PER_TARGET> armors;
-    int armor_count = 4;
+    // ==================== 最小火控元数据 ====================
+
+    uint8_t visible_mask = 0;
+    uint8_t detected_mask = 0;
+
+    std::array<int, MAX_ARMORS_PER_TARGET> armor_ids = {0, 1, 2, 3};
+    std::array<ArmorType, MAX_ARMORS_PER_TARGET> armor_types = {
+        ArmorType::SMALL, ArmorType::SMALL, ArmorType::SMALL, ArmorType::SMALL
+    };
+    std::array<double, MAX_ARMORS_PER_TARGET> armor_radii = {0.0, 0.0, 0.0, 0.0};
+    std::array<double, MAX_ARMORS_PER_TARGET> armor_z_offsets = {0.0, 0.0, 0.0, 0.0};
+    std::array<Eigen::Vector3d, MAX_ARMORS_PER_TARGET> armor_position_offsets = {
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()
+    };
+    std::array<Eigen::Vector3d, MAX_ARMORS_PER_TARGET> armor_velocity_offsets = {
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+        Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()
+    };
+    std::array<double, MAX_ARMORS_PER_TARGET> armor_z_to_v = {0.0, 0.0, 0.0, 0.0};
+    std::array<double, MAX_ARMORS_PER_TARGET> armor_last_seen = {0.0, 0.0, 0.0, 0.0};
+    std::array<double, MAX_ARMORS_PER_TARGET> armor_scores = {0.0, 0.0, 0.0, 0.0};
 
     // ==================== 置信度 ====================
 
@@ -296,52 +334,142 @@ struct VehicleState {
 
     // ==================== 辅助方法 ====================
 
-    const ArmorState* get_recommended_armor() const {
-        if (recommended_armor_idx >= 0 && recommended_armor_idx < armor_count) {
-            return &armors[recommended_armor_idx];
+    bool armor_index_valid(int armor_idx) const {
+        return armor_idx >= 0 && armor_idx < armor_count
+            && armor_idx < MAX_ARMORS_PER_TARGET;
+    }
+
+    double armor_step() const {
+        return armor_count > 0 ? (2.0 * M_PI / armor_count) : 0.0;
+    }
+
+    int armor_id(int armor_idx) const {
+        return armor_index_valid(armor_idx) ? armor_ids[armor_idx] : -1;
+    }
+
+    ArmorType armor_type(int armor_idx) const {
+        return armor_index_valid(armor_idx) ? armor_types[armor_idx] : ArmorType::SMALL;
+    }
+
+    double armor_width(int armor_idx) const {
+        return armor_size::width(armor_type(armor_idx));
+    }
+
+    double armor_height(int armor_idx) const {
+        return armor_size::height(armor_type(armor_idx));
+    }
+
+    bool armor_visible(int armor_idx) const {
+        return armor_index_valid(armor_idx)
+            && (visible_mask & (1u << armor_idx)) != 0;
+    }
+
+    bool armor_detected(int armor_idx) const {
+        return armor_index_valid(armor_idx)
+            && (detected_mask & (1u << armor_idx)) != 0;
+    }
+
+    void set_armor_visible(int armor_idx, bool visible) {
+        if (!armor_index_valid(armor_idx)) return;
+        if (visible) {
+            visible_mask |= (1u << armor_idx);
+        } else {
+            visible_mask &= ~(1u << armor_idx);
         }
-        const ArmorState* best = nullptr;
+    }
+
+    void set_armor_detected(int armor_idx, bool detected) {
+        if (!armor_index_valid(armor_idx)) return;
+        if (detected) {
+            detected_mask |= (1u << armor_idx);
+        } else {
+            detected_mask &= ~(1u << armor_idx);
+        }
+    }
+
+    double armor_score(int armor_idx) const {
+        return armor_index_valid(armor_idx) ? armor_scores[armor_idx] : 0.0;
+    }
+
+    double armor_last_seen_time(int armor_idx) const {
+        return armor_index_valid(armor_idx) ? armor_last_seen[armor_idx] : 0.0;
+    }
+
+    int best_armor_idx() const {
+        if (recommended_armor_idx >= 0 && recommended_armor_idx < armor_count) {
+            return recommended_armor_idx;
+        }
+        int best_idx = -1;
         double best_score = -1;
         for (int i = 0; i < armor_count; ++i) {
-            if (armors[i].score > best_score) {
-                best_score = armors[i].score;
-                best = &armors[i];
+            if (armor_scores[i] > best_score) {
+                best_score = armor_scores[i];
+                best_idx = i;
             }
         }
-        return best;
+        return best_idx;
     }
 
     Eigen::Vector3d predict_center(double dt) const {
-        return center + velocity * dt;
+        return position + velocity * dt;
+    }
+
+    double armor_yaw(int armor_idx, double dt) const {
+        if (!armor_index_valid(armor_idx)) {
+            return yaw + v_yaw * dt;
+        }
+        return aimer::math::reduced_angle(yaw + v_yaw * dt + armor_idx * armor_step());
     }
 
     Eigen::Vector3d predict_armor_position(int armor_idx, double dt) const {
-        if (armor_idx < 0 || armor_idx >= armor_count) {
+        if (!armor_index_valid(armor_idx)) {
             return Eigen::Vector3d::Zero();
         }
 
-        if (!spin.active || std::abs(spin.omega) < 0.1) {
-            return armors[armor_idx].predict_position(dt);
+        if (!spin.active || std::abs(v_yaw) < 0.1) {
+            return position + armor_position_offsets[armor_idx]
+                + (velocity + armor_velocity_offsets[armor_idx]) * dt;
         }
 
-        // 陀螺：用存储位置 + 绕 z 轴旋转
-        // 注意: armors[] 是按相对顺序填充的 (armors[0] = tracked)
-        // 不能用 armor_idx % 2 判断物理属性，必须直接使用存储的位置
-        Eigen::Vector3d new_center = predict_center(dt);
-
-        // 从存储的 armors[i].position 获取相对中心的偏移 (motion 模型已正确计算)
-        Eigen::Vector3d offset = armors[armor_idx].position - center;
-
-        // 绕 z 轴旋转 omega * dt
-        double rot = spin.omega * dt;
-        double cos_rot = std::cos(rot);
-        double sin_rot = std::sin(rot);
+        const Eigen::Vector3d center = predict_center(dt);
+        const double r = armor_radii[armor_idx];
+        const double armor_inward_yaw = armor_yaw(armor_idx, dt);
 
         return Eigen::Vector3d(
-            new_center.x() + offset.x() * cos_rot - offset.y() * sin_rot,
-            new_center.y() + offset.x() * sin_rot + offset.y() * cos_rot,
-            new_center.z() + offset.z()  // z 不随旋转变化
+            center.x() - r * std::cos(armor_inward_yaw),
+            center.y() - r * std::sin(armor_inward_yaw),
+            center.z() + armor_z_offsets[armor_idx]
         );
+    }
+
+    Eigen::Vector3d predict_armor_velocity(int armor_idx, double dt) const {
+        if (!armor_index_valid(armor_idx)) {
+            return Eigen::Vector3d::Zero();
+        }
+        if (!spin.active || std::abs(v_yaw) < 0.1) {
+            return velocity + armor_velocity_offsets[armor_idx];
+        }
+
+        const Eigen::Vector3d center = predict_center(dt);
+        const Eigen::Vector3d armor_pos = predict_armor_position(armor_idx, dt);
+        const Eigen::Vector3d offset = armor_pos - center;
+        return velocity + Eigen::Vector3d(
+            -v_yaw * offset.y(),
+            +v_yaw * offset.x(),
+            0.0
+        );
+    }
+
+    double predicted_z_to_v(int armor_idx, double dt) const {
+        if (!armor_index_valid(armor_idx)) {
+            return 0.0;
+        }
+        if (!spin.active || std::abs(v_yaw) < 0.1) {
+            return armor_z_to_v[armor_idx];
+        }
+        const Eigen::Vector3d pos = predict_armor_position(armor_idx, dt);
+        const double view_yaw = std::atan2(pos.y(), pos.x());
+        return aimer::math::reduced_angle(armor_yaw(armor_idx, dt) - view_yaw);
     }
 };
 
@@ -349,7 +477,7 @@ struct VehicleState {
  * @brief 战场快照 (Predictor → 火控)
  */
 struct BattlefieldSnapshot {
-    std::array<VehicleState, MAX_TARGETS> vehicles;
+    std::vector<TargetState> targets;
 
     uint16_t valid_mask = 0;       // 哪些目标有效
     uint16_t detected_mask = 0;   // 当前帧检测到哪些
@@ -374,11 +502,38 @@ struct BattlefieldSnapshot {
         return id >= 0 && id < MAX_TARGETS && (detected_mask & (1 << id)) != 0;
     }
 
-    const VehicleState* get_primary() const {
-        if (primary_target_id >= 0 && is_valid(primary_target_id)) {
-            return &vehicles[primary_target_id];
+    const TargetState* get_primary() const {
+        return find_target(primary_target_id);
+    }
+
+    const TargetState* find_target(int id) const {
+        if (id < 0 || !is_valid(id)) {
+            return nullptr;
         }
-        return nullptr;
+        auto it = std::find_if(targets.begin(), targets.end(),
+            [id](const TargetState& target) {
+                return target.target_id == id && target.valid;
+            });
+        return it != targets.end() ? &(*it) : nullptr;
+    }
+
+    TargetState* find_target(int id) {
+        if (id < 0 || !is_valid(id)) {
+            return nullptr;
+        }
+        auto it = std::find_if(targets.begin(), targets.end(),
+            [id](const TargetState& target) {
+                return target.target_id == id && target.valid;
+            });
+        return it != targets.end() ? &(*it) : nullptr;
+    }
+
+    void add_target(const TargetState& target) {
+        if (!target.valid || target.target_id < 0 || target.target_id >= MAX_TARGETS) {
+            return;
+        }
+        targets.push_back(target);
+        set_valid(target.target_id, true);
     }
 
     void set_valid(int id, bool valid) {
@@ -397,16 +552,18 @@ struct BattlefieldSnapshot {
 
     template<typename Func>
     void for_each_valid(Func&& func) const {
-        for (int i = 0; i < MAX_TARGETS; ++i) {
-            if (is_valid(i)) func(i, vehicles[i]);
+        for (const auto& target : targets) {
+            if (target.valid && is_valid(target.target_id)) {
+                func(target.target_id, target);
+            }
         }
     }
 
     void clear() {
+        targets.clear();
         valid_mask = 0;
         detected_mask = 0;
         primary_target_id = -1;
-        for (auto& v : vehicles) v.valid = false;
     }
 };
 

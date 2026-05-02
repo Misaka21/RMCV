@@ -47,7 +47,7 @@ public:
      * @brief 预测状态
      * @param timestamp 预测时间点
      */
-    virtual VehicleState predict(double timestamp) const = 0;
+    virtual TargetState predict(double timestamp) const = 0;
 
     /**
      * @brief 是否存活 (有效)

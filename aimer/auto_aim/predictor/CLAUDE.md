@@ -29,7 +29,7 @@ DetectionResult
 - `BattlefieldSnapshot.predict_timestamp` 使用预测完成时间，供火控估算
   `img_to_predict` 延迟。
 - `BattlefieldSnapshot.self_state` 保存检测时刻自身状态。
-- `VehicleState` 表示单个目标整体状态。
+- `TargetState` 表示单个目标整体状态。
 - `ArmorState` 表示单块装甲板位置、速度、朝向、可见性和评分。
 
 ## 模型边界

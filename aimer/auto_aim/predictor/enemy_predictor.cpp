@@ -145,16 +145,16 @@ BattlefieldSnapshot EnemyPredictor::export_snapshot() {
     int best_target_id = -1;
     double best_confidence = -1;
 
-    // 从模型导出各车辆状态
+    // 从模型导出各目标状态
     for (int i = 1; i < MAX_TARGETS; ++i) {
         if (enemy_models_[i] && enemy_models_[i]->alive()) {
-            snapshot.vehicles[i] = enemy_models_[i]->predict(current_time_);
-            snapshot.set_valid(i, true);
+            auto target = enemy_models_[i]->predict(current_time_);
+            snapshot.add_target(target);
 
             // 选择置信度最高的作为默认主目标
             // 注意: 实际应由 FireControl 根据代价函数选择
-            if (snapshot.vehicles[i].confidence > best_confidence) {
-                best_confidence = snapshot.vehicles[i].confidence;
+            if (target.confidence > best_confidence) {
+                best_confidence = target.confidence;
                 best_target_id = i;
             }
         }
