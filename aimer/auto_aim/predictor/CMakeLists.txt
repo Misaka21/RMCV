@@ -14,10 +14,7 @@ add_library(predictor STATIC
     # model/
     model/enemy_model_factory.cpp
     model/vehicle/vehicle_model.cpp
-    model/vehicle/ekf/motion_factory.cpp
     model/vehicle/ekf/armor_ekf.cpp
-    model/vehicle/ekf/spin_ekf.cpp
-    model/vehicle/ekf/lmtd_ekf.cpp
     model/vehicle/ekf/sp_ekf.cpp
     model/outpost/outpost_model.cpp
     model/outpost/outpost_ekf.cpp
