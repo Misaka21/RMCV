@@ -60,7 +60,7 @@ enum StateIdx {
     OMEGA = 6   // 角速度 (约束 |ω| ≈ 0.8π)
 };
 
-// 观测索引 (和 SpinMotion 一样)
+// 观测索引
 enum ObsIdx {
     YAW = 0,
     PITCH = 1,
@@ -75,7 +75,7 @@ enum ObsIdx {
 // ============================================================================
 
 /**
- * @brief 匀速预测 (和 SpinMotion 类似，但没有 r 状态)
+ * @brief 前哨站匀速预测
  */
 struct OutpostCVPredict {
     double dt;

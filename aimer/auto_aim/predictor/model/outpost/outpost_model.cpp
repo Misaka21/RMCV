@@ -65,6 +65,7 @@ void draw_armor_rect(
     const cv::Scalar& color,
     int thickness
 ) {
+    // yaw 使用 INWARD 语义: 从装甲板指向前哨站旋转中心。
     const double w = (type == ArmorType::LARGE) ? 0.225 : 0.133;
     const double h = 0.050;
     const double pitch = armor_pitch_by_rule(ArmorNumber::OUTPOST);
@@ -229,13 +230,17 @@ void OutpostModel::update(const std::vector<ArmorObservation>& observations, dou
     initialized_ = motion_.valid();
 }
 
-VehicleState OutpostModel::predict(double timestamp) const {
-    VehicleState vs;
-    vs.target_id = target_id_;
-    vs.enemy_type = enemy_type_;
-    vs.valid = initialized_;
+TargetState OutpostModel::predict(double timestamp) const {
+    TargetState target;
+    target.target_id = target_id_;
+    target.enemy_type = enemy_type_;
+    target.valid = initialized_;
+    target.tracking = initialized_;
+    target.timestamp = timestamp;
+    target.frame_count = frame_count_;
+    target.armor_count = ARMOR_NUM;
 
-    if (!initialized_) return vs;
+    if (!initialized_) return target;
 
     // 计算预测时间差
     double dt = timestamp - last_update_time_;
@@ -246,46 +251,63 @@ VehicleState OutpostModel::predict(double timestamp) const {
     Eigen::Vector3d center = motion_.predict_center(dt);
     Eigen::Vector3d velocity = motion_.get_velocity();
     double omega = motion_.get_omega();
-    const double theta_inward = motion_.get_theta() + omega * dt;
-    const double theta_outward = theta_inward + M_PI;
+    const double theta_inward = aimer::math::reduced_angle(motion_.get_theta() + omega * dt);
 
-    vs.center = center;
-    vs.velocity = velocity;
-    vs.timestamp = timestamp;
-    vs.armor_count = ARMOR_NUM;
+    target.position = center;
+    target.velocity = velocity;
+    target.yaw = theta_inward;
+    target.v_yaw = omega;
+    target.radius_1 = outpost_model::RADIUS;
+    target.radius_2 = outpost_model::RADIUS;
+    target.dz = outpost_model::DZ_STEP;
 
     // 陀螺状态
-    vs.spin.active = true;
-    vs.spin.omega = omega;
-    vs.spin.phase = theta_outward;
-    vs.spin.radius = outpost_model::RADIUS;
-    vs.spin.level = SpinLevel::HIGH;  // 前哨站始终高速
+    target.spin.active = true;
+    target.spin.omega = omega;
+    target.spin.phase = theta_inward;
+    target.spin.radius = outpost_model::RADIUS;
+    target.spin.radius_2 = outpost_model::RADIUS;
+    target.spin.dz = target.dz;
+    target.spin.level = SpinLevel::HIGH;  // 前哨站始终高速
 
     // 生成 3 块装甲板位置
+    const int current_slot = motion_.get_current_slot();
+    double best_score = -1.0;
     for (int i = 0; i < ARMOR_NUM; ++i) {
         Eigen::Vector3d armor_pos = motion_.predict_armor_pos(i, dt);
+        const Eigen::Vector3d offset = armor_pos - center;
 
-        vs.armors[i].id = i;
-        vs.armors[i].type = ArmorType::SMALL;
-        vs.armors[i].position = armor_pos;
-        vs.armors[i].velocity = velocity;  // 继承中心速度
-        vs.armors[i].visible = visible_fresh;
-        vs.armors[i].last_seen = last_update_time_;
+        target.armor_ids[i] = i;
+        target.armor_types[i] = ArmorType::SMALL;
+        target.armor_radii[i] = outpost_model::RADIUS;
+        target.armor_z_offsets[i] = offset.z();
+        target.armor_position_offsets[i] = offset;
+        target.armor_velocity_offsets[i] = Eigen::Vector3d(
+            -omega * offset.y(),
+            +omega * offset.x(),
+            0.0
+        );
+        target.armor_last_seen[i] = last_update_time_;
 
-        const double armor_yaw_inward = theta_inward + i * (2.0 * M_PI / 3.0);
-        const double armor_yaw_outward = armor_yaw_inward + M_PI;
-        vs.armors[i].yaw = armor_yaw_outward;
+        const double z_to_v = target.predicted_z_to_v(i, 0.0);
+        const double score = std::cos(std::abs(z_to_v));
+        target.armor_z_to_v[i] = z_to_v;
+        target.armor_scores[i] = score;
+        if (score > best_score) {
+            best_score = score;
+        }
 
-        const double view_yaw = std::atan2(armor_pos.y(), armor_pos.x());
-        const double z_to_v = aimer::math::reduced_angle(armor_yaw_outward - view_yaw - M_PI);
-        vs.armors[i].z_to_v = z_to_v;
-        vs.armors[i].score = std::cos(std::abs(z_to_v));
+        const bool observed_slot = visible_fresh && (i == current_slot);
+        target.set_armor_visible(i, observed_slot);
+        target.set_armor_detected(i, observed_slot);
     }
 
     // 推荐装甲板 = 当前追踪的槽位
-    vs.recommended_armor_idx = motion_.get_current_slot();
+    target.recommended_armor_idx = current_slot;
+    const double stale_time = std::max(0.0, dt);
+    target.confidence = std::max(0.0, best_score) * std::exp(-stale_time / LOST_TIMEOUT);
 
-    return vs;
+    return target;
 }
 
 bool OutpostModel::alive() const {
@@ -328,10 +350,12 @@ void OutpostModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
 
     const int current_slot = motion_.get_current_slot();
     const double omega = motion_.get_omega();
+    // theta_predicted 是 slot 0 装甲板的 INWARD yaw。
     const double theta_predicted = motion_.get_theta() + omega * draw_dt;
 
     for (int i = 0; i < ARMOR_NUM; ++i) {
         const Eigen::Vector3d pos = motion_.predict_armor_pos(i, draw_dt);
+        // OutpostMotion 与 TargetState 均使用 INWARD yaw，绘制不再做 π 转换。
         const double armor_yaw = theta_predicted + i * (2.0 * M_PI / ARMOR_NUM);
         const bool current = (i == current_slot);
         const cv::Scalar color = current ? color_current : color_predicted;
@@ -389,7 +413,7 @@ void OutpostModel::draw(cv::Mat& img, const Eigen::Quaterniond& q_imu, double ti
         const double omega_deg = omega * 180.0 / M_PI;
         const std::array<std::string, 5> lines = {
             fmt::format("[T{}] OUTPOST | EKF ON", target_id_),
-            fmt::format("slot:{} | w:{:+.0f} d/s | th:{:.0f}", current_slot, omega_deg, theta_deg),
+            fmt::format("slot:{} | w:{:+.0f} d/s | in_yaw:{:.0f}", current_slot, omega_deg, theta_deg),
             fmt::format("r:{:.2f} | dt:{:.1f}ms | lost:{:.1f}ms",
                 outpost_model::RADIUS, draw_dt * 1000.0, time_since_update * 1000.0),
             fmt::format("pos: ({:.2f}, {:.2f}, {:.2f})", center.x(), center.y(), center.z()),
