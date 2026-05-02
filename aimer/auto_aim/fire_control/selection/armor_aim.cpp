@@ -64,7 +64,7 @@ struct DirectScore {
 };
 
 DirectScore score_direct_candidate(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     int idx,
     double predict_dt,
     const ::fire_control::GimbalState& gimbal,
@@ -73,7 +73,7 @@ DirectScore score_direct_candidate(
 )
 {
     DirectScore score;
-    const Eigen::Vector3d pos = vehicle.predict_armor_position(idx, predict_dt);
+    const Eigen::Vector3d pos = target.predict_armor_position(idx, predict_dt);
     if (!pos.allFinite() || pos.squaredNorm() < 1e-9) {
         return score;
     }
@@ -125,29 +125,8 @@ bool direct_score_better(const DirectScore& lhs, const DirectScore& rhs)
     return lhs.swing_cost < rhs.swing_cost;
 }
 
-double predicted_z_to_v(
-    const predictor::VehicleState& vehicle,
-    int armor_idx,
-    double predict_dt
-)
-{
-    if (armor_idx < 0 || armor_idx >= vehicle.armor_count) {
-        return 0.0;
-    }
-
-    const auto& armor = vehicle.armors[armor_idx];
-    if (!vehicle.spin.active || std::abs(vehicle.spin.omega) < 0.1) {
-        return armor.z_to_v;
-    }
-
-    const Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, predict_dt);
-    const double armor_yaw = armor.yaw + vehicle.spin.omega * predict_dt;
-    const double view_yaw = std::atan2(pos.y(), pos.x());
-    return aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI);
-}
-
-TopAimProfile get_top_aim_profile(const predictor::VehicleState& vehicle) {
-    const double top0_deg = (vehicle.armor_count == 4)
+TopAimProfile get_top_aim_profile(const predictor::TargetState& target) {
+    const double top0_deg = (target.armor_count == 4)
         ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
         : get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0);
     const double top0_out = get_param_or("AutoAim.FireControl.PID.top0_max_out_error", 1.8);
@@ -159,7 +138,7 @@ TopAimProfile get_top_aim_profile(const predictor::VehicleState& vehicle) {
     const double top2_out = get_param_or("AutoAim.FireControl.PID.top2_max_out_error", 1.8);
 
     TopAimProfile profile;
-    switch (vehicle.spin.level) {
+    switch (target.spin.level) {
         case predictor::SpinLevel::HIGH:
             profile.max_orientation_angle = aimer::math::deg2rad(top2_deg);
             profile.max_out_error = std::max(0.0, top2_out);
@@ -188,7 +167,7 @@ TopAimProfile get_top_aim_profile(const predictor::VehicleState& vehicle) {
 }  // namespace
 
 ArmorAimResult ArmorAim::compute(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double predict_dt
 ) const
 {
@@ -196,7 +175,7 @@ ArmorAimResult ArmorAim::compute(
 }
 
 ArmorAimResult ArmorAim::compute(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
@@ -216,7 +195,7 @@ ArmorAimResult ArmorAim::compute(
 }
 
 ArmorAimResult ArmorAim::compute(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     int preferred_armor_idx,
@@ -227,7 +206,7 @@ ArmorAimResult ArmorAim::compute(
 }
 
 ArmorAimResult ArmorAim::compute_non_spin(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
@@ -247,7 +226,7 @@ ArmorAimResult ArmorAim::compute_non_spin(
 }
 
 ArmorAimResult ArmorAim::compute_spin(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
@@ -295,7 +274,7 @@ ArmorAimResult ArmorAim::compute_spin(
 }
 
 ArmorAimResult ArmorAim::compute_direct(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
@@ -313,7 +292,7 @@ ArmorAimResult ArmorAim::compute_direct(
     std::vector<int> candidate_indices;
     candidate_indices.reserve(vehicle.armor_count);
     for (int i = 0; i < vehicle.armor_count; ++i) {
-        if (!visible_only || vehicle.armors[i].visible) {
+        if (!visible_only || vehicle.armor_visible(i)) {
             candidate_indices.push_back(i);
         }
     }
@@ -327,7 +306,7 @@ ArmorAimResult ArmorAim::compute_direct(
         std::vector<int> in_window;
         in_window.reserve(candidate_indices.size());
         for (int idx : candidate_indices) {
-            if (std::abs(predicted_z_to_v(vehicle, idx, predict_dt)) <= window) {
+            if (std::abs(vehicle.predicted_z_to_v(idx, predict_dt)) <= window) {
                 in_window.push_back(idx);
             }
         }
@@ -351,22 +330,21 @@ ArmorAimResult ArmorAim::compute_direct(
         return result;
     }
 
-    const auto& armor = vehicle.armors[armor_idx];
     result.valid = true;
     result.mode = AimMode::DIRECT;
     result.armor_idx = armor_idx;
-    result.armor_id = armor.id;
+    result.armor_id = vehicle.armor_id(armor_idx);
     result.target_pos = vehicle.predict_armor_position(armor_idx, predict_dt);
     result.target_vel = compute_armor_velocity(vehicle, armor_idx, predict_dt);
-    result.z_to_v = predicted_z_to_v(vehicle, armor_idx, predict_dt);
+    result.z_to_v = vehicle.predicted_z_to_v(armor_idx, predict_dt);
     result.time_to_fire = 0.0;
-    result.armor_width = armor.width();
-    result.armor_height = armor.height();
+    result.armor_width = vehicle.armor_width(armor_idx);
+    result.armor_height = vehicle.armor_height(armor_idx);
     return result;
 }
 
 ArmorAimResult ArmorAim::compute_indirect(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
     const Eigen::Quaterniond* q_imu,
@@ -386,12 +364,12 @@ ArmorAimResult ArmorAim::compute_indirect(
         return result;
     }
 
-    const double omega = vehicle.spin.omega;
+    const double omega = vehicle.v_yaw;
     if (std::abs(omega) < 1e-4) {
         return result;
     }
 
-    const double sample_armor_width = vehicle.armors[0].width();
+    const double sample_armor_width = vehicle.armor_width(0);
     const double zn_to_lim = (omega > 0.0) ? -max_orientation_angle : +max_orientation_angle;
 
     int best_idx = -1;
@@ -426,14 +404,15 @@ ArmorAimResult ArmorAim::compute_indirect(
 
         // 对齐 rm.cv.fans: max_out_angle = sample_width/2 * max_out_error / radius
         const double leave_angle = sample_armor_width * 0.5 * max_out_error / radius;
-        const double z_to_v = predicted_z_to_v(vehicle, i, predict_dt);
+        const double z_to_v = vehicle.predicted_z_to_v(i, predict_dt);
+        // 这里的 M_PI 只用于把角距离折到正向等待区间，不是 OUTWARD yaw 修正。
         const double armor_to_lim = (omega > 0.0)
             ? (aimer::math::reduced_angle((zn_to_lim - z_to_v) - M_PI + leave_angle) + M_PI - leave_angle)
             : (aimer::math::reduced_angle((z_to_v - zn_to_lim) - M_PI + leave_angle) + M_PI - leave_angle);
 
         diags.push_back(CandidateDiag{
             i,
-            vehicle.armors[i].visible,
+            vehicle.armor_visible(i),
             z_to_v,
             leave_angle,
             armor_to_lim,
@@ -484,14 +463,14 @@ ArmorAimResult ArmorAim::compute_indirect(
 
     result.valid = true;
     result.armor_idx = best_idx;
-    result.armor_id = vehicle.armors[best_idx].id;
+    result.armor_id = vehicle.armor_id(best_idx);
     result.target_pos = emerge_pos;
     // 与 rm.cv.fans 一致：返回被选中装甲板在当前时刻的 z_to_v，
     // 后续开火门控会基于各自时刻再次计算。
-    result.z_to_v = predicted_z_to_v(vehicle, best_idx, predict_dt);
+    result.z_to_v = vehicle.predicted_z_to_v(best_idx, predict_dt);
     result.time_to_fire = time_to_emerge;
-    result.armor_width = vehicle.armors[best_idx].width();
-    result.armor_height = vehicle.armors[best_idx].height();
+    result.armor_width = vehicle.armor_width(best_idx);
+    result.armor_height = vehicle.armor_height(best_idx);
 
     // 对齐 rm.cv.fans: indirect 的 ypd_v 仅使用 center_v。
     result.target_vel = vehicle.velocity;
@@ -545,7 +524,7 @@ ArmorAimResult ArmorAim::compute_indirect(
 }
 
 int ArmorAim::choose_best_direct(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     const std::vector<int>& direct_indices,
     double predict_dt,
     const ::fire_control::GimbalState* gimbal,
@@ -559,11 +538,11 @@ int ArmorAim::choose_best_direct(
     }
 
     // 对齐 rm.cv.fans 的“无硬锁板”前提下，固定候选遍历顺序，
-    // 避免 vehicle.armors[] 因 tracked_id 轮转导致同分候选来回抖动。
+    // 避免装甲板物理 id 顺序变化导致同分候选来回抖动。
     std::vector<int> ordered_indices = direct_indices;
     std::sort(ordered_indices.begin(), ordered_indices.end(),
         [&](int a, int b) {
-            return vehicle.armors[a].id < vehicle.armors[b].id;
+            return vehicle.armor_id(a) < vehicle.armor_id(b);
         });
 
     // 对齐 rm.cv.fans armor_model::aim_cmp:
@@ -605,9 +584,9 @@ int ArmorAim::choose_best_direct(
 
     // 无云台状态时回退到“最正对”策略
     int best_idx = ordered_indices[0];
-    double best_score = std::abs(predicted_z_to_v(vehicle, best_idx, predict_dt));
+    double best_score = std::abs(vehicle.predicted_z_to_v(best_idx, predict_dt));
     for (int idx : ordered_indices) {
-        const double score = std::abs(predicted_z_to_v(vehicle, idx, predict_dt));
+        const double score = std::abs(vehicle.predicted_z_to_v(idx, predict_dt));
         if (score < best_score) {
             best_score = score;
             best_idx = idx;
@@ -617,7 +596,7 @@ int ArmorAim::choose_best_direct(
 }
 
 Eigen::Vector3d ArmorAim::compute_armor_velocity(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     int armor_idx,
     double predict_dt
 ) const
@@ -626,23 +605,7 @@ Eigen::Vector3d ArmorAim::compute_armor_velocity(
         return Eigen::Vector3d::Zero();
     }
 
-    if (!vehicle.spin.active) {
-        return vehicle.armors[armor_idx].velocity;
-    }
-
-    // 陀螺模式: v = v_center + ω × (armor_pos - center)
-    double omega = vehicle.spin.omega;
-    const Eigen::Vector3d center = vehicle.predict_center(predict_dt);
-    const Eigen::Vector3d armor_pos = vehicle.predict_armor_position(armor_idx, predict_dt);
-    Eigen::Vector3d offset = armor_pos - center;
-    Eigen::Vector3d tangent_vel(
-        -omega * offset.y(),
-        +omega * offset.x(),
-        0
-    );
-
-    // 加上中心速度
-    return vehicle.velocity + tangent_vel;
+    return vehicle.predict_armor_velocity(armor_idx, predict_dt);
 }
 
 }  // namespace autoaim::fire_control

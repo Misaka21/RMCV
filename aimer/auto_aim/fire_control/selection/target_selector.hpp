@@ -104,7 +104,7 @@ private:
      * @brief 检查该敌人是否有可见装甲板
      */
     bool has_visible_armor(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double dt
     ) const;
 
@@ -115,7 +115,7 @@ private:
      *   只要处于陀螺级别且仍在信用时间内，即便窗口角为 0 也可继续跟踪。
      */
     bool can_track_without_visible(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double current_time
     ) const;
 
@@ -123,7 +123,7 @@ private:
      * @brief 目标是否可用于火控（可见 direct 或无可见但可 indirect）
      */
     bool is_trackable_target(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double dt,
         double current_time
     ) const;
@@ -145,14 +145,14 @@ private:
     /**
      * @brief 获取当前目标保持时间 (按 enemy_type 区分)
      */
-    double keep_as_target_time(const predictor::VehicleState& vehicle) const;
+    double keep_as_target_time(const predictor::TargetState& target) const;
 
     /**
      * @brief 评估单个敌人的最佳可见候选板（仅 visible）
      */
     VisibleCandidate evaluate_visible_candidate(
         int target_id,
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         const GimbalState& gimbal,
         double dt
     ) const;
@@ -162,7 +162,7 @@ private:
      * @return 装甲板索引，若无可见可打装甲板则返回 -1
      */
     int pick_best_visible_armor(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         const GimbalState& gimbal,
         double dt
     ) const;

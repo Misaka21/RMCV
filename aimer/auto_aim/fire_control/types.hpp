@@ -49,7 +49,7 @@ constexpr double CONTROL_DT = 0.002;        // 控制周期 2ms (500Hz)
 struct TargetSelection {
     bool has_target = false;
 
-    int target_id = -1;        // 敌人索引 (snapshot.vehicles[target_id])
+    int target_id = -1;        // 敌人编号，用 snapshot.find_target(target_id) 获取目标
 
     double priority = 0;       // 优先级评分
 
