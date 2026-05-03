@@ -31,15 +31,15 @@ double get_param_or(const std::string& name, double default_value)
 }  // namespace
 
 // 公共工具函数 (需在匿名命名空间之后，因为依赖 get_param_or)
-double get_spin_window_rad(const predictor::VehicleState& vehicle)
+double get_spin_window_rad(const predictor::TargetState& target)
 {
-    const double top0_deg = (vehicle.armor_count == 4)
+    const double top0_deg = (target.armor_count == 4)
         ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
         : get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors_other", 75.0);
     const double top1_deg = get_param_or("AutoAim.FireControl.PID.top1_max_orientation_angle", 0.0);
     const double top2_deg = get_param_or("AutoAim.FireControl.PID.top2_max_orientation_angle", 0.0);
 
-    switch (vehicle.spin.level) {
+    switch (target.spin.level) {
         case predictor::SpinLevel::HIGH:
             return aimer::math::deg2rad(top2_deg);
         case predictor::SpinLevel::LOW:
@@ -51,12 +51,12 @@ double get_spin_window_rad(const predictor::VehicleState& vehicle)
 }
 
 namespace {
-double get_spin_out_error(const predictor::VehicleState& vehicle)
+double get_spin_out_error(const predictor::TargetState& target)
 {
     const double top0_out = get_param_or("AutoAim.FireControl.PID.top0_max_out_error", 1.8);
     const double top1_out = get_param_or("AutoAim.FireControl.PID.top1_max_out_error", 0.6);
     const double top2_out = get_param_or("AutoAim.FireControl.PID.top2_max_out_error", 1.8);
-    switch (vehicle.spin.level) {
+    switch (target.spin.level) {
         case predictor::SpinLevel::HIGH:
             return std::max(0.0, top2_out);
         case predictor::SpinLevel::LOW:
@@ -67,7 +67,7 @@ double get_spin_out_error(const predictor::VehicleState& vehicle)
     }
 }
 
-double get_spin_swing_error(const predictor::VehicleState& vehicle)
+double get_spin_swing_error(const predictor::TargetState& target)
 {
     // 报告语义：max-swing-error 与 max-out-error 解耦。
     // 若未单独配置，回退到同级 max-out-error，保持兼容。
@@ -77,7 +77,7 @@ double get_spin_swing_error(const predictor::VehicleState& vehicle)
     const double top0_swing = get_param_or("AutoAim.FireControl.PID.top0_max_swing_error", top0_default);
     const double top1_swing = get_param_or("AutoAim.FireControl.PID.top1_max_swing_error", top1_default);
     const double top2_swing = get_param_or("AutoAim.FireControl.PID.top2_max_swing_error", top2_default);
-    switch (vehicle.spin.level) {
+    switch (target.spin.level) {
         case predictor::SpinLevel::HIGH:
             return std::max(0.0, top2_swing);
         case predictor::SpinLevel::LOW:
@@ -164,7 +164,7 @@ void FireController::reset()
 bool FireController::evaluate_fire_window(
     const predictor::BattlefieldSnapshot& snapshot,
     const LatencyInfo& latency,
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double prediction_dt,
     const Eigen::Vector3d& self_velocity
 )
@@ -190,7 +190,7 @@ bool FireController::evaluate_fire_window(
     // 反陀螺对齐 antitop/rm.cv.fans:
     // 1) 预测控制命中点 tracking_aim（上面已判）
     // 2) 再检查实际出弹命中点 hit_aim 的 swing/out 约束
-    if (vehicle.spin.active && std::abs(vehicle.spin.omega) > 1e-4) {
+    if (vehicle.spin.active && std::abs(vehicle.v_yaw) > 1e-4) {
         const double control_to_fire = std::max(0.0, latency.control_to_fire);
         const double hit_dt = prediction_dt + control_to_fire;
         DirectAimContext direct_ctx;
@@ -330,7 +330,7 @@ bool FireController::evaluate_fire_window(
 }
 
 bool FireController::evaluate_rotate_back_gate(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     double prediction_dt,
     const LatencyInfo& latency,
     double bullet_speed,
@@ -351,7 +351,7 @@ bool FireController::evaluate_rotate_back_gate(
     if (!vehicle.spin.active || vehicle.spin.level == predictor::SpinLevel::NONE) {
         return true;
     }
-    if (std::abs(vehicle.spin.omega) < 1e-4 || bullet_speed <= 1e-3) {
+    if (std::abs(vehicle.v_yaw) < 1e-4 || bullet_speed <= 1e-3) {
         return true;
     }
     const double control_to_fire = std::max(0.0, latency.control_to_fire);
@@ -388,10 +388,10 @@ bool FireController::evaluate_rotate_back_gate(
     }
 
     auto armor_yaw_at = [&](int armor_idx, double t) {
-        return vehicle.armors[armor_idx].yaw + vehicle.spin.omega * t;
+        return vehicle.armor_yaw(armor_idx, t);
     };
 
-    const double omega = vehicle.spin.omega;
+    const double omega = vehicle.v_yaw;
     const double armor_yaw_water = armor_yaw_at(water_aim.armor_idx, time_water_hit);
     const double armor_yaw_command = armor_yaw_at(command_aim.armor_idx, time_command_hit);
     const double armor_rotate_water_to_command = aimer::math::reduced_angle(
@@ -465,7 +465,7 @@ bool FireController::evaluate_rotate_back_gate(
 
 bool FireController::solve_aim_with_latency_iteration(
     const predictor::BattlefieldSnapshot& snapshot,
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& vehicle,
     const Eigen::Vector3d& self_velocity,
     double current_time,
     const LatencyInfo& base_latency,
@@ -607,7 +607,7 @@ FireCommand FireController::control(
 
     TargetSelection selection;
     if (has_cached_solution_ && snapshot.frame_id == last_solution_frame_id_
-        && last_selection_.has_target && snapshot.is_valid(last_selection_.target_id))
+        && last_selection_.has_target && snapshot.find_target(last_selection_.target_id) != nullptr)
     {
         selection = last_selection_;
     } else {
@@ -637,7 +637,8 @@ FireCommand FireController::control(
     lost_count_ = 0;
     last_no_target_frame_id_ = -1;
 
-    if (!snapshot.is_valid(selection.target_id)) {
+    const auto* selected_target = snapshot.find_target(selection.target_id);
+    if (selected_target == nullptr) {
         last_fail_stage_ = 1;
         has_cached_solution_ = false;
         last_gate_debug_ = {};
@@ -648,22 +649,19 @@ FireCommand FireController::control(
         return no_target_command();
     }
 
-    // 获取目标车辆的引用 (用索引访问，避免指针悬空问题)
-    const auto& vehicle = snapshot.vehicles[selection.target_id];
+    const auto& vehicle = *selected_target;
 
     // 5. 选择 preferred armor（跨帧沿用绝对 id）
     int preferred_armor_idx = -1;
     if (last_armor_id_ >= 0) {
         for (int i = 0; i < vehicle.armor_count; ++i) {
-            if (vehicle.armors[i].id == last_armor_id_) {
+            if (vehicle.armor_id(i) == last_armor_id_) {
                 preferred_armor_idx = i;
                 break;
             }
         }
     }
-    if (preferred_armor_idx < 0
-        && vehicle.recommended_armor_idx >= 0
-        && vehicle.recommended_armor_idx < vehicle.armor_count)
+    if (preferred_armor_idx < 0 && vehicle.armor_index_valid(vehicle.recommended_armor_idx))
     {
         preferred_armor_idx = vehicle.recommended_armor_idx;
     }
@@ -711,7 +709,7 @@ FireCommand FireController::control(
     if (armor_result.armor_id >= 0) {
         last_armor_id_ = armor_result.armor_id;
     } else if (armor_result.armor_idx >= 0 && armor_result.armor_idx < vehicle.armor_count) {
-        last_armor_id_ = vehicle.armors[armor_result.armor_idx].id;
+        last_armor_id_ = vehicle.armor_id(armor_result.armor_idx);
     }
     bool can_fire = evaluate_fire_window(
         snapshot, solved_latency, vehicle, last_prediction_dt_, self_velocity

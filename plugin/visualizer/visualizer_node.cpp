@@ -42,7 +42,7 @@ using SteadyClock = std::chrono::steady_clock;
 using autoaim::predictor::BattlefieldSnapshot;
 using autoaim::predictor::PredictorDebugFrame;
 using autoaim::predictor::SpinLevel;
-using autoaim::predictor::VehicleState;
+using autoaim::predictor::TargetState;
 using autoaim::predictor::MAX_TARGETS;
 using fire_control::FireDebugInfo;
 
@@ -105,12 +105,12 @@ static int choose_debug_target_id(
 }
 
 static int resolve_selected_armor_idx(
-    const VehicleState& v,
+    const TargetState& v,
     const FireDebugInfo& dbg
 ) {
     if (dbg.armor_id >= 0) {
         for (int i = 0; i < v.armor_count; ++i) {
-            if (v.armors[i].id == dbg.armor_id) {
+            if (v.armor_id(i) == dbg.armor_id) {
                 return i;
             }
         }
@@ -133,21 +133,11 @@ static double center_cost_deg(
 }
 
 static double predicted_armor_z_to_v(
-    const VehicleState& v,
+    const TargetState& v,
     int armor_idx,
     double predict_dt
 ) {
-    if (armor_idx < 0 || armor_idx >= v.armor_count) {
-        return 0.0;
-    }
-    const auto& a = v.armors[armor_idx];
-    if (!v.spin.active || std::abs(v.spin.omega) < 0.1) {
-        return a.z_to_v;
-    }
-    const Eigen::Vector3d pos = v.predict_armor_position(armor_idx, predict_dt);
-    const double armor_yaw = a.yaw + v.spin.omega * predict_dt;
-    const double view_yaw = std::atan2(pos.y(), pos.x());
-    return aimer::math::reduced_angle(armor_yaw - view_yaw - M_PI);
+    return v.predicted_z_to_v(armor_idx, predict_dt);
 }
 
 static const char* armor_aim_mode_name(int mode) {
@@ -333,7 +323,7 @@ static void draw_fire_debug_panel(
 static void draw_battlefield_panel(cv::Mat& vis, const BattlefieldSnapshot& snapshot) {
     // 收集有效目标数
     int n_tracked = 0;
-    snapshot.for_each_valid([&](int, const VehicleState&) { n_tracked++; });
+    snapshot.for_each_valid([&](int, const TargetState&) { n_tracked++; });
 
     int lh = 15;
     int panel_h = 20 + n_tracked * 2 * lh + (n_tracked > 0 ? 4 : 0);
@@ -363,7 +353,7 @@ static void draw_battlefield_panel(cv::Mat& vis, const BattlefieldSnapshot& snap
     put(fmt::format("Battlefield  {} tracked  bs={:.1f}m/s",
         n_tracked, snapshot.self_state.bullet_speed), {255, 255, 255});
 
-    snapshot.for_each_valid([&](int id, const VehicleState& v) {
+    snapshot.for_each_valid([&](int id, const TargetState& v) {
         bool is_pri = (id == snapshot.primary_target_id);
         cv::Scalar color = is_pri ? cv::Scalar(0, 255, 255) : cv::Scalar(180, 180, 180);
 
@@ -375,7 +365,7 @@ static void draw_battlefield_panel(cv::Mat& vis, const BattlefieldSnapshot& snap
         // 可见装甲板
         std::string arm_str;
         for (int a = 0; a < v.armor_count; ++a) {
-            if (v.armors[a].visible) {
+            if (v.armor_visible(a)) {
                 if (!arm_str.empty()) arm_str += ",";
                 arm_str += std::to_string(a);
             }
@@ -387,7 +377,7 @@ static void draw_battlefield_panel(cv::Mat& vis, const BattlefieldSnapshot& snap
         else if (v.spin.level == SpinLevel::HIGH) spin_label = "HIGH";
 
         put(fmt::format("{}#{} {}  {:.1f}m  arm[{}]{}",
-            is_pri ? ">" : " ", id, type_str, v.center.norm(),
+            is_pri ? ">" : " ", id, type_str, v.position.norm(),
             arm_str, is_pri ? " [PRI]" : ""), color);
 
         put(fmt::format("  spin:{} w={:+.0f}d/s r={:.2f}m  v=({:.1f},{:.1f})",
@@ -409,7 +399,11 @@ static void draw_selected_target_panel(
         return;
     }
 
-    const auto& v = snapshot.vehicles[tid];
+    const auto* target = snapshot.find_target(tid);
+    if (target == nullptr) {
+        return;
+    }
+    const auto& v = *target;
     const double pred_dt = std::max(0.0, dbg.prediction_dt);
     auto get_param_or = [](const std::string& name, double default_value) {
         auto ptr = runtime_param::find_param(name);
@@ -476,7 +470,7 @@ static void draw_selected_target_panel(
         armor_aim_mode_name(dbg.armor_aim_mode), pred_dt * 1000.0, dbg.armor_time_to_fire * 1000.0),
         cv::Scalar(100, 220, 255));
     put(fmt::format("spin:{} active={} w={:+.1f}d/s  center={:.2f}m",
-        spin_label, v.spin.active ? 1 : 0, v.spin.omega * 57.3, v.center.norm()), cv::Scalar(180, 180, 255));
+        spin_label, v.spin.active ? 1 : 0, v.spin.omega * 57.3, v.position.norm()), cv::Scalar(180, 180, 255));
     put(fmt::format("ori_window:{}  max={:.1f}deg  frame={} mask=0x{:03x}",
         use_window ? "ON" : "OFF", max_angle * 57.3, snapshot.frame_id, snapshot.valid_mask),
         cv::Scalar(160, 220, 255));
@@ -484,7 +478,6 @@ static void draw_selected_target_panel(
         cv::Scalar(140, 140, 140));
 
     for (int i = 0; i < v.armor_count; ++i) {
-        const auto& a = v.armors[i];
         const Eigen::Vector3d pos = v.predict_armor_position(i, pred_dt);
         const double z_to_v = predicted_armor_z_to_v(v, i, pred_dt);
         const bool in_window = (!use_window) || (std::abs(z_to_v) <= max_angle);
@@ -493,15 +486,15 @@ static void draw_selected_target_panel(
         const bool selected = (i == sel_idx);
 
         cv::Scalar color = selected ? cv::Scalar(0, 80, 255)
-                       : (a.visible ? cv::Scalar(120, 220, 120)
-                                    : cv::Scalar(150, 150, 150));
+                       : (v.armor_visible(i) ? cv::Scalar(120, 220, 120)
+                                             : cv::Scalar(150, 150, 150));
         put(fmt::format("A{}(id={}): {}{}{}  z={:+5.1f}deg  c={:5.1f}deg  s={:.2f}  d={:.2f}m",
             i,
-            a.id,
+            v.armor_id(i),
             selected ? "*" : " ",
-            a.visible ? "V" : "-",
+            v.armor_visible(i) ? "V" : "-",
             in_window ? "W" : "-",
-            z_to_v * 57.3, cc_deg, a.score, dist),
+            z_to_v * 57.3, cc_deg, v.armor_score(i), dist),
             color);
     }
 }
@@ -725,7 +718,11 @@ static void draw_target_geometry_markers(
     if (tid < 0 || !snapshot.is_valid(tid)) {
         return;
     }
-    const auto& v = snapshot.vehicles[tid];
+    const auto* target = snapshot.find_target(tid);
+    if (target == nullptr) {
+        return;
+    }
+    const auto& v = *target;
     const double pred_dt = std::max(0.0, dbg.prediction_dt);
     const Eigen::Vector3d center_world = v.predict_center(pred_dt);
 
@@ -748,7 +745,6 @@ static void draw_target_geometry_markers(
 
     const int sel_idx = resolve_selected_armor_idx(v, dbg);
     for (int i = 0; i < v.armor_count; ++i) {
-        const auto& armor = v.armors[i];
         Eigen::Vector3d pos = v.predict_armor_position(i, pred_dt);
         bool valid = false;
         cv::Point2f px = aimer::tf::world_to_pixel(pos, q_imu, valid);
@@ -756,13 +752,13 @@ static void draw_target_geometry_markers(
 
         const bool selected = (i == sel_idx);
         cv::Scalar color = selected ? cv::Scalar(0, 80, 255)
-                       : (armor.visible ? cv::Scalar(50, 230, 50)
-                                        : cv::Scalar(120, 120, 120));
+                       : (v.armor_visible(i) ? cv::Scalar(50, 230, 50)
+                                             : cv::Scalar(120, 120, 120));
         int radius = selected ? 9 : 6;
         cv::circle(vis, px, radius, color, 2, cv::LINE_AA);
         cv::putText(vis,
             fmt::format("A{}(id={}){} z{:+.0f}",
-                i, armor.id, armor.visible ? "V" : "-",
+                i, v.armor_id(i), v.armor_visible(i) ? "V" : "-",
                 predicted_armor_z_to_v(v, i, pred_dt) * 57.3),
             px + cv::Point2f(8, -6),
             cv::FONT_HERSHEY_SIMPLEX, 0.35, color, 1, cv::LINE_AA);

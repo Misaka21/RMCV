@@ -2,6 +2,7 @@
 // transformer 模块测试
 //
 
+#include <algorithm>
 #include <cmath>
 #include <fmt/color.h>
 #include <fmt/core.h>

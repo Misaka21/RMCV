@@ -8,20 +8,16 @@
  * - 观测消抖
  * - 装甲板 ID 分配 (ArmorIdentifier)
  * - 匀速 EKF 滤波 (ArmorMotion)
- * - 整车 EKF 滤波 (MotionInterface)
+ * - 整车 EKF 滤波 (SpMotion)
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_VEHICLE_MODEL_HPP__
 #define __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_VEHICLE_MODEL_HPP__
 
-#include <memory>
-
 #include "aimer/auto_aim/predictor/observer/armor_tracker.hpp"
 #include "../enemy_model.hpp"
 #include "ekf/armor_ekf.hpp"
-#include "ekf/motion_interface.hpp"
-#include "ekf/motion_factory.hpp"
-#include "plugin/param/runtime_parameter.hpp"
+#include "ekf/sp_ekf.hpp"
 
 namespace autoaim::predictor {
 
@@ -29,14 +25,14 @@ namespace autoaim::predictor {
  * @brief 车辆运动模型
  *
  * 数据流:
- *   observations → filter() → ArmorIdentifier → ArmorMotion → VehicleState
+ *   observations → filter() → ArmorIdentifier → ArmorMotion/SpMotion → TargetState
  */
 class VehicleModel : public EnemyModelInterface {
 public:
     VehicleModel(int target_id, EnemyType enemy_type);
 
     void update(const std::vector<ArmorObservation>& observations, double timestamp) override;
-    VehicleState predict(double timestamp) const override;
+    TargetState predict(double timestamp) const override;
     bool alive() const override;
     void reset() override;
     int target_id() const override { return target_id_; }
@@ -64,11 +60,6 @@ private:
         const std::vector<ArmorObservation>& last
     ) const;
 
-    /**
-     * @brief 确保运动模型存在且类型匹配
-     */
-    void ensure_motion_model();
-
     // ==================== 数据 ====================
 
     int target_id_;
@@ -83,9 +74,8 @@ private:
     // 装甲板运动模型 (职责: 匀速 EKF 滤波)
     ArmorMotion armor_motion_;
 
-    // 整车旋转模型 (通过工厂创建，支持热切换)
-    std::unique_ptr<MotionInterface> motion_;
-    std::string current_motion_model_;  // 当前模型类型 ("spin", "lmtd", "sp")
+    // 整车旋转模型 (固定使用 SpMotion)
+    SpMotion motion_;
 
     // 上一帧观测 (用于消抖)
     std::vector<ArmorObservation> prev_armors_;

@@ -34,7 +34,7 @@ namespace autoaim::fire_control {
  * 根据 SpinLevel 读取对应 top0/1/2 配置。
  * 非陀螺目标调用者不应使用返回值。
  */
-double get_spin_window_rad(const predictor::VehicleState& vehicle);
+double get_spin_window_rad(const predictor::TargetState& target);
 
 /**
  * @brief 火控主类
@@ -119,7 +119,7 @@ private:
 
     bool solve_aim_with_latency_iteration(
         const predictor::BattlefieldSnapshot& snapshot,
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         const Eigen::Vector3d& self_velocity,
         double current_time,
         const LatencyInfo& base_latency,
@@ -133,13 +133,13 @@ private:
     bool evaluate_fire_window(
         const predictor::BattlefieldSnapshot& snapshot,
         const LatencyInfo& latency,
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double prediction_dt,
         const Eigen::Vector3d& self_velocity
     );
 
     bool evaluate_rotate_back_gate(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double prediction_dt,
         const LatencyInfo& latency,
         double bullet_speed,

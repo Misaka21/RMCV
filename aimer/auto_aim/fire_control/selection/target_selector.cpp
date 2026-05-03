@@ -3,7 +3,7 @@
  * @brief 目标选择器实现
  *
  * 职责: 只选"打哪个敌人"，不选装甲板
- *       装甲板选择由 SpinAim 负责
+ *       装甲板选择由 ArmorAim 负责
  *
  * 选择策略 (参考 rm.cv.fans):
  *   选敌人：最靠近图像中心 (操作手意图)
@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 
 #include "plugin/param/runtime_parameter.hpp"
 
@@ -37,20 +38,24 @@ double get_param_or(const std::string& name, double default_value)
     return default_value;
 }
 
-int pick_fallback_armor_idx(const predictor::VehicleState& vehicle) {
-    if (vehicle.armor_count <= 0) return -1;
+int pick_fallback_armor_idx(const predictor::TargetState& target) {
+    if (target.armor_count <= 0) return -1;
 
-    if (vehicle.recommended_armor_idx >= 0
-        && vehicle.recommended_armor_idx < vehicle.armor_count)
+    if (target.armor_index_valid(target.recommended_armor_idx))
     {
-        return vehicle.recommended_armor_idx;
+        return target.recommended_armor_idx;
     }
 
-    for (int i = 0; i < vehicle.armor_count; ++i) {
-        if (vehicle.armors[i].visible) return i;
+    for (int i = 0; i < target.armor_count; ++i) {
+        if (target.armor_visible(i)) return i;
     }
 
-    return 0;
+    const int best_idx = target.best_armor_idx();
+    if (target.armor_index_valid(best_idx)) {
+        return best_idx;
+    }
+
+    return target.armor_index_valid(0) ? 0 : -1;
 }
 
 }  // namespace
@@ -68,15 +73,15 @@ TargetSelection TargetSelector::select(
     const double current_time = snapshot.timestamp;
 
     // ========== 1. 预瞄锁定优先 ==========
-    if (forced_target_id_ >= 0 && snapshot.is_valid(forced_target_id_)) {
-        const auto& vehicle = snapshot.vehicles[forced_target_id_];
-        if (is_trackable_target(vehicle, dt, current_time)) {
+    if (forced_target_id_ >= 0) {
+        const auto* target = snapshot.find_target(forced_target_id_);
+        if (target != nullptr && is_trackable_target(*target, dt, current_time)) {
             const auto forced_candidate = evaluate_visible_candidate(
-                forced_target_id_, vehicle, gimbal, dt
+                forced_target_id_, *target, gimbal, dt
             );
             int armor_idx = forced_candidate.valid()
                 ? forced_candidate.armor_idx
-                : pick_fallback_armor_idx(vehicle);
+                : pick_fallback_armor_idx(*target);
             if (armor_idx >= 0) {
                 current_target_id_ = forced_target_id_;
                 target_caught_time_ = current_time;
@@ -86,7 +91,7 @@ TargetSelection TargetSelector::select(
                 result.priority = forced_candidate.valid()
                     ? (1.0 / (1.0 + forced_candidate.score))
                     : 0.0;
-                result.predicted_pos = vehicle.predict_armor_position(armor_idx, dt);
+                result.predicted_pos = target->predict_armor_position(armor_idx, dt);
                 return result;
             }
         }
@@ -95,7 +100,7 @@ TargetSelection TargetSelector::select(
     // ========== 2. 构造”最中心可见目标”候选 ==========
     // 对齐 rmcvfans: 候选池只看当前帧检测到的目标 (sorted_armors 只来自当帧)
     VisibleCandidate best_candidate;
-    snapshot.for_each_valid([&](int id, const predictor::VehicleState& vehicle) {
+    snapshot.for_each_valid([&](int id, const predictor::TargetState& vehicle) {
         if (!snapshot.is_detected(id)) return;
         auto candidate = evaluate_visible_candidate(id, vehicle, gimbal, dt);
         if (!candidate.valid()) return;
@@ -131,17 +136,17 @@ TargetSelection TargetSelector::select(
         return result;
     }
 
-    const auto& selected_vehicle = snapshot.vehicles[selected_target];
-    if (!is_trackable_target(selected_vehicle, dt, current_time)) {
+    const auto* selected_state = snapshot.find_target(selected_target);
+    if (selected_state == nullptr || !is_trackable_target(*selected_state, dt, current_time)) {
         return result;
     }
 
     const auto selected_visible = evaluate_visible_candidate(
-        selected_target, selected_vehicle, gimbal, dt
+        selected_target, *selected_state, gimbal, dt
     );
     int armor_idx = selected_visible.valid()
         ? selected_visible.armor_idx
-        : pick_fallback_armor_idx(selected_vehicle);
+        : pick_fallback_armor_idx(*selected_state);
     if (armor_idx < 0) {
         return result;
     }
@@ -151,7 +156,7 @@ TargetSelection TargetSelector::select(
     result.priority = selected_visible.valid()
         ? (1.0 / (1.0 + selected_visible.score))
         : 0.0;
-    result.predicted_pos = selected_vehicle.predict_armor_position(armor_idx, dt);
+    result.predicted_pos = selected_state->predict_armor_position(armor_idx, dt);
     return result;
 }
 
@@ -206,38 +211,35 @@ double TargetSelector::compute_center_distance(
 }
 
 bool TargetSelector::has_visible_armor(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     double /* dt */
 ) const
 {
-    for (int i = 0; i < vehicle.armor_count; ++i) {
-        const auto& armor = vehicle.armors[i];
-
+    for (int i = 0; i < target.armor_count; ++i) {
         // 仅要求“有可见板”即可参与选敌，避免窗口硬过滤导致无目标。
-        if (armor.visible) return true;
+        if (target.armor_visible(i)) return true;
     }
     return false;
 }
 
 bool TargetSelector::can_track_without_visible(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     double current_time
 ) const
 {
-    if (!vehicle.spin.active) {
+    if (!target.spin.active) {
         return false;
     }
-    if (vehicle.spin.level == predictor::SpinLevel::NONE) {
+    if (target.spin.level == predictor::SpinLevel::NONE) {
         return false;
     }
 
     // 对齐 rm.cv.fans: allow_indirect 由 top_level 决定，而不是由 orientation window 是否大于 0 决定。
     // 这里用“最近一次有效观测时间”近似 top credit，避免在两板空窗期直接丢目标。
-    const double credit_default = get_param_or("AutoAim.Predictor.LmtdEKF.credit_dt", 1.0);
     double credit_time = get_param_or(
-        "AutoAim.FireControl.TargetSelector.top_credit_time", credit_default
+        "AutoAim.FireControl.TargetSelector.top_credit_time", 1.0
     );
-    if (vehicle.enemy_type == predictor::EnemyType::OUTPOST) {
+    if (target.enemy_type == predictor::EnemyType::OUTPOST) {
         credit_time = get_param_or(
             "AutoAim.FireControl.TargetSelector.top_credit_time_outpost", credit_time
         );
@@ -245,8 +247,8 @@ bool TargetSelector::can_track_without_visible(
     credit_time = std::max(0.0, credit_time);
 
     double latest_seen = -std::numeric_limits<double>::infinity();
-    for (int i = 0; i < vehicle.armor_count; ++i) {
-        latest_seen = std::max(latest_seen, vehicle.armors[i].last_seen);
+    for (int i = 0; i < target.armor_count; ++i) {
+        latest_seen = std::max(latest_seen, target.armor_last_seen_time(i));
     }
     if (!std::isfinite(latest_seen) || latest_seen <= 0.0) {
         return false;
@@ -256,12 +258,12 @@ bool TargetSelector::can_track_without_visible(
 }
 
 bool TargetSelector::is_trackable_target(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     double dt,
     double current_time
 ) const
 {
-    return has_visible_armor(vehicle, dt) || can_track_without_visible(vehicle, current_time);
+    return has_visible_armor(target, dt) || can_track_without_visible(target, current_time);
 }
 
 void TargetSelector::try_catch_target(
@@ -274,7 +276,8 @@ void TargetSelector::try_catch_target(
         return;
     }
 
-    if (current_target_id_ < 0 || !snapshot.is_valid(current_target_id_)) {
+    const auto* current_target = snapshot.find_target(current_target_id_);
+    if (current_target == nullptr) {
         current_target_id_ = candidate.target_id;
         target_caught_time_ = current_time;
         return;
@@ -285,8 +288,7 @@ void TargetSelector::try_catch_target(
         return;
     }
 
-    const auto& current_vehicle = snapshot.vehicles[current_target_id_];
-    const double keep_time = keep_as_target_time(current_vehicle);
+    const double keep_time = keep_as_target_time(*current_target);
     if (current_time - target_caught_time_ <= keep_time) {
         return;
     }
@@ -309,13 +311,13 @@ int TargetSelector::latched_target(double current_time) const
     return current_target_id_;
 }
 
-double TargetSelector::keep_as_target_time(const predictor::VehicleState& vehicle) const
+double TargetSelector::keep_as_target_time(const predictor::TargetState& target) const
 {
     const double default_keep = get_param_or(
         "AutoAim.FireControl.TargetSelector.keep_time", 0.1
     );
 
-    switch (vehicle.enemy_type) {
+    switch (target.enemy_type) {
         case predictor::EnemyType::OUTPOST:
             return get_param_or("AutoAim.FireControl.TargetSelector.keep_time_outpost", 0.5);
         case predictor::EnemyType::SENTRY:
@@ -337,26 +339,26 @@ double TargetSelector::keep_as_target_time(const predictor::VehicleState& vehicl
 
 TargetSelector::VisibleCandidate TargetSelector::evaluate_visible_candidate(
     int target_id,
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     const GimbalState& gimbal,
     double dt
 ) const
 {
     VisibleCandidate candidate;
-    const int armor_idx = pick_best_visible_armor(vehicle, gimbal, dt);
+    const int armor_idx = pick_best_visible_armor(target, gimbal, dt);
     if (armor_idx < 0) {
         return candidate;
     }
 
     candidate.target_id = target_id;
     candidate.armor_idx = armor_idx;
-    const Eigen::Vector3d pos = vehicle.predict_armor_position(armor_idx, dt);
+    const Eigen::Vector3d pos = target.predict_armor_position(armor_idx, dt);
     candidate.score = compute_center_distance(pos, gimbal);
     return candidate;
 }
 
 int TargetSelector::pick_best_visible_armor(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     const GimbalState& gimbal,
     double dt
 ) const
@@ -364,11 +366,10 @@ int TargetSelector::pick_best_visible_armor(
     int best_idx = -1;
     double best_score = std::numeric_limits<double>::infinity();
 
-    for (int i = 0; i < vehicle.armor_count; ++i) {
-        const auto& armor = vehicle.armors[i];
-        if (!armor.visible) continue;
+    for (int i = 0; i < target.armor_count; ++i) {
+        if (!target.armor_visible(i)) continue;
 
-        const Eigen::Vector3d pos = vehicle.predict_armor_position(i, dt);
+        const Eigen::Vector3d pos = target.predict_armor_position(i, dt);
         const double score = compute_center_distance(pos, gimbal);
         if (score < best_score) {
             best_score = score;

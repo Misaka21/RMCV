@@ -272,10 +272,10 @@ int main(int argc, char* argv[]) {
         double current_time = get_current_time();
 
         // 更新飞行时间
-        if (snapshot.get_primary()) {
-            const auto* armor = snapshot.get_primary()->get_recommended_armor();
-            if (armor) {
-                double distance = armor->position.norm();
+        if (const auto* primary = snapshot.get_primary()) {
+            const int armor_idx = primary->best_armor_idx();
+            if (primary->armor_index_valid(armor_idx)) {
+                double distance = primary->predict_armor_position(armor_idx, 0.0).norm();
                 double bullet_speed = std::max(static_cast<double>(snapshot.self_state.bullet_speed), 15.0);
                 latency.fire_to_hit = distance / bullet_speed;
             }
@@ -287,30 +287,29 @@ int main(int argc, char* argv[]) {
         // ========== 可视化 ==========
 
         // 绘制所有目标
-        snapshot.for_each_valid([&](int id, const autoaim::predictor::VehicleState& vehicle) {
+        snapshot.for_each_valid([&](int id, const autoaim::predictor::TargetState& target) {
             cv::Scalar color = (id == cmd.target_id) ? cv::Scalar(0, 255, 0) : cv::Scalar(128, 128, 128);
 
             // 绘制旋转中心
-            draw_armor(img, vehicle.center, cv::Scalar(255, 255, 0), K,
+            draw_armor(img, target.position, cv::Scalar(255, 255, 0), K,
                        fmt::format("ID:{}", id));
 
             // 绘制各装甲板
-            for (int i = 0; i < vehicle.armor_count; ++i) {
-                const auto& armor = vehicle.armors[i];
-                cv::Scalar armor_color = armor.visible ? color : cv::Scalar(64, 64, 64);
+            for (int i = 0; i < target.armor_count; ++i) {
+                cv::Scalar armor_color = target.armor_visible(i) ? color : cv::Scalar(64, 64, 64);
 
-                if (i == vehicle.recommended_armor_idx) {
+                if (i == target.recommended_armor_idx) {
                     armor_color = cv::Scalar(0, 255, 255);  // 推荐装甲板用黄色
                 }
 
-                draw_armor(img, armor.position, armor_color, K);
+                draw_armor(img, target.predict_armor_position(i, 0.0), armor_color, K);
             }
 
             // 如果是陀螺，标记
-            if (vehicle.spin.active) {
-                cv::Point pt = project_to_image(vehicle.center, K);
+            if (target.spin.active) {
+                cv::Point pt = project_to_image(target.position, K);
                 if (pt.x >= 0) {
-                    std::string spin_label = (vehicle.spin.level == autoaim::predictor::SpinLevel::HIGH)
+                    std::string spin_label = (target.spin.level == autoaim::predictor::SpinLevel::HIGH)
                         ? "SPIN-H" : "SPIN-L";
                     cv::putText(img, spin_label, pt + cv::Point(-20, 20),
                                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 2);

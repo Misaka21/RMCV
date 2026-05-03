@@ -22,7 +22,7 @@ public:
     BaseModel(int target_id, EnemyType enemy_type);
 
     void update(const std::vector<ArmorObservation>& observations, double timestamp) override;
-    VehicleState predict(double timestamp) const override;
+    TargetState predict(double timestamp) const override;
     bool alive() const override;
     void reset() override;
     int target_id() const override { return target_id_; }

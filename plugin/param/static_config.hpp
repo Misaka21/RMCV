@@ -144,7 +144,7 @@ namespace static_param {
                 debug::print("error",
                              "static_param",
                              "Skipping key \"{}\" in table \"{}\" due to error:{}",
-                             key, table_path, e.what());
+                             std::string(key), table_path, e.what());
             }
         }
         return result;

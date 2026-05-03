@@ -2,7 +2,7 @@
  * @file sp_motion.hpp
  * @brief SP 整车旋转模型 - 移植自 sp_vision_25
  *
- * 与 SpinMotion/LmtdMotion 的关键区别:
+ * 相比旧整车模型的关键区别:
  * - 状态包含 L (半径差 r_odd - r_even) 和 H (高度差 z_odd - z_even)
  * - 切板时不交换状态，而是根据 armor_id 选择使用哪个半径/高度
  * - 观测函数带 armor_id 参数
@@ -11,7 +11,7 @@
  *   [xc, vx, yc, vy, zc, vz, θ, ω, r, l, h]
  *   - xc, yc, zc: 旋转中心位置 (世界系)
  *   - vx, vy, vz: 旋转中心速度
- *   - θ: 车体朝向角 (OUTWARD, 从中心指向 id=0 装甲板, rad)
+ *   - θ: slot 0 装甲板 INWARD yaw (从装甲板指向车心, rad)
  *   - ω: 角速度 (rad/s)
  *   - r: 基础半径 (id=0,2 用)
  *   - l: 半径差 l = r_odd - r_even (id=1,3 用 r+l)
@@ -20,12 +20,12 @@
  * 观测向量 (4维):
  *   [yaw, pitch, dis, armor_yaw]
  *   - yaw, pitch, dis: 装甲板位置的球坐标
- *   - armor_yaw: 装甲板朝向角 (= θ + id * 2π/N)
+ *   - armor_yaw: 装甲板 INWARD yaw (= θ + id * 2π/N)
  *
- * 几何关系 (OUTWARD):
+ * 几何关系 (INWARD):
  *   armor_angle = θ + id * (2π / armor_num)
- *   xa = xc + r_actual * cos(armor_angle)
- *   ya = yc + r_actual * sin(armor_angle)
+ *   xa = xc - r_actual * cos(armor_angle)
+ *   ya = yc - r_actual * sin(armor_angle)
  *   za = z_actual
  *
  *   其中:
@@ -38,6 +38,8 @@
 #define __AIMER_AUTO_AIM_PREDICTOR_MOTION_SP_MOTION_HPP__
 
 #include <cmath>
+#include <string>
+#include <vector>
 
 #include <Eigen/Core>
 #include <ceres/jet.h>
@@ -45,7 +47,6 @@
 #include "aimer/auto_aim/predictor/types.hpp"
 #include "aimer/auto_aim/predictor/observer/armor_tracker.hpp"
 #include "aimer/common/filter/adaptive_ekf.hpp"
-#include "motion_interface.hpp"
 
 namespace autoaim::predictor {
 
@@ -66,7 +67,7 @@ enum StateIdx {
     VY = 3,          // Y 速度
     ZC = 4,          // 旋转中心 Z
     VZ = 5,          // Z 速度
-    THETA = 6,       // 车体朝向角 (OUTWARD, 指向 id=0 装甲板)
+    THETA = 6,       // slot 0 装甲板 INWARD yaw
     OMEGA = 7,       // 角速度
     R = 8,           // 基础半径 (id=0,2 用)
     L = 9,           // 半径差 l = r_odd - r_even (id=1,3 用 r+l)
@@ -78,7 +79,7 @@ enum ObsIdx {
     YAW = 0,         // 装甲板方位角
     PITCH = 1,       // 装甲板俯仰角
     DIS = 2,         // 装甲板距离
-    ARMOR_YAW = 3    // 装甲板朝向角
+    ARMOR_YAW = 3    // 装甲板 INWARD yaw
 };
 
 }  // namespace sp_model
@@ -150,9 +151,9 @@ struct SpMeasure {
         T r_actual = use_l_h ? (x[sp_model::R] + x[sp_model::L]) : x[sp_model::R];
         T z_actual = use_l_h ? (x[sp_model::ZC] + x[sp_model::H]) : x[sp_model::ZC];
 
-        // 计算装甲板位置 (OUTWARD: armor = center + r * (cos θ, sin θ))
-        T xa = x[sp_model::XC] + r_actual * ceres::cos(angle);
-        T ya = x[sp_model::YC] + r_actual * ceres::sin(angle);
+        // 计算装甲板位置 (INWARD: armor = center - r * (cos θ, sin θ))
+        T xa = x[sp_model::XC] - r_actual * ceres::cos(angle);
+        T ya = x[sp_model::YC] - r_actual * ceres::sin(angle);
         T za = z_actual;
 
         // 计算 YPD 观测
@@ -174,7 +175,7 @@ struct SpMeasure {
 /**
  * @brief SP 整车旋转模型
  *
- * 核心设计 (与 SpinMotion 的区别):
+ * 核心设计:
  * 1. 状态包含 l, h，不需要外部维护 another_r, another_dz
  * 2. 切板时不交换状态，而是根据 armor_id 选择
  * 3. 观测函数带 armor_id 参数
@@ -183,7 +184,7 @@ struct SpMeasure {
  * - 切板时状态连续，不会跳变
  * - 简化代码，减少 bug
  */
-class SpMotion : public MotionInterface {
+class SpMotion {
 public:
     using Ekf = aimer::filter::AdaptiveEkf<sp_model::N_X, sp_model::N_Z>;
     using VectorX = Eigen::Matrix<double, sp_model::N_X, 1>;
@@ -197,33 +198,33 @@ public:
      */
     explicit SpMotion(int armor_num = 4);
 
-    // ==================== MotionInterface 实现 ====================
+    // ==================== 生命周期与预测 ====================
 
-    void init(const ArmorData& armor, double timestamp) override;
-    void update(const ArmorData& armor, double timestamp) override;
-    void update(const std::vector<ArmorData>& armors, double timestamp) override;
-    void reset() override;
-    bool valid() const override { return initialized_; }
+    void init(const ArmorData& armor, double timestamp);
+    void update(const ArmorData& armor, double timestamp);
+    void update(const std::vector<ArmorData>& armors, double timestamp);
+    void reset();
+    bool valid() const { return initialized_; }
 
-    Eigen::Vector3d predict_center(double dt) const override;
-    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const override;
+    Eigen::Vector3d predict_center(double dt) const;
+    Eigen::Vector3d predict_armor_pos(int armor_idx, double dt) const;
 
-    Eigen::Vector3d get_velocity() const override;
-    Eigen::Vector3d get_armor_pos() const override;
-    double get_theta() const override;
-    double get_omega() const override { return ekf_.get_x()[sp_model::OMEGA]; }
-    double get_radius() const override { return ekf_.get_x()[sp_model::R]; }
-    double get_another_radius() const override {
+    Eigen::Vector3d get_velocity() const;
+    Eigen::Vector3d get_armor_pos() const;
+    double get_theta() const;
+    double get_omega() const { return ekf_.get_x()[sp_model::OMEGA]; }
+    double get_radius() const { return ekf_.get_x()[sp_model::R]; }
+    double get_another_radius() const {
         VectorX x = ekf_.get_x();
         return x[sp_model::R] + x[sp_model::L];
     }
-    double get_dz() const override { return ekf_.get_x()[sp_model::H]; }
-    int get_tracked_id() const override { return tracked_armor_id_; }
+    double get_dz() const { return ekf_.get_x()[sp_model::H]; }
+    int get_tracked_id() const { return tracked_armor_id_; }
 
-    std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const override;
-    void log_state(const std::string& prefix) const override;
-    const char* name() const override { return "sp"; }
-    int armor_num() const override { return armor_num_; }
+    std::vector<Eigen::Vector3d> compute_all_armors(double dt = 0) const;
+    void log_state(const std::string& prefix) const;
+    const char* name() const { return "sp"; }
+    int armor_num() const { return armor_num_; }
 
     // ==================== 额外方法 ====================
 

@@ -77,25 +77,25 @@ public:
     /**
      * @brief 计算装甲板瞄准
      *
-     * @param vehicle 目标车辆状态
+     * @param target 目标状态
      * @param predict_dt 预测时间 (弹道飞行时间)
      * @return 瞄准结果
      */
     ArmorAimResult compute(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double predict_dt
     ) const;
 
     /**
      * @brief 计算装甲板瞄准（带云台状态）
      *
-     * @param vehicle 目标车辆状态
+     * @param target 目标状态
      * @param predict_dt 预测时间
      * @param gimbal 当前云台状态（用于最小转动代价）
      * @param preferred_armor_idx 上一帧偏好索引（当前 direct 对齐 rm.cv.fans，不强制使用）
      */
     ArmorAimResult compute(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
@@ -104,7 +104,7 @@ public:
     ) const;
 
     ArmorAimResult compute(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         int preferred_armor_idx,
@@ -116,7 +116,7 @@ private:
      * @brief 非陀螺瞄准 (direct-center)
      */
     ArmorAimResult compute_non_spin(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
@@ -128,7 +128,7 @@ private:
      * @brief 陀螺瞄准 (rm.cv.fans: direct + indirect)
      */
     ArmorAimResult compute_spin(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
@@ -143,7 +143,7 @@ private:
      * @param strict_orientation_window true=窗口内无候选则直接失败（供 indirect 回退）
      */
     ArmorAimResult compute_direct(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
@@ -159,7 +159,7 @@ private:
      * @brief indirect 执行路径（rm.cv.fans emerging 思路）
      */
     ArmorAimResult compute_indirect(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
         const Eigen::Quaterniond* q_imu,
@@ -176,7 +176,7 @@ private:
      * - swing_cost 最小优先
      */
     int choose_best_direct(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         const std::vector<int>& direct_indices,
         double predict_dt,
         const ::fire_control::GimbalState* gimbal,
@@ -191,7 +191,7 @@ private:
      * v = ω × r (切向速度)
      */
     Eigen::Vector3d compute_armor_velocity(
-        const predictor::VehicleState& vehicle,
+        const predictor::TargetState& target,
         int armor_idx,
         double predict_dt
     ) const;

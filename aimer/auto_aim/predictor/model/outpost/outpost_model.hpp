@@ -7,6 +7,7 @@
  * - 支持盲区预测 (装甲板不可见时仍可预测)
  * - 3块装甲板，120°间隔
  * - 固定转速 |ω| = 0.8π rad/s
+ * - 输出 TargetState 使用 INWARD yaw
  */
 
 #ifndef __AIMER_AUTO_AIM_PREDICTOR_ENEMY_MODEL_OUTPOST_MODEL_HPP__
@@ -30,7 +31,7 @@ public:
     OutpostModel(int target_id, EnemyType enemy_type);
 
     void update(const std::vector<ArmorObservation>& observations, double timestamp) override;
-    VehicleState predict(double timestamp) const override;
+    TargetState predict(double timestamp) const override;
     bool alive() const override;
     void reset() override;
     int target_id() const override { return target_id_; }

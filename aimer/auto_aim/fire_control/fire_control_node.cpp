@@ -69,37 +69,37 @@ bool get_param_or(const std::string& name, bool default_value) {
     return default_value;
 }
 
-const predictor::VehicleState* choose_latency_target(
+const predictor::TargetState* choose_latency_target(
     const predictor::BattlefieldSnapshot& snapshot,
     int preferred_target_id
 ) {
-    if (snapshot.is_valid(preferred_target_id)) {
-        return &snapshot.vehicles[preferred_target_id];
+    if (const auto* target = snapshot.find_target(preferred_target_id)) {
+        return target;
     }
     return snapshot.get_primary();
 }
 
 int choose_latency_armor_idx(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     int preferred_armor_idx
 ) {
-    if (preferred_armor_idx >= 0 && preferred_armor_idx < vehicle.armor_count) {
+    if (preferred_armor_idx >= 0 && preferred_armor_idx < target.armor_count) {
         return preferred_armor_idx;
     }
 
-    int idx = vehicle.recommended_armor_idx;
-    if (idx >= 0 && idx < vehicle.armor_count) {
+    int idx = target.recommended_armor_idx;
+    if (idx >= 0 && idx < target.armor_count) {
         return idx;
     }
-    if (vehicle.armor_count <= 0) {
+    if (target.armor_count <= 0) {
         return -1;
     }
 
     int best_idx = 0;
-    double best_score = vehicle.armors[0].score;
-    for (int i = 1; i < vehicle.armor_count; ++i) {
-        if (vehicle.armors[i].score > best_score) {
-            best_score = vehicle.armors[i].score;
+    double best_score = target.armor_score(0);
+    for (int i = 1; i < target.armor_count; ++i) {
+        if (target.armor_score(i) > best_score) {
+            best_score = target.armor_score(i);
             best_idx = i;
         }
     }
@@ -107,14 +107,14 @@ int choose_latency_armor_idx(
 }
 
 int find_armor_idx_by_id(
-    const predictor::VehicleState& vehicle,
+    const predictor::TargetState& target,
     int armor_id
 ) {
     if (armor_id < 0) {
         return -1;
     }
-    for (int i = 0; i < vehicle.armor_count; ++i) {
-        if (vehicle.armors[i].id == armor_id) {
+    for (int i = 0; i < target.armor_count; ++i) {
+        if (target.armor_id(i) == armor_id) {
             return i;
         }
     }
@@ -268,13 +268,16 @@ void fire_control_run(const std::string& /* config_path */) {
         const int last_armor_id = controller.last_armor_id();
         if (last_sel.has_target && snapshot.is_valid(last_sel.target_id)) {
             latency_target_id = last_sel.target_id;
-            const auto& latency_vehicle = snapshot.vehicles[latency_target_id];
-            if (last_armor_id >= 0) {
-                latency_armor_idx = find_armor_idx_by_id(latency_vehicle, last_armor_id);
-            }
-            if (latency_armor_idx < 0 && last_armor.valid) {
-                if (last_armor.armor_idx >= 0 && last_armor.armor_idx < latency_vehicle.armor_count) {
-                    latency_armor_idx = last_armor.armor_idx;
+            if (const auto* latency_target = snapshot.find_target(latency_target_id)) {
+                if (last_armor_id >= 0) {
+                    latency_armor_idx = find_armor_idx_by_id(*latency_target, last_armor_id);
+                }
+                if (latency_armor_idx < 0 && last_armor.valid) {
+                    if (last_armor.armor_idx >= 0
+                        && last_armor.armor_idx < latency_target->armor_count)
+                    {
+                        latency_armor_idx = last_armor.armor_idx;
+                    }
                 }
             }
         }
@@ -509,8 +512,8 @@ void fire_control_run(const std::string& /* config_path */) {
                 dbg.gate_out_yaw_limit = gate.out_yaw_limit;
                 dbg.gate_out_pitch_limit = gate.out_pitch_limit;
 
-                if (snapshot.is_valid(cmd.target_id)) {
-                    const auto& v = snapshot.vehicles[cmd.target_id];
+                if (const auto* v_ptr = snapshot.find_target(cmd.target_id)) {
+                    const auto& v = *v_ptr;
                     dbg.spin_active = v.spin.active;
                     dbg.spin_level = static_cast<int>(v.spin.level);
                     dbg.spin_omega = v.spin.omega;
@@ -528,8 +531,7 @@ void fire_control_run(const std::string& /* config_path */) {
                         v.spin.active && std::abs(dbg.orientation_window_deg) > 1e-6;
 
                     if (armor_aim.armor_idx >= 0 && armor_aim.armor_idx < v.armor_count) {
-                        const auto& armor = v.armors[armor_aim.armor_idx];
-                        dbg.selected_armor_visible = armor.visible;
+                        dbg.selected_armor_visible = v.armor_visible(armor_aim.armor_idx);
                     } else {
                         dbg.selected_armor_visible = false;
                     }
@@ -602,8 +604,8 @@ void fire_control_run(const std::string& /* config_path */) {
                 double spin_omega = 0.0;
                 double orientation_window_deg = 0.0;
                 bool orientation_window_on = false;
-                if (snapshot.is_valid(cmd.target_id)) {
-                    const auto& v_dbg = snapshot.vehicles[cmd.target_id];
+                if (const auto* v_dbg_ptr = snapshot.find_target(cmd.target_id)) {
+                    const auto& v_dbg = *v_dbg_ptr;
                     spin_active = v_dbg.spin.active;
                     spin_level = static_cast<int>(v_dbg.spin.level);
                     spin_omega = v_dbg.spin.omega;
@@ -618,18 +620,19 @@ void fire_control_run(const std::string& /* config_path */) {
                 std::string vis_stat = "N/A";
                 int vis_count = 0;
                 int armor_count = 0;
-                if (snapshot.is_valid(cmd.target_id)
+                if (const auto* v_dbg_ptr = snapshot.find_target(cmd.target_id);
+                    v_dbg_ptr != nullptr
                         && armor_aim.armor_idx >= 0
-                    && armor_aim.armor_idx < snapshot.vehicles[cmd.target_id].armor_count) {
-                    const auto& v_dbg = snapshot.vehicles[cmd.target_id];
+                        && armor_aim.armor_idx < v_dbg_ptr->armor_count) {
+                    const auto& v_dbg = *v_dbg_ptr;
                     armor_count = v_dbg.armor_count;
                     for (int vi = 0; vi < armor_count; ++vi) {
-                        if (v_dbg.armors[vi].visible) {
+                        if (v_dbg.armor_visible(vi)) {
                             ++vis_count;
                         }
                     }
                     vis_stat = fmt::format("{}/{}", vis_count, armor_count);
-                    visible = snapshot.vehicles[cmd.target_id].armors[armor_aim.armor_idx].visible
+                    visible = v_dbg.armor_visible(armor_aim.armor_idx)
                         ? "Y" : "N";
                 }
 
