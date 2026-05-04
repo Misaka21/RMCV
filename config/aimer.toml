@@ -59,6 +59,14 @@
     #@double 装甲板“可见”时间窗口 (s)，超过窗口仅保留预测不视为可见
     visible_time_window = 0.04
 
+[AutoAim.Predictor.Debug]
+    #@bool 是否输出指定目标的预测诊断日志
+    enable = true
+    #@int 诊断目标编号；当前测试旋转 3 号步兵
+    target_id = 3
+    #@double 周期日志间隔 (s)
+    period_s = 0.05
+
 [AutoAim.Predictor.PnP]
     #@double PnP 测距二次修正系数: fixed_dis = dis + a2 * dis * dis
     distance_fixer_a2 = 0.0
@@ -108,9 +116,9 @@
 [AutoAim.Predictor.Motion]
     # 陀螺等级阈值 (度/秒, 带迟滞消抖)
     #@double top_level 1 激活阈值 (°/s)
-    top1_activate_w = 90.0
+    top1_activate_w = 70.0
     #@double top_level 1 退激活阈值 (°/s)
-    top1_deactivate_w = 60.0
+    top1_deactivate_w = 45.0
     #@double top_level 2 激活阈值 (°/s)
     top2_activate_w = 500.0
     #@double top_level 2 退激活阈值 (°/s)
@@ -130,17 +138,17 @@
     #@double 线加速度过程噪声方差（m^2/s^4）
     q_acc = 520.0
     #@double 角加速度过程噪声方差（rad^2/s^4）
-    q_ang_acc = 420.0
+    q_ang_acc = 50000.0
     #@double 基础半径 r 随机游走强度（m^2/s），Q_rr = q_r_rw * dt
-    q_r_rw = 0.06
+    q_r_rw = 0.15
     #@double 半径差 l 随机游走强度（m^2/s），Q_ll = q_l_rw * dt
-    q_l_rw = 0.06
+    q_l_rw = 0.15
     #@double 高度差 h 随机游走强度（m^2/s），Q_hh = q_h_rw * dt
     q_h_rw = 0.03
 
     # 观测噪声 R
     #@double yaw/pitch角度观测噪声
-    r_angle = 2.8
+    r_angle = 0.35
     #@string 距离噪声模型："log" / "quadratic" / "pow4"
     r_dis_model = "log"
     #@double 距离噪声基线项（m^2）
@@ -152,9 +160,9 @@
     #@double pow4模型系数，R_dis = base + k * distance^4（仅调试保留）
     r_dis_pow4_k = 8.0
     #@double 装甲板朝向角观测噪声 - 单块
-    r_armor_yaw_single = 4.2
+    r_armor_yaw_single = 0.06
     #@double 装甲板朝向角观测噪声 - 双块
-    r_armor_yaw_double = 2.1
+    r_armor_yaw_double = 0.03
 
     # 几何参数
     #@double 初始半径 (m)
@@ -188,9 +196,9 @@
 
     # 陀螺等级阈值 (度/秒)
     #@double top_level 1 激活阈值 (°/s)
-    top1_activate_w = 90.0
+    top1_activate_w = 70.0
     #@double top_level 1 退激活阈值 (°/s)
-    top1_deactivate_w = 70.0
+    top1_deactivate_w = 45.0
     #@double top_level 2 激活阈值 (°/s)
     top2_activate_w = 500.0
     #@double top_level 2 退激活阈值 (°/s)
@@ -267,15 +275,17 @@
 
 [AutoAim.FireControl.Debug]
     #@bool 是否开启火控诊断日志
-    enable = false
+    enable = true
     #@bool 是否输出延迟缓存重建细节（排查同帧反复重建）
     latency_detail = false
     #@double 周期日志间隔 (s)
-    period_s = 0.5
+    period_s = 0.2
     #@double 角度突变阈值 (deg)，超过会输出 JUMP 事件
     jump_deg = 8.0
     #@bool 是否输出 indirect 选板细节日志（每块板的评分）
-    indirect_detail = false
+    indirect_detail = true
+    #@bool 是否输出旋转目标开火 gate 偏移/限幅细节
+    gate_detail = true
     #@double indirect 细节日志最小间隔 (s)
     indirect_period_s = 0.2
 
@@ -329,10 +339,10 @@
     #@double top0 的朝向窗口 (非4板车, deg)
     top0_max_orientation_angle_armors_other = 75.0
 
-    #@double top1 的朝向窗口 (deg, 慢速小陀螺建议 > 0，例如 30)
-    top1_max_orientation_angle = 30.0
-    #@double top2 的朝向窗口 (deg, 超高速陀螺常用 0 表示只在中心线附近 direct)
-    top2_max_orientation_angle = 60.0
+    #@double top1 的朝向窗口 (deg, 0 表示瞄中心守株待兔，等待装甲板进中心线)
+    top1_max_orientation_angle = 0.0
+    #@double top2 的朝向窗口 (deg, 0 表示瞄中心守株待兔，等待装甲板进中心线)
+    top2_max_orientation_angle = 0.0
 
     #@double top0 的间接打击离场误差比例
     top0_max_out_error = 1.8
@@ -351,6 +361,9 @@
     #@double direct 选板切换迟滞 (deg)
     # 同帧/相邻帧候选评分接近时优先保持上一块板，减少双板来回切
     direct_switch_hysteresis_deg = 2.0
+    #@double direct 窗口边缘保持迟滞 (deg)
+    # 防止 z_to_v 在 -orientation/+orientation 边界附近时同一帧 direct/indirect 互跳
+    direct_window_hysteresis_deg = 2.0
     #@double indirect 选板切换迟滞 (deg)
     # armor_to_limit 评分接近时优先保持上一块板，减少等待点抖动
     indirect_switch_hysteresis_deg = 5.0

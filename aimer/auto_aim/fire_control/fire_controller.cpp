@@ -514,6 +514,8 @@ bool FireController::solve_aim_with_latency_iteration(
         return out_aim.valid;
     };
 
+    const bool lock_spin_iteration = vehicle.spin.active;
+    bool spin_iteration_locked = false;
     int iter_preferred_idx = preferred_armor_idx;
     for (int i = 0; i < iter_count; ++i) {
         const double prediction_dt =
@@ -529,7 +531,14 @@ bool FireController::solve_aim_with_latency_iteration(
             out_latency.set_fly_time(iter_aim.fly_time);
         }
         if (iter_armor.armor_idx >= 0 && iter_armor.armor_idx < vehicle.armor_count) {
-            iter_preferred_idx = iter_armor.armor_idx;
+            if (lock_spin_iteration) {
+                if (!spin_iteration_locked) {
+                    iter_preferred_idx = iter_armor.armor_idx;
+                    spin_iteration_locked = true;
+                }
+            } else {
+                iter_preferred_idx = iter_armor.armor_idx;
+            }
         }
     }
 

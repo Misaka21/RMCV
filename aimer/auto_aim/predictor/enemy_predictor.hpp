@@ -73,6 +73,11 @@ private:
      */
     BattlefieldSnapshot export_snapshot();
 
+    /**
+     * @brief 低频输出指定目标的 predictor 诊断信息
+     */
+    void log_debug_snapshot(const BattlefieldSnapshot& snapshot) const;
+
     // ==================== 数据 ====================
 
     // 装甲板观测器
@@ -97,6 +102,16 @@ private:
     // 新目标消抖状态：需连续出现一段时间才创建模型
     std::array<double, MAX_TARGETS> pending_first_seen_time_ = {};
     std::array<double, MAX_TARGETS> pending_last_seen_time_ = {};
+
+    // 指定目标调试日志状态
+    mutable double last_debug_log_time_ = -1.0;
+    mutable int last_debug_target_id_ = -1;
+    mutable bool last_debug_valid_ = false;
+    mutable bool last_debug_detected_ = false;
+    mutable int last_debug_spin_level_ = -1;
+    mutable int last_debug_recommended_idx_ = -2;
+    mutable uint8_t last_debug_visible_mask_ = 0;
+    mutable size_t last_debug_obs_count_ = 0;
 };
 
 }  // namespace autoaim::predictor

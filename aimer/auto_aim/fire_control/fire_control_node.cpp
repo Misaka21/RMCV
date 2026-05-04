@@ -708,6 +708,40 @@ void fire_control_run(const std::string& /* config_path */) {
                     orientation_window_deg,
                     orientation_window_on ? "Y" : "N"
                 );
+                if (spin_active
+                    && get_param_or("AutoAim.FireControl.Debug.gate_detail", false)) {
+                    debug::print(
+                        level,
+                        "AutoAimFireControl",
+                        "[GATE] frame={} fire={} "
+                        "trk(c={:.2f}/{:.2f} y={:.1f}/{:.1f}mm p={:.1f}/{:.1f}mm) "
+                        "spin(swing={} y={:.1f}/{:.1f}mm p={:.1f}/{:.1f}mm r={:.2f} "
+                        "out={} y={:.1f}/{:.1f}mm p={:.1f}/{:.1f}mm r={:.2f}) "
+                        "allow={} rb={}",
+                        snapshot.frame_id,
+                        cmd.fire_now ? 1 : 0,
+                        gate.tracking.confidence,
+                        gate.tracking.min_confidence,
+                        gate.tracking.hit_offset_yaw * 1000.0,
+                        gate.tracking.yaw_limit * 1000.0,
+                        gate.tracking.hit_offset_pitch * 1000.0,
+                        gate.tracking.pitch_limit * 1000.0,
+                        gate.swing_ok ? "Y" : "N",
+                        gate.swing_offset_yaw * 1000.0,
+                        gate.swing_yaw_limit * 1000.0,
+                        gate.swing_offset_pitch * 1000.0,
+                        gate.swing_pitch_limit * 1000.0,
+                        gate.swing_error_rate,
+                        gate.out_ok ? "Y" : "N",
+                        gate.out_offset_yaw * 1000.0,
+                        gate.out_yaw_limit * 1000.0,
+                        gate.out_offset_pitch * 1000.0,
+                        gate.out_pitch_limit * 1000.0,
+                        gate.out_error_rate,
+                        gate.allow_fire_ok ? "Y" : "N",
+                        controller.last_rotate_back_ok() ? "Y" : "N"
+                    );
+                }
                 last_fc_log_ts = current_time;
             }
 
