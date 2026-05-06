@@ -491,7 +491,9 @@ TargetState VehicleModel::predict(double timestamp) const {
 
         for (int i = 0; i < vs.armor_count; ++i) {
             const auto& armor = armor_states[i];
-            vs.armor_ids[i] = armor.id;
+            // TargetState::armor_id 给火控做选板连续性，不能暴露 ArmorIdentifier 的递增
+            // tracking id；普通模式只输出当前紧凑列表内的稳定槽位。
+            vs.armor_ids[i] = i;
             vs.armor_types[i] = correct_armor_type(armor.type, enemy_type_);
             vs.armor_position_offsets[i] = armor.position - vs.position;
             vs.armor_velocity_offsets[i] = armor.velocity - vs.velocity;

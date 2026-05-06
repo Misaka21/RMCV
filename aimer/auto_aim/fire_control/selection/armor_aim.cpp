@@ -125,6 +125,20 @@ bool direct_score_better(const DirectScore& lhs, const DirectScore& rhs)
     return lhs.swing_cost < rhs.swing_cost;
 }
 
+Eigen::Vector2d camera_z_i2(const Eigen::Quaterniond& q_imu)
+{
+    const Eigen::Vector3d camera_z_world =
+        aimer::tf::vector<aimer::tf::Frame::Camera, aimer::tf::Frame::World>(
+            Eigen::Vector3d(0.0, 0.0, 1.0), q_imu
+        );
+    Eigen::Vector2d z_i2(camera_z_world.x(), camera_z_world.y());
+    const double norm = z_i2.norm();
+    if (norm < 1e-6) {
+        return Eigen::Vector2d(1.0, 0.0);
+    }
+    return z_i2 / norm;
+}
+
 TopAimProfile get_top_aim_profile(const predictor::TargetState& target) {
     const double top0_deg = (target.armor_count == 4)
         ? get_param_or("AutoAim.FireControl.PID.top0_max_orientation_angle_armors4", 58.8888)
@@ -214,10 +228,14 @@ ArmorAimResult ArmorAim::compute_non_spin(
     const DirectAimContext* direct_ctx
 ) const
 {
-    // 非陀螺: 直接喵中心（仅可见）。
-    // 选板评分对齐 rm.cv.fans armor_model::aim_cmp（non-idle + swing_cost）。
+    (void)gimbal;
+    (void)q_imu;
+    (void)direct_ctx;
+
+    // 非陀螺/停转: 在可见板里选车体最正中的板，而不是按云台转动代价选。
+    // 否则两块板同时可见时，容易跳到侧得更厉害但更容易转到的那块板。
     return compute_direct(
-        vehicle, predict_dt, gimbal, q_imu, direct_ctx, preferred_armor_idx,
+        vehicle, predict_dt, nullptr, nullptr, nullptr, preferred_armor_idx,
         /*use_orientation_window=*/false,
         /*max_orientation_angle=*/0.0,
         /*visible_only=*/true,
@@ -303,10 +321,21 @@ ArmorAimResult ArmorAim::compute_direct(
     // 窗口过滤：保持与 rm.cv.fans 一致，窗口内无候选时可选择直接失败（用于 indirect 回退）
     if (use_orientation_window) {
         const double window = std::max(0.0, max_orientation_angle);
+        // orientation=0 是“瞄中心守株待兔”，不能被迟滞扩成一个隐含 direct 窗口。
+        const double preferred_hold_window = window > 1e-6
+            ? window + aimer::math::deg2rad(std::max(
+                0.0, get_param_or("AutoAim.FireControl.PID.direct_window_hysteresis_deg", 2.0)
+            ))
+            : 0.0;
         std::vector<int> in_window;
         in_window.reserve(candidate_indices.size());
         for (int idx : candidate_indices) {
-            if (std::abs(vehicle.predicted_z_to_v(idx, predict_dt)) <= window) {
+            const double z_to_v = std::abs(vehicle.predicted_z_to_v(idx, predict_dt));
+            const bool preferred_hold =
+                preferred_hold_window > 0.0
+                && idx == preferred_armor_idx
+                && z_to_v <= preferred_hold_window;
+            if (z_to_v <= window || preferred_hold) {
                 in_window.push_back(idx);
             }
         }
@@ -354,7 +383,6 @@ ArmorAimResult ArmorAim::compute_indirect(
 ) const
 {
     (void)gimbal;
-    (void)q_imu;
 
     ArmorAimResult result;
     result.mode = AimMode::INDIRECT;
@@ -371,6 +399,9 @@ ArmorAimResult ArmorAim::compute_indirect(
 
     const double sample_armor_width = vehicle.armor_width(0);
     const double zn_to_lim = (omega > 0.0) ? -max_orientation_angle : +max_orientation_angle;
+    const double switch_hyst = aimer::math::deg2rad(std::max(
+        0.0, get_param_or("AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 5.0)
+    ));
 
     int best_idx = -1;
     double closest_to_lim = std::numeric_limits<double>::infinity();
@@ -378,6 +409,7 @@ ArmorAimResult ArmorAim::compute_indirect(
     double best_z_plus = 0.0;
     bool preferred_valid = false;
     double preferred_to_lim = std::numeric_limits<double>::infinity();
+    double preferred_hold_to_lim = std::numeric_limits<double>::infinity();
     double preferred_radius = 0.0;
     double preferred_z_plus = 0.0;
 
@@ -387,6 +419,7 @@ ArmorAimResult ArmorAim::compute_indirect(
         double z_to_v = 0.0;
         double leave_angle = 0.0;
         double armor_to_lim = 0.0;
+        double hold_to_lim = 0.0;
         double radius = 0.0;
     };
     std::vector<CandidateDiag> diags;
@@ -409,6 +442,12 @@ ArmorAimResult ArmorAim::compute_indirect(
         const double armor_to_lim = (omega > 0.0)
             ? (aimer::math::reduced_angle((zn_to_lim - z_to_v) - M_PI + leave_angle) + M_PI - leave_angle)
             : (aimer::math::reduced_angle((z_to_v - zn_to_lim) - M_PI + leave_angle) + M_PI - leave_angle);
+        const double hold_leave_angle = leave_angle + switch_hyst;
+        const double hold_to_lim = (omega > 0.0)
+            ? (aimer::math::reduced_angle((zn_to_lim - z_to_v) - M_PI + hold_leave_angle)
+                + M_PI - hold_leave_angle)
+            : (aimer::math::reduced_angle((z_to_v - zn_to_lim) - M_PI + hold_leave_angle)
+                + M_PI - hold_leave_angle);
 
         diags.push_back(CandidateDiag{
             i,
@@ -416,6 +455,7 @@ ArmorAimResult ArmorAim::compute_indirect(
             z_to_v,
             leave_angle,
             armor_to_lim,
+            hold_to_lim,
             radius
         });
 
@@ -429,6 +469,7 @@ ArmorAimResult ArmorAim::compute_indirect(
         if (i == preferred_armor_idx) {
             preferred_valid = true;
             preferred_to_lim = armor_to_lim;
+            preferred_hold_to_lim = hold_to_lim;
             preferred_radius = radius;
             preferred_z_plus = offset.z();
         }
@@ -439,24 +480,34 @@ ArmorAimResult ArmorAim::compute_indirect(
     }
 
     if (preferred_valid && std::isfinite(preferred_to_lim)) {
-        const double switch_hyst = aimer::math::deg2rad(std::max(
-            0.0, get_param_or("AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 5.0)
-        ));
-        // 迟滞切板：偏好板只要不明显差于最优，则继续保持，避免 0/3 高频互切。
-        if (preferred_to_lim <= closest_to_lim + switch_hyst) {
+        // 迟滞切板：偏好板只要不明显差于最优，则继续保持。
+        // 参考 rm.cv.fans 允许负 ttf；这里额外用扩大的 leaving angle 保持上一块板，
+        // 避免同一帧预测 dt 细微变化时在“刚过中心线的板”和“下一块板”之间来回跳。
+        const double preferred_score = std::min(preferred_to_lim, preferred_hold_to_lim);
+        if (preferred_score <= closest_to_lim + switch_hyst) {
             best_idx = preferred_armor_idx;
-            closest_to_lim = preferred_to_lim;
+            closest_to_lim = preferred_score;
             best_radius = preferred_radius;
             best_z_plus = preferred_z_plus;
         }
     }
 
     // 对齐 rm.cv.fans lmtd_top_model::choose_indirect_aim:
-    // min_armor_to_wait 允许为负；最终瞄点是同一装甲板在
-    // (predict_dt + time_to_emerge) 的预测位置，而不是强制投影到 lim 方向。
+    // min_armor_to_wait 允许为负；lim=0 时板刚过中心仍瞄它之前的中心位置，
+    // 避免枪口瞬时跳到下一块装甲板的中心。
     const double time_to_emerge = closest_to_lim / std::abs(omega);
-    const Eigen::Vector3d emerge_pos =
-        vehicle.predict_armor_position(best_idx, predict_dt + time_to_emerge);
+    const double emerge_dt = predict_dt + time_to_emerge;
+    Eigen::Vector3d emerge_pos = vehicle.predict_armor_position(best_idx, emerge_dt);
+    if (q_imu != nullptr) {
+        const Eigen::Vector3d center_lim = vehicle.predict_center(emerge_dt);
+        const Eigen::Vector2d lim_norm =
+            aimer::math::rotate(camera_z_i2(*q_imu), M_PI + zn_to_lim);
+        emerge_pos = Eigen::Vector3d(
+            center_lim.x() + lim_norm.x() * best_radius,
+            center_lim.y() + lim_norm.y() * best_radius,
+            center_lim.z() + best_z_plus
+        );
+    }
     if (!emerge_pos.allFinite() || emerge_pos.squaredNorm() < 1e-9) {
         return ArmorAimResult{};
     }
@@ -483,7 +534,7 @@ ArmorAimResult ArmorAim::compute_indirect(
         );
         const double now = now_sec();
         const bool best_switched = (best_idx != last_diag_best_idx);
-        if (best_switched || (now - last_diag_log_sec) >= period_s) {
+        if ((now - last_diag_log_sec) >= period_s) {
             debug::print(
                 best_switched ? debug::PrintMode::INFO : debug::PrintMode::DEBUG,
                 "ArmorAim",
@@ -503,12 +554,13 @@ ArmorAimResult ArmorAim::compute_indirect(
             std::string line;
             for (const auto& d : diags) {
                 line += fmt::format(
-                    " i{}(vis={},z2v={:.1f},leave={:.1f},alim={:.1f},t={:.1f}ms,r={:.3f})",
+                    " i{}(vis={},z2v={:.1f},leave={:.1f},alim={:.1f},hold={:.1f},t={:.1f}ms,r={:.3f})",
                     d.idx,
                     d.visible ? "Y" : "N",
                     aimer::math::rad2deg(d.z_to_v),
                     aimer::math::rad2deg(d.leave_angle),
                     aimer::math::rad2deg(d.armor_to_lim),
+                    aimer::math::rad2deg(d.hold_to_lim),
                     d.armor_to_lim / std::abs(omega) * 1000.0,
                     d.radius
                 );
@@ -545,18 +597,30 @@ int ArmorAim::choose_best_direct(
             return vehicle.armor_id(a) < vehicle.armor_id(b);
         });
 
+    // 参考 rm.cv.fans 的 direct 评分用“最小转动代价”，但本工程还携带了当前可见性。
+    // 若窗口内已有可见板，优先在可见板里选，避免宽 orientation 窗口下追到背后的预测板。
+    std::vector<int> visible_indices;
+    visible_indices.reserve(ordered_indices.size());
+    for (int idx : ordered_indices) {
+        if (vehicle.armor_visible(idx)) {
+            visible_indices.push_back(idx);
+        }
+    }
+    const std::vector<int>& scoring_indices =
+        visible_indices.empty() ? ordered_indices : visible_indices;
+
     // 对齐 rm.cv.fans armor_model::aim_cmp:
     // 1) non-idle 优先
     // 2) 再比较 swing_cost
     if (gimbal != nullptr) {
-        int best_idx = ordered_indices[0];
+        int best_idx = scoring_indices[0];
         DirectScore best_score = score_direct_candidate(
             vehicle, best_idx, predict_dt, *gimbal, q_imu, direct_ctx
         );
         DirectScore preferred_score{};
         bool has_preferred = false;
 
-        for (int idx : ordered_indices) {
+        for (int idx : scoring_indices) {
             const DirectScore score = score_direct_candidate(
                 vehicle, idx, predict_dt, *gimbal, q_imu, direct_ctx
             );
@@ -583,9 +647,9 @@ int ArmorAim::choose_best_direct(
     }
 
     // 无云台状态时回退到“最正对”策略
-    int best_idx = ordered_indices[0];
+    int best_idx = scoring_indices[0];
     double best_score = std::abs(vehicle.predicted_z_to_v(best_idx, predict_dt));
-    for (int idx : ordered_indices) {
+    for (int idx : scoring_indices) {
         const double score = std::abs(vehicle.predicted_z_to_v(idx, predict_dt));
         if (score < best_score) {
             best_score = score;
