@@ -340,9 +340,9 @@
     top0_max_orientation_angle_armors_other = 75.0
 
     #@double top1 的朝向窗口 (deg, 0 表示瞄中心守株待兔，等待装甲板进中心线)
-    top1_max_orientation_angle = 0.0
+    top1_max_orientation_angle = 60.0
     #@double top2 的朝向窗口 (deg, 0 表示瞄中心守株待兔，等待装甲板进中心线)
-    top2_max_orientation_angle = 0.0
+    top2_max_orientation_angle = 10.0
 
     #@double top0 的间接打击离场误差比例
     top0_max_out_error = 1.8

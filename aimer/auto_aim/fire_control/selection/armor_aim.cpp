@@ -364,11 +364,22 @@ ArmorAimResult ArmorAim::compute_direct(
     result.armor_idx = armor_idx;
     result.armor_id = vehicle.armor_id(armor_idx);
     result.target_pos = vehicle.predict_armor_position(armor_idx, predict_dt);
-    result.target_vel = compute_armor_velocity(vehicle, armor_idx, predict_dt);
     result.z_to_v = vehicle.predicted_z_to_v(armor_idx, predict_dt);
     result.time_to_fire = 0.0;
     result.armor_width = vehicle.armor_width(armor_idx);
     result.armor_height = vehicle.armor_height(armor_idx);
+
+    const Eigen::Vector3d armor_vel = compute_armor_velocity(vehicle, armor_idx, predict_dt);
+    if (use_orientation_window && max_orientation_angle > 1e-6) {
+        // direct 的命令速度按击打窗口开口连续变化：中心完整跟装甲板，窗口边界退到车心速度。
+        // 这样 direct 边界和 indirect 等待点在位置、速度上都连续，不会靠事后兜底消跳。
+        const double normalized_orientation =
+            std::clamp(std::abs(result.z_to_v) / max_orientation_angle, 0.0, 1.0);
+        const double follow_ratio = std::cos(0.5 * M_PI * normalized_orientation);
+        result.target_vel = vehicle.velocity + (armor_vel - vehicle.velocity) * follow_ratio;
+    } else {
+        result.target_vel = armor_vel;
+    }
     return result;
 }
 
@@ -402,6 +413,7 @@ ArmorAimResult ArmorAim::compute_indirect(
     const double switch_hyst = aimer::math::deg2rad(std::max(
         0.0, get_param_or("AutoAim.FireControl.PID.indirect_switch_hysteresis_deg", 5.0)
     ));
+    const bool future_only_indirect = max_orientation_angle > 1e-6;
 
     int best_idx = -1;
     double closest_to_lim = std::numeric_limits<double>::infinity();
@@ -459,7 +471,8 @@ ArmorAimResult ArmorAim::compute_indirect(
             radius
         });
 
-        if (armor_to_lim < closest_to_lim) {
+        const bool can_select_for_indirect = !future_only_indirect || armor_to_lim >= 0.0;
+        if (can_select_for_indirect && armor_to_lim < closest_to_lim) {
             closest_to_lim = armor_to_lim;
             best_idx = i;
             best_radius = radius;
@@ -480,11 +493,13 @@ ArmorAimResult ArmorAim::compute_indirect(
     }
 
     if (preferred_valid && std::isfinite(preferred_to_lim)) {
-        // 迟滞切板：偏好板只要不明显差于最优，则继续保持。
-        // 参考 rm.cv.fans 允许负 ttf；这里额外用扩大的 leaving angle 保持上一块板，
-        // 避免同一帧预测 dt 细微变化时在“刚过中心线的板”和“下一块板”之间来回跳。
-        const double preferred_score = std::min(preferred_to_lim, preferred_hold_to_lim);
-        if (preferred_score <= closest_to_lim + switch_hyst) {
+        const double preferred_score = future_only_indirect
+            ? preferred_to_lim
+            : std::min(preferred_to_lim, preferred_hold_to_lim);
+        // 非 0 orientation 是窗口击打，indirect 只等待未来入窗板；orientation=0 保留
+        // rm.cv.fans 的负 ttf 守中心语义，防止纯守株待兔时跳到下一块板中心。
+        const bool preferred_selectable = !future_only_indirect || preferred_score >= 0.0;
+        if (preferred_selectable && preferred_score <= closest_to_lim + switch_hyst) {
             best_idx = preferred_armor_idx;
             closest_to_lim = preferred_score;
             best_radius = preferred_radius;
@@ -492,9 +507,9 @@ ArmorAimResult ArmorAim::compute_indirect(
         }
     }
 
-    // 对齐 rm.cv.fans lmtd_top_model::choose_indirect_aim:
-    // min_armor_to_wait 允许为负；lim=0 时板刚过中心仍瞄它之前的中心位置，
-    // 避免枪口瞬时跳到下一块装甲板的中心。
+    const double selected_z_to_v = vehicle.predicted_z_to_v(best_idx, predict_dt);
+    // orientation=0 时保留 rm.cv.fans 的负 ttf 守中心；orientation>0 时上面已经只保留
+    // 未来入窗板，因此这里的 emerge 点语义始终是“下一次进入击打窗口的位置”。
     const double time_to_emerge = closest_to_lim / std::abs(omega);
     const double emerge_dt = predict_dt + time_to_emerge;
     Eigen::Vector3d emerge_pos = vehicle.predict_armor_position(best_idx, emerge_dt);
@@ -518,7 +533,7 @@ ArmorAimResult ArmorAim::compute_indirect(
     result.target_pos = emerge_pos;
     // 与 rm.cv.fans 一致：返回被选中装甲板在当前时刻的 z_to_v，
     // 后续开火门控会基于各自时刻再次计算。
-    result.z_to_v = vehicle.predicted_z_to_v(best_idx, predict_dt);
+    result.z_to_v = selected_z_to_v;
     result.time_to_fire = time_to_emerge;
     result.armor_width = vehicle.armor_width(best_idx);
     result.armor_height = vehicle.armor_height(best_idx);
@@ -597,17 +612,10 @@ int ArmorAim::choose_best_direct(
             return vehicle.armor_id(a) < vehicle.armor_id(b);
         });
 
-    // 参考 rm.cv.fans 的 direct 评分用“最小转动代价”，但本工程还携带了当前可见性。
-    // 若窗口内已有可见板，优先在可见板里选，避免宽 orientation 窗口下追到背后的预测板。
-    std::vector<int> visible_indices;
-    visible_indices.reserve(ordered_indices.size());
-    for (int idx : ordered_indices) {
-        if (vehicle.armor_visible(idx)) {
-            visible_indices.push_back(idx);
-        }
-    }
-    const std::vector<int>& scoring_indices =
-        visible_indices.empty() ? ordered_indices : visible_indices;
+    // 对齐 rm.cv.fans：direct 窗口内按预测状态的转动代价选板。
+    // 可见性由调用方的 visible_only 控制；spin direct 需要允许打预测板，否则
+    // 较大的 orientation 窗口会被“当前可见板优先”打断，导致窗口内来回抢板。
+    const std::vector<int>& scoring_indices = ordered_indices;
 
     // 对齐 rm.cv.fans armor_model::aim_cmp:
     // 1) non-idle 优先
