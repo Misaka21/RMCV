@@ -847,34 +847,41 @@ FireCommand FireController::control(
     last_latency_ = iter_latency;
     last_prediction_dt_ = final_predict_dt;
 
-    // 4. 构建 GimbalPlan
+    // 4. MPC 规划 (对齐 sp_vision_25 Planner)
+    const double hit_offset = iter_latency.send_to_control + iter_latency.fire_to_hit;
+    planner_.build_reference(
+        vehicle, armor.armor_idx, img_age, hit_offset,
+        bullet_speed, self_velocity, snapshot.self_state.q_imu);
+    PlannerOutput planner_out = planner_.step(gimbal_state_);
+    last_planner_output_ = planner_out;
+
+    // 5. 构建 GimbalPlan (从 MPC 输出)
     GimbalPlan plan;
-    plan.valid = true;
-    plan.yaw = aim.yaw;
-    plan.pitch = aim.pitch;
-    // 速度前馈
-    if (armor.target_pos.allFinite() && armor.target_vel.allFinite()) {
-        const Eigen::Vector3d rp = aimer::tf::world_to_barrel_origin_world(
-            armor.target_pos, snapshot.self_state.q_imu);
-        const Eigen::Vector3d& rv = armor.target_vel;
-        const double x = rp.x(), y = rp.y(), z = rp.z();
-        const double xy2 = x*x + y*y, xyz2 = xy2 + z*z, xy = std::sqrt(xy2);
-        if (xy2 > 1e-9 && xyz2 > 1e-9 && xy > 1e-9) {
-            plan.yaw_vel = -y * rv.x() / xy2 + x * rv.y() / xy2;
-            plan.pitch_vel = rv.z() * xy / xyz2
-                - x * z * rv.x() / (xy * xyz2)
-                - y * z * rv.y() / (xy * xyz2);
-        }
+    if (planner_out.valid) {
+        plan.valid = true;
+        plan.yaw = planner_out.yaw;
+        plan.pitch = planner_out.pitch;
+        plan.yaw_vel = planner_out.yaw_vel;
+        plan.pitch_vel = planner_out.pitch_vel;
+        plan.yaw_acc = planner_out.yaw_acc;
+        plan.pitch_acc = planner_out.pitch_acc;
+    } else {
+        // MPC 未就绪: 退化为原始瞄准点 + 零速度
+        plan.valid = true;
+        plan.yaw = aim.yaw;
+        plan.pitch = aim.pitch;
+        plan.yaw_vel = 0;
+        plan.pitch_vel = 0;
     }
 
-    // 5. 缓存调试状态
+    // 6. 缓存调试状态
     last_selection_ = {true, target_id, 1.0, armor.target_pos};
     last_aim_ = aim;
     last_armor_aim_ = armor;
     last_plan_ = plan;
     last_armor_id_ = armor.armor_id;
 
-    // 6. 开火判断
+    // 7. 开火判断
     bool can_fire = evaluate_fire_gate(
         snapshot, vehicle, iter_latency, profile,
         final_predict_dt, self_velocity);
@@ -885,33 +892,23 @@ FireCommand FireController::control(
 
     last_fail_stage_ = 9;
 
-    // 7. 生成指令
+    // 8. 生成指令
     FireCommand cmd;
     cmd.control_enabled = true;
-
-    const double additional = runtime_param::get_param<double>(
-        "AutoAim.FireControl.Cmd.additional_predict_time");
-    const double max_abs_vel = std::max(0.0, runtime_param::get_param<double>(
-        "AutoAim.FireControl.Cmd.max_abs_vel"));
-
-    double yaw_ff = plan.yaw_vel;
-    double pitch_ff = plan.pitch_vel;
-    if (max_abs_vel > 0.0) {
-        yaw_ff = std::clamp(yaw_ff, -max_abs_vel, max_abs_vel);
-        pitch_ff = std::clamp(pitch_ff, -max_abs_vel, max_abs_vel);
-    }
 
     const double off_yaw = aimer::math::deg2rad(runtime_param::get_param<double>(
         "AutoAim.FireControl.AimOffset.yaw"));
     const double off_pitch = aimer::math::deg2rad(runtime_param::get_param<double>(
         "AutoAim.FireControl.AimOffset.pitch"));
 
-    cmd.yaw = static_cast<float>(aim.yaw + additional * yaw_ff + off_yaw);
-    cmd.yaw_vel = static_cast<float>(yaw_ff);
-    cmd.yaw_acc = 0;
-    cmd.pitch = static_cast<float>(aim.pitch + additional * pitch_ff + off_pitch);
-    cmd.pitch_vel = static_cast<float>(pitch_ff);
-    cmd.pitch_acc = 0;
+    // MPC 已包含完整轨迹 (位置+速度+加速度), 不再需要 additional_predict_time 前馈
+    // aim_offset 在校准偏差时为非零, 加在 MPC 输出之上
+    cmd.yaw = static_cast<float>(plan.yaw + off_yaw);
+    cmd.yaw_vel = static_cast<float>(plan.yaw_vel);
+    cmd.yaw_acc = static_cast<float>(plan.yaw_acc);
+    cmd.pitch = static_cast<float>(plan.pitch + off_pitch);
+    cmd.pitch_vel = static_cast<float>(plan.pitch_vel);
+    cmd.pitch_acc = static_cast<float>(plan.pitch_acc);
 
     cmd.allow_fire = true;
     cmd.fire_now = can_fire;
@@ -930,6 +927,7 @@ FireCommand FireController::control(
 void FireController::reset() {
     catcher_.reset();
     gimbal_state_ = {};
+    planner_.reset();
     last_time_ = 0;
     last_selection_ = {};
     last_aim_ = {};

@@ -6,6 +6,9 @@ add_library(autoaim_fire_control STATIC
     # 主控制器
     fire_controller.cpp
     fire_control_node.cpp
+
+    # MPC 规划器
+    planner/gimbal_planner.cpp
 )
 
 target_include_directories(autoaim_fire_control PUBLIC

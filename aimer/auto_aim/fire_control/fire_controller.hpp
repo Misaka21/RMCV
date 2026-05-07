@@ -26,6 +26,7 @@
 #include <memory>
 
 #include "types.hpp"
+#include "planner/gimbal_planner.hpp"
 #include "aimer/common/trajectory/solver_factory.hpp"
 #include "aimer/auto_aim/predictor/types.hpp"
 
@@ -66,6 +67,7 @@ public:
     double last_prediction_dt() const { return last_prediction_dt_; }
     const LatencyInfo& last_latency() const { return last_latency_; }
     int last_armor_id() const { return last_armor_id_; }
+    const PlannerOutput& last_planner_output() const { return last_planner_output_; }
     bool last_rotate_back_ok() const { return last_rotate_back_ok_; }
     bool last_rotate_back_active() const { return last_rotate_back_active_; }
     double last_rotate_back_start() const { return last_rotate_back_start_; }
@@ -209,6 +211,7 @@ private:
 
     GimbalState gimbal_state_;
     TargetCatcher catcher_;
+    GimbalPlanner planner_;
     double last_time_ = 0;
 
     // ==================== 调试缓存 ====================
@@ -217,6 +220,7 @@ private:
     AimResult last_aim_;
     ArmorAimResult last_armor_aim_;
     GimbalPlan last_plan_;
+    PlannerOutput last_planner_output_;
     FireGateDebug last_gate_debug_;
     LatencyInfo last_latency_;
     double last_prediction_dt_ = 0;
