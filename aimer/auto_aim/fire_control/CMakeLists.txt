@@ -3,13 +3,6 @@
 
 # AutoAim 火控库
 add_library(autoaim_fire_control STATIC
-    # 目标选择层
-    selection/target_selector.cpp
-    selection/armor_aim.cpp
-
-    # 决策层
-    decision/fire_decision.cpp
-
     # 主控制器
     fire_controller.cpp
     fire_control_node.cpp
