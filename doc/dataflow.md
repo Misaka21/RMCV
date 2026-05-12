@@ -32,7 +32,7 @@
          │  armors + 时间戳     │
          └──────────┬──────────┘
                     │ UMT Publisher
-                    │ "detection_result"
+                    │ "detections"
                     ▼
                   后续处理...
 ```
@@ -47,24 +47,25 @@
 // hardware/serial/serial_thread.hpp
 struct SerialReceiveData {
     // IMU 姿态数据
-    float yaw;            // 偏航角 (°)
-    float pitch;          // 俯仰角 (°)
-    float roll;           // 横滚角 (°)
-
-    // 机器人状态
-    uint8_t robot_id;     // 机器人ID (1-7红方, 101-107蓝方)
-    uint8_t enemy_color;  // 敌方颜色 (0=未知, 1=红, 2=蓝)
+    float yaw;            // 偏航角 (rad)
+    float pitch;          // 俯仰角 (rad)
+    float roll;           // 横滚角 (rad)
 
     // 射击参数
     float bullet_speed;   // 弹速 (m/s)
 
     // 模式控制 (原始字节，业务含义见 aimer::AimMode)
     uint8_t aim_mode;     // 原始值 (0/1/2/3)，转换见 aimer::to_aim_mode()
-    bool allow_fire;      // 是否允许射击
     bool aiming_lock;     // 预瞄锁定 (右键按下=true, 释放=false)
 
-    // 时间戳
-    uint32_t timestamp;   // 下位机时间戳 (ms)
+    // 协议字段
+    uint8_t enemy_color;  // 敌方颜色 (0=未知, 1=红, 2=蓝)
+
+    // 本地软门控字段，不走当前串口协议
+    bool allow_fire;      // 是否允许射击
+
+    // 上位机接收时间戳
+    int64_t recv_time_us;
 };
 ```
 
@@ -164,12 +165,11 @@ while (true) {
 DetectorNode 中的颜色获取优先级：
 
 ```cpp
-// 优先使用串口传来的颜色，否则用全局设置
-detector::EnemyColor current_color = g_detect_color;
-if (frame.serial_valid && frame.serial_data.enemy_color != 0) {
-    current_color = (frame.serial_data.enemy_color == 1)
-        ? detector::EnemyColor::RED
-        : detector::EnemyColor::BLUE;
+// 默认使用串口 byte[19]；若 hardware.toml 中调试覆盖开启，则使用覆盖值。
+if (frame.serial_data.enemy_color == 1) {
+    detector->set_enemy_color(detector::EnemyColor::RED);
+} else if (frame.serial_data.enemy_color == 2) {
+    detector->set_enemy_color(detector::EnemyColor::BLUE);
 }
 ```
 
@@ -178,15 +178,15 @@ if (frame.serial_valid && frame.serial_data.enemy_color != 0) {
 | 通道名 | 数据类型 | 发布者 | 订阅者 |
 |--------|----------|--------|--------|
 | `sync_frame` | `SyncFrame` | HardwareNode | DetectorNode |
-| `detection_result` | `DetectionResult` | DetectorNode | Predictor/Aimer |
-| `receive_queue` | `std::queue<SerialReceiveData>` | 串口接收线程 | HardwareNode |
+| `detections` | `DetectionResult` | DetectorNode | Predictor/Aimer |
+| `serial_receive` | `SerialReceiveData` | 串口接收线程 | HardwareNode |
 
 ## 时间同步机制
 
 HardwareNode 使用缓冲区进行时间同步匹配：
 
-1. 串口接收线程将数据放入 `receive_queue`
-2. HardwareNode 主循环从队列取出数据，记录接收时间
+1. 串口接收线程将数据发布到 `serial_receive`
+2. HardwareNode 主循环将串口数据转移到时间同步缓冲区
 3. 相机采集图像后，根据 `delta_t_us` 配置找到最接近的串口数据
 4. 打包成 SyncFrame 发布
 
@@ -238,11 +238,10 @@ auto data = find_closest_serial_data(serial_buffer, target);
 
 [Serial.fake_data]
     # IMU姿态
-    yaw_deg = 0.0
-    pitch_deg = 0.0
-    roll_deg = 0.0
-    # 机器人状态
-    robot_id = 3           # 1-7红方, 101-107蓝方
+    yaw_rad = 0.0
+    pitch_rad = 0.0
+    roll_rad = 0.0
+    # 敌方颜色
     enemy_color = 1        # 0=未知, 1=红, 2=蓝
     # 射击参数
     bullet_speed = 15.0    # m/s
@@ -250,6 +249,10 @@ auto data = find_closest_serial_data(serial_buffer, target);
     aim_mode = 1           # 0=DISABLED, 1=AUTOAIM, 2=ENERGY_SMALL, 3=ENERGY_LARGE
     allow_fire = true
     aiming_lock = false
+
+[Serial.enemy_color_override]
+    enable = false         # 调试时才设为 true
+    enemy_color = 1        # 0=未知, 1=红, 2=蓝
 ```
 
 启用后，HardwareNode 会跳过串口初始化，直接使用配置的虚拟数据填充 `SyncFrame.serial_data`。

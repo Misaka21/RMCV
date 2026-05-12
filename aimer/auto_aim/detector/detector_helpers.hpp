@@ -25,7 +25,9 @@ namespace autoaim::detector {
  * @param serial_color 串口颜色 (0=未知, 1=红, 2=蓝)
  */
 inline EnemyColor serial_to_enemy_color(uint8_t serial_color) {
-    return (serial_color == 1) ? EnemyColor::RED : EnemyColor::BLUE;
+    if (serial_color == 1) return EnemyColor::RED;
+    if (serial_color == 2) return EnemyColor::BLUE;
+    return EnemyColor::GRAY;
 }
 
 /**
@@ -41,7 +43,6 @@ inline aimer::RobotState build_robot_state(
     state.bullet_speed = s.bullet_speed;
     state.aim_mode = aimer::to_aim_mode(s.aim_mode);  // uint8_t → AimMode
     state.aiming_lock = s.aiming_lock;
-    // enemy_color 和 allow_fire 从配置加载（不在协议中）
     state.enemy_color = s.enemy_color;
     state.allow_fire = s.allow_fire;
     state.timestamp_us = timestamp_us;

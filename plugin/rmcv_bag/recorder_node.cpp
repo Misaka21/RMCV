@@ -224,12 +224,11 @@ void start_recorder_node() {
                 if (config.record_imu_csv || match_mode) {
                     std::string imu_filepath = get_unique_filepath(session_path, "imu", ".csv");
                     imu_writer = std::make_unique<CsvWriter>(imu_filepath);
-                    // 新协议: 删除 robot_id, enemy_color, allow_fire
                     imu_writer->write_header({
                         "timestamp_us", "frame_id",
                         "yaw", "pitch", "roll",
                         "bullet_speed", "aim_mode", "aiming_lock",
-                        "serial_timestamp"
+                        "enemy_color", "allow_fire", "serial_timestamp"
                     });
                     csv_row_count = 0;
                 }
@@ -315,7 +314,6 @@ void start_recorder_node() {
             // ========== 写入 IMU CSV ==========
             if (sync_valid && imu_writer) {
                 const auto& s = sync_frame.serial_data;
-                // 新协议: 删除 robot_id, enemy_color, allow_fire
                 imu_writer->write_row({
                     std::to_string(sync_frame.timestamp_us),
                     std::to_string(sync_frame.frame_id),
@@ -325,6 +323,8 @@ void start_recorder_node() {
                     fmt::format("{:.2f}", s.bullet_speed),
                     std::to_string(s.aim_mode),
                     std::to_string(s.aiming_lock ? 1 : 0),
+                    std::to_string(s.enemy_color),
+                    std::to_string(s.allow_fire ? 1 : 0),
                     std::to_string(s.recv_time_us)
                 });
                 csv_row_count++;
