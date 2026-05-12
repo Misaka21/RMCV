@@ -18,9 +18,10 @@ namespace autobuff::detector {
  * @param config_file 配置文件名 (相对于 CONFIG_DIR)
  * @return BuffDetectorInterface 接口指针
  *
- * 根据配置文件中的 [Detector.Yolo].backend 选择后端:
- *   - "openvino": OpenVINO 后端
- *   - "tensorrt": TensorRT 后端
+ * 根据配置文件中的 [Detector.Backend].backend 选择后端:
+ *   - "traditional": 传统 CV 检测器 (颜色差分 + 轮廓分析)
+ *   - "openvino": OpenVINO YOLOX 后端
+ *   - "tensorrt": TensorRT YOLOX 后端
  */
 std::unique_ptr<BuffDetectorInterface> create_detector_from_config(
     EnemyColor color,

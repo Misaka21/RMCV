@@ -5,16 +5,20 @@
 
 [Detector]
     #@bool 是否开启调试模式
-    debug = false
+    debug = true
 
-# ==================== YOLOX 检测器配置 ====================
-# 模型: FYT yolox_rune_3.6m
-# 输出: 5 关键点 (r_center + 4 装甲板角点) + 颜色 + 类型
-# 注意: 模型不需要 /255 归一化, 内部处理
+# ==================== 检测器后端选择 ====================
+# backend 可选:
+#   "traditional"  - 传统 CV 管线 (颜色差分 + 轮廓分析, 纯 CPU)
+#   "openvino"     - YOLOX 模型 OpenVINO 推理
+#   "tensorrt"     - YOLOX 模型 TensorRT 推理
+# 切换后重启程序生效。传统检测器参数在 config/buff.toml [AutoBuff.Detector.Traditional]
+[Detector.Backend]
+    #@string 检测后端: "traditional" / "openvino" / "tensorrt"
+    backend = "traditional"
 
+# ==================== YOLOX 模型参数 (backend != traditional 时生效) ====================
 [Detector.Yolo]
-    #@string 推理后端: "openvino" 或 "tensorrt"
-    backend = "openvino"
     #@string 模型文件路径 (相对于 asset 目录)
     model_path = "yolox_rune_3.6m.onnx"
     #@double 置信度阈值

@@ -50,6 +50,10 @@ target_link_libraries(buff_detector_core PUBLIC
     plugin
 )
 
+# 传统检测器 (始终构建)
+add_subdirectory(detector_traditional)
+message(STATUS "Buff traditional detector: ENABLED")
+
 # 可选: OpenVINO 检测器
 if(ENABLE_BUFF_OPENVINO_DETECTOR)
     add_subdirectory(detector_ov)
@@ -86,7 +90,11 @@ target_link_libraries(buff_detector_node PUBLIC
     hardware
     ${OpenCV_LIBS}
     fmt::fmt
+    buff_detector_traditional
 )
+
+# 传统检测器 (始终可用)
+target_compile_definitions(buff_detector_node PUBLIC ENABLE_BUFF_TRADITIONAL_DETECTOR)
 
 # 条件编译 YOLO 检测器 (宏定义 PRIVATE，不传播)
 if(ENABLE_BUFF_OPENVINO_DETECTOR)

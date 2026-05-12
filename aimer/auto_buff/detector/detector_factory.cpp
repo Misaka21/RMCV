@@ -9,6 +9,10 @@
 #include "plugin/param/static_config.hpp"
 #include "plugin/debug/logger.hpp"
 
+#ifdef ENABLE_BUFF_TRADITIONAL_DETECTOR
+#include "detector_traditional/traditional_buff_detector.hpp"
+#endif
+
 #ifdef ENABLE_BUFF_OPENVINO_DETECTOR
 #include "detector_ov/openvino_buff_detector.hpp"
 #endif
@@ -25,17 +29,31 @@ std::unique_ptr<BuffDetectorInterface> create_detector_from_config(
 
     auto config = static_param::parse_file(config_file);
 
-    // 读取 YOLO 后端类型
+    // 读取检测后端类型
     auto backend_str = static_param::get_param<std::string>(
-        config, "Detector.Yolo", "backend");
+        config, "Detector.Backend", "backend");
     if (backend_str.empty()) {
         backend_str = "openvino";
     }
 
     debug::print("info", "BuffDetector",
-        "Creating YOLOX rune detector: backend={}", backend_str);
+        "Creating rune detector: backend={}", backend_str);
 
-    if (backend_str == "openvino") {
+    if (backend_str == "traditional") {
+#ifdef ENABLE_BUFF_TRADITIONAL_DETECTOR
+        debug::print("info", "BuffDetector",
+            "Creating traditional CV rune detector");
+        auto detector = std::make_unique<TraditionalBuffDetector>();
+        detector->set_enemy_color(color);
+        bool dbg = static_param::get_param<bool>(config, "Detector", "debug");
+        detector->set_debug_enabled(dbg);
+        return detector;
+#else
+        throw std::runtime_error(
+            "Traditional buff detector requested but not compiled. "
+            "Rebuild with -DENABLE_BUFF_TRADITIONAL_DETECTOR=ON");
+#endif
+    } else if (backend_str == "openvino") {
 #ifdef ENABLE_BUFF_OPENVINO_DETECTOR
         return OpenvinoBuffDetector::from_config(color, config_file);
 #else
@@ -53,7 +71,8 @@ std::unique_ptr<BuffDetectorInterface> create_detector_from_config(
 #endif
     } else {
         throw std::runtime_error(
-            "Unknown YOLO backend for buff detector: " + backend_str);
+            "Unknown backend for buff detector: " + backend_str
+            + ". Expected: traditional, openvino, or tensorrt.");
     }
 }
 
