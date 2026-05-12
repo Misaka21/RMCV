@@ -57,7 +57,7 @@ aimer::RobotState build_robot_state(const serial::SerialReceiveData& data, int64
     state.aim_mode = aimer::to_aim_mode(data.aim_mode);
     state.aiming_lock = data.aiming_lock;
     state.enemy_color = data.enemy_color;
-    state.allow_fire = true;
+    state.allow_fire = data.allow_fire;
     state.timestamp_us = timestamp_us;
     return state;
 }

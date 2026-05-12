@@ -402,7 +402,7 @@ bool SerialUtils::vision_data_to_packet(const VisionData_t& cmd, PacketType& pac
 // BoardToVision 协议布局 (电控 → 视觉, 32字节):
 //   [0] head=0xff, [1] mode, [2] aiming_lock,
 //   [3-6] bullet_speed, [7-10] yaw, [11-14] pitch, [15-18] roll,
-//   [19-28] reserved, [29-30] crc16, [31] tail=0x0d
+//   [19] enemy_color, [20-28] reserved, [29-30] crc16, [31] tail=0x0d
 // CRC 计算范围: buffer[1..28] (28字节)
 bool SerialUtils::packet_to_receive_data(const PacketType& packet, SerialReceiveData& data) {
     try {

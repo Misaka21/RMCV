@@ -10,13 +10,13 @@
 #ifndef SIMULATOR_NODE_HPP
 #define SIMULATOR_NODE_HPP
 
+#include <cstdint>
 #include <string>
 
 namespace simulator {
 
 /**
  * @brief 模拟器配置
- * 注: 新协议不含 robot_id, enemy_color, allow_fire
  */
 struct SimulatorConfig {
     // ROS2 Topics
@@ -27,6 +27,8 @@ struct SimulatorConfig {
     float bullet_speed = 15.0f;
     uint8_t aim_mode = 1;
     bool aiming_lock = false;
+    uint8_t enemy_color = 0;
+    bool allow_fire = true;
 };
 
 /**

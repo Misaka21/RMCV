@@ -199,6 +199,9 @@ SimulatorConfig load_config(const std::string& filename) {
         cfg.aim_mode = static_cast<uint8_t>(
             static_param::get_param<int64_t>(toml, "Simulator.serial", "aim_mode"));
         cfg.aiming_lock = static_param::get_param<bool>(toml, "Simulator.serial", "aiming_lock");
+        cfg.enemy_color = static_cast<uint8_t>(
+            static_param::get_param<int64_t>(toml, "Simulator.serial", "enemy_color"));
+        cfg.allow_fire = static_param::get_param<bool>(toml, "Simulator.serial", "allow_fire");
 
     } catch (const std::exception& e) {
         debug::print(debug::PrintMode::WARNING, "Simulator",
@@ -301,6 +304,8 @@ void start_simulator_node() {
         frame.serial_data.bullet_speed = config.bullet_speed;
         frame.serial_data.aim_mode = config.aim_mode;
         frame.serial_data.aiming_lock = config.aiming_lock;
+        frame.serial_data.enemy_color = config.enemy_color;
+        frame.serial_data.allow_fire = config.allow_fire;
 
         // 发布
         pub.push(frame);

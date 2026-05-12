@@ -28,7 +28,6 @@ using hardware::SyncFrame;
 // CSV Reader
 // ============================================================================
 
-// 新协议: 删除 robot_id, enemy_color, allow_fire
 struct ImuRecord {
     int64_t timestamp_us;
     int frame_id;
@@ -38,6 +37,8 @@ struct ImuRecord {
     float bullet_speed;
     uint8_t aim_mode;
     bool aiming_lock;
+    uint8_t enemy_color = 0;
+    bool allow_fire = true;
     int64_t serial_timestamp;
 };
 
@@ -89,7 +90,13 @@ private:
             record.bullet_speed = std::stof(tokens[5]);
             record.aim_mode = static_cast<uint8_t>(std::stoi(tokens[6]));
             record.aiming_lock = (std::stoi(tokens[7]) != 0);
-            record.serial_timestamp = std::stoll(tokens[8]);
+            if (tokens.size() >= 11) {
+                record.enemy_color = static_cast<uint8_t>(std::stoi(tokens[8]));
+                record.allow_fire = (std::stoi(tokens[9]) != 0);
+                record.serial_timestamp = std::stoll(tokens[10]);
+            } else {
+                record.serial_timestamp = std::stoll(tokens[8]);
+            }
             return true;
         } catch (...) {
             return false;
@@ -185,6 +192,8 @@ void start_playback_node(const std::string& bag_path, double playback_speed) {
         sync_frame.serial_data.bullet_speed = imu.bullet_speed;
         sync_frame.serial_data.aim_mode = imu.aim_mode;
         sync_frame.serial_data.aiming_lock = imu.aiming_lock;
+        sync_frame.serial_data.enemy_color = imu.enemy_color;
+        sync_frame.serial_data.allow_fire = imu.allow_fire;
         sync_frame.serial_data.recv_time_us = imu.serial_timestamp;
         sync_frame.serial_valid = true;
         if (csv_index < csv_reader->size()) {

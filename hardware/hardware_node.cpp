@@ -30,6 +30,38 @@ namespace hardware {
 using namespace std::chrono_literals;
 using SteadyClock = std::chrono::steady_clock;
 
+namespace {
+
+constexpr uint8_t ENEMY_COLOR_UNKNOWN = 0;
+constexpr uint8_t ENEMY_COLOR_RED = 1;
+constexpr uint8_t ENEMY_COLOR_BLUE = 2;
+
+uint8_t read_enemy_color_config(
+    const toml::table& config,
+    const std::string& table_name,
+    const std::string& key_name,
+    uint8_t fallback = ENEMY_COLOR_UNKNOWN) {
+
+    const int64_t raw = static_param::get_param<int64_t>(config, table_name, key_name);
+    if (raw >= ENEMY_COLOR_UNKNOWN && raw <= ENEMY_COLOR_BLUE) {
+        return static_cast<uint8_t>(raw);
+    }
+
+    debug::print(debug::PrintMode::WARNING, "HardwareNode",
+        "{}.{}={} is invalid, use {}", table_name, key_name, raw, fallback);
+    return fallback;
+}
+
+const char* enemy_color_name(uint8_t color) {
+    switch (color) {
+        case ENEMY_COLOR_RED: return "RED";
+        case ENEMY_COLOR_BLUE: return "BLUE";
+        default: return "UNKNOWN";
+    }
+}
+
+}  // namespace
+
 // 带时间戳的串口数据，用于时间同步匹配
 struct TimestampedSerialData {
     int64_t recv_time_us;  // 接收时间 (微秒)
@@ -223,12 +255,12 @@ void start_hardware_node() {
         // Fake serial config
         bool use_fake_serial = static_param::get_param<bool>(config, "Serial", "use_fake_serial_data");
 
-        // enemy_color / allow_fire 不在新协议中：统一从配置注入（fake/real 串口都需要）
-        // 目前复用 Serial.fake_data.* 字段作为注入源，避免再加一套配置表。
-        // NOTE: 若未来下位机协议加入这两个字段，需要改为“仅当值未知/未提供时才注入”，避免覆盖真实值。
-        uint8_t injected_enemy_color = static_cast<uint8_t>(
-            static_param::get_param<int64_t>(config, "Serial.fake_data", "enemy_color"));
-        bool injected_allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
+        // 调试覆盖独立于 fake serial；默认关闭，实车时使用串口协议 byte[19] 的 enemy_color。
+        bool override_enemy_color =
+            static_param::get_param<bool>(config, "Serial.enemy_color_override", "enable");
+        uint8_t override_enemy_color_value = read_enemy_color_config(
+            config, "Serial.enemy_color_override", "enemy_color", ENEMY_COLOR_UNKNOWN);
+        bool fake_allow_fire = static_param::get_param<bool>(config, "Serial.fake_data", "allow_fire");
 
         serial::SerialReceiveData fake_data;  // 预加载fake数据
         if (use_fake_serial) {
@@ -244,14 +276,16 @@ void start_hardware_node() {
             fake_data.aim_mode = static_cast<uint8_t>(
                 static_param::get_param<int64_t>(config, "Serial.fake_data", "aim_mode"));
             fake_data.aiming_lock = static_param::get_param<bool>(config, "Serial.fake_data", "aiming_lock");
-            // 以下字段不在协议中，从配置加载
-            fake_data.enemy_color = static_cast<uint8_t>(
-                static_param::get_param<int64_t>(config, "Serial.fake_data", "enemy_color"));
-            fake_data.allow_fire = injected_allow_fire;
+            fake_data.enemy_color = read_enemy_color_config(
+                config, "Serial.fake_data", "enemy_color", ENEMY_COLOR_UNKNOWN);
+            fake_data.allow_fire = fake_allow_fire;
         }
 
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Delta_t: {} us", delta_t_us);
         debug::print(debug::PrintMode::INFO, "HardwareNode", "Use fake serial: {}", use_fake_serial);
+        debug::print(debug::PrintMode::INFO, "HardwareNode",
+            "Enemy color override: {} ({})",
+            override_enemy_color, enemy_color_name(override_enemy_color_value));
 
         // 1. Start serial communication (only if not using fake)
         if (!use_fake_serial) {
@@ -259,8 +293,8 @@ void start_hardware_node() {
             std::this_thread::sleep_for(100ms);  // Wait for serial threads to start
         } else {
             debug::print(debug::PrintMode::WARNING, "HardwareNode",
-                "Using fake serial: mode={}, bullet_speed={:.1f}",
-                fake_data.aim_mode, fake_data.bullet_speed);
+                "Using fake serial: mode={}, bullet_speed={:.1f}, enemy_color={}",
+                fake_data.aim_mode, fake_data.bullet_speed, enemy_color_name(fake_data.enemy_color));
         }
 
         // 2. Load camera config and open camera
@@ -335,10 +369,10 @@ void start_hardware_node() {
                     }
                 }
 
-                // 注入不在协议中的字段（上层需要）
                 if (frame.serial_valid) {
-                    frame.serial_data.enemy_color = injected_enemy_color;
-                    frame.serial_data.allow_fire = injected_allow_fire;
+                    if (override_enemy_color) {
+                        frame.serial_data.enemy_color = override_enemy_color_value;
+                    }
                     current_aim_mode->store(frame.serial_data.aim_mode);
                     current_aim_mode_time_us->store(frame.timestamp_us);
                 }

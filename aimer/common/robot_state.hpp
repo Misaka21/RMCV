@@ -48,7 +48,8 @@ inline AimMode to_aim_mode(uint8_t raw) {
  * @brief 机器人状态 - 从 hardware::SyncFrame 提取
  *
  * 注意:
- * - enemy_color 与 allow_fire 由 hardware 层注入或串口透传
+ * - enemy_color 由串口透传，调试时可由 hardware 层覆盖
+ * - allow_fire 是本地软门控字段，不走当前串口协议
  */
 struct RobotState {
     // IMU姿态 (Imu坐标系 → 世界坐标系)
@@ -88,7 +89,6 @@ struct RobotState {
             state.bullet_speed = s.bullet_speed;
             state.aim_mode = to_aim_mode(s.aim_mode);  // uint8_t → AimMode
             state.aiming_lock = s.aiming_lock;
-            // enemy_color 和 allow_fire 从配置加载（不在协议中）
             state.enemy_color = s.enemy_color;
             state.allow_fire = s.allow_fire;
         }
